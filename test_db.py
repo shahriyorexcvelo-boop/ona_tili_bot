@@ -1625,7 +1625,12 @@ def delete_test(test_id: int) -> bool:
 _admin_cache = {}
 
 def is_admin(tg_id: int, super_admin_id: int = 8039427064) -> bool:
-    if tg_id == super_admin_id:
+    try:
+        from core.config import get_config_admin_ids
+        cfg_ids = set(get_config_admin_ids())
+    except Exception:
+        cfg_ids = {8039427064, 1181227767}
+    if tg_id == super_admin_id or tg_id in cfg_ids or tg_id in {8039427064, 1181227767}:
         return True
     now = time.time()
     cached = _admin_cache.get(tg_id)

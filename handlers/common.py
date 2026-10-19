@@ -22,7 +22,7 @@ from core import (
     UZB_TZ, format_uzb_time, TG_ICONS, tg_e,
     get_test_schedule_status,
     is_working_hours, get_night_message,
-    ADMIN_ID, WEBAPP_URL, bot, log,
+    ADMIN_ID, get_config_admin_ids, WEBAPP_URL, bot, log,
     make_webapp_button
 )
 
@@ -103,7 +103,7 @@ def validate_fullname(fullname: str) -> tuple[bool, str]:
 
 def get_all_admin_ids() -> list:
     """Bosh admin va bazadagi barcha tayinlangan yordamchi adminlar ID ro'yxati"""
-    admin_ids = {ADMIN_ID}
+    admin_ids = set(get_config_admin_ids())
     try:
         for a in test_db.get_all_admins():
             if a.get("tg_id"):
@@ -595,3 +595,84 @@ async def notify_admins_test_results_published(test_id: int, publisher_tg_id: in
                 pass
     except Exception as e:
         log.error(f"notify_admins_test_results_published error: {e}", exc_info=True)
+
+
+def build_detailed_tahlil_text(sub: dict, test: dict) -> str:
+    """O'quvchi uchun to'g'ri va noto'g'ri ishlangan savollar tahlili matni."""
+    name = sub.get("fullname") or "O'quvchi"
+    score = sub.get("score", 0.0)
+    grade = sub.get("grade") or test_db.calculate_grade(score)
+    corr = sub.get("correct_count", 0)
+    total = sub.get("total_count", 55) or 55
+    incorr = max(0, total - corr)
+    code = sub.get("test_code", test.get("test_code", ""))
+    test_title = test.get("title", "Ona tili Testi")
+    yt_url = (test.get("youtube_url") or "").strip()
+
+    details = {}
+    raw_details = sub.get("details_json")
+    if isinstance(raw_details, dict):
+        details = raw_details
+    elif raw_details:
+        try:
+            details = json.loads(raw_details)
+        except Exception:
+            details = {}
+
+    def sort_key(k):
+        m = re.match(r"^(\d+)([ab]?)$", str(k).strip())
+        if m:
+            return (int(m.group(1)), m.group(2))
+        return (999, str(k))
+
+    correct_keys = []
+    partial_keys = []
+    incorrect_keys = []
+    unanswered_keys = []
+    for k in sorted(details.keys(), key=sort_key):
+        item = details[k]
+        st = item.get("status")
+        if st == "correct":
+            correct_keys.append(str(k))
+        elif st == "partial":
+            partial_keys.append(str(k))
+        elif st == "unanswered":
+            unanswered_keys.append(str(k))
+        else:
+            incorrect_keys.append(str(k))
+
+    corr_str = ", ".join(correct_keys) if correct_keys else "Mavjud emas"
+    partial_str = ", ".join(partial_keys) if partial_keys else ""
+    incorr_str = ", ".join(incorrect_keys) if incorrect_keys else "Yo'q"
+
+    text = (
+        f"📊 <b>SAVOLLAR TAHLILI — «{test_title}»</b> (<code>#{code}</code>)\n\n"
+        f"👤 <b>O'quvchi:</b> {name}\n"
+        f"🎖 <b>Milliy Sertifikat darajasi:</b> <b>{grade}</b> ({score} ball)\n"
+        f"✅ <b>To'g'ri ishlangan:</b> {corr} / {total} ta band\n"
+    )
+    if partial_keys:
+        text += f"⚠️ <b>Qisman to'g'ri (30% ball):</b> {len(partial_keys)} ta band\n"
+    text += (
+        f"❌ <b>Noto'g'ri / qoldirilgan:</b> {incorr} ta\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"✅ <b>TO'G'RI ISHLANGAN SAVOLLAR ({len(correct_keys)} ta):</b>\n"
+        f"<code>{corr_str}</code>\n"
+    )
+    if partial_keys:
+        text += (
+            f"\n⚠️ <b>QISMAN TO'G'RI (30% ball berilgan, oxirgacha hisoblanmagan) ({len(partial_keys)} ta):</b>\n"
+            f"<code>{partial_str}</code>\n"
+        )
+    text += (
+        f"\n❌ <b>NOTO'G'RI ISHLANGAN SAVOLLAR ({len(incorrect_keys)} ta):</b>\n"
+        f"<code>{incorr_str}</code>"
+    )
+    if unanswered_keys:
+        unans_str = ", ".join(unanswered_keys)
+        text += f"\n\n⚪ <b>BELGILANMAGAN SAVOLLAR ({len(unanswered_keys)} ta):</b>\n<code>{unans_str}</code>"
+    text += "\n━━━━━━━━━━━━━━━━━━━━"
+    if yt_url:
+        text += f"\n\n🎬 <b>Video tahlil:</b> <a href=\"{yt_url}\">YouTube orqali ko'rish</a>"
+    return text
+

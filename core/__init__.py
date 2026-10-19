@@ -3,7 +3,7 @@ from .config import (
     _dashboard_overview_cache, _dashboard_users_cache, _dashboard_tests_cache, invalidate_dashboard_cache,
     get_test_schedule_status, get_test_min_submit_info,
     WORK_START_HOUR, WORK_END_HOUR, is_working_hours, get_night_message, get_maintenance_message,
-    BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, CACHED_BOT_USERNAME, log
+    BOT_TOKEN, ADMIN_ID, get_config_admin_ids, PORT, WEBAPP_URL, CACHED_BOT_USERNAME, log
 )
 from .bot import bot, dp, MaintenanceMiddleware
 from .states import (

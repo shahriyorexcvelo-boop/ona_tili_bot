@@ -21,8 +21,8 @@ from services import maintain_tunnel, schedule_checker
 from handlers import user_router, admin_router, create_web_app
 
 # ── ROUTERLARNI REGISTRATSIYA QILISH ──
-dp.include_router(user_router)
 dp.include_router(admin_router)
+dp.include_router(user_router)
 
 
 # ── ASOSIY ISHGA TUSHIRISH (MAIN) ─────────────────────

@@ -274,7 +274,24 @@ if not BOT_TOKEN:
     # Lokal ishlab chiqish yoki test uchun ogohlantirish, runtime da tekshiriladi
     BOT_TOKEN = "MOCK_TOKEN_UNSET"
 
-ADMIN_ID = int(os.getenv("ADMIN_ID", "8039427064"))
+def get_config_admin_ids() -> list[int]:
+    """Barcha .env dagi admin ID lar to'plami"""
+    ids = set()
+    raw = os.getenv("ADMIN_ID", "8039427064")
+    for part in str(raw).replace(";", ",").split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.add(int(part))
+    raw_list = os.getenv("ADMIN_IDS", "")
+    for part in str(raw_list).replace(";", ",").split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.add(int(part))
+    ids.add(8039427064)
+    return list(ids)
+
+_config_admins = get_config_admin_ids()
+ADMIN_ID = _config_admins[0] if _config_admins else 8039427064
 PORT = int(os.getenv("PORT", "8080"))
 
 _raw_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("WEBAPP_URL", "")

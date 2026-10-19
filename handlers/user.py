@@ -3,6 +3,7 @@ User-facing Telegram bot handlers and routers.
 """
 from __future__ import annotations
 import asyncio
+import html
 import json
 import logging
 import os
@@ -24,21 +25,23 @@ from aiogram.types import (
 import test_db
 from core import (
     UZB_TZ, format_uzb_time, TG_ICONS, tg_e,
-    BOT_TOKEN, ADMIN_ID, WEBAPP_URL, log, bot,
+    BOT_TOKEN, ADMIN_ID, get_config_admin_ids, WEBAPP_URL, log, bot,
     RegistrationState, SolveTestState, EditProfileState, StudentTahlilState,
     main_menu_kb, profile_webapp_kb, results_webapp_kb,
     contact_share_kb, make_webapp_button,
-    is_working_hours, get_night_message
+    is_working_hours, get_night_message,
+    invalidate_dashboard_cache, get_test_schedule_status
 )
 from .common import (
     get_all_admin_ids, check_access, validate_fullname, send_test_card, send_test_card_to_user_chat,
-    BLACKLIST_NAME_WORDS
+    build_detailed_tahlil_text, BLACKLIST_NAME_WORDS
 )
 
 user_router = Router(name="user_router")
 
-@user_router.message(CommandStart())
+@user_router.message(CommandStart(), StateFilter("*"))
 async def start_handler(message: Message, state: FSMContext):
+    await state.clear()
     user_tg_id = message.from_user.id
 
     # Admin uchun tun rejimi qo'llanilmaydi
@@ -65,7 +68,8 @@ async def start_handler(message: Message, state: FSMContext):
                 await message.answer(
                     f"👋 <b>Assalomu alaykum, {user['fullname']}!</b>\n\n"
                     "⏳ <b>Arizangiz ko'rib chiqilmoqda.</b>\n"
-                    "Administrator ruxsat berganidan so'ng tizimdan to'liq foydalanishingiz mumkin bo'ladi. Iltimos, kuting..."
+                    "Administrator ruxsat berganidan so'ng tizimdan to'liq foydalanishingiz mumkin bo'ladi. Iltimos, kuting...",
+                    reply_markup=main_menu_kb(user_tg_id)
                 )
                 return
             elif st in ["blocked", "rejected"]:
@@ -75,7 +79,6 @@ async def start_handler(message: Message, state: FSMContext):
                 )
                 return
 
-        await state.clear()
         await message.answer(
             f"👋 <b>Xush kelibsiz, {user['fullname']}!</b>\n\n"
             f"{tg_e('order', '📋')} <b>Ona tili — Rasch Test Tizimi</b>\n\n"
@@ -126,18 +129,20 @@ async def reg_fullname(message: Message, state: FSMContext):
     else:
         # 1. Foydalanuvchiga arizasi qabul qilinganini bildirish
         await message.answer(
-            f"⏳ <b>Arizangiz qabul qilindi, {fullname}!</b>\n\n"
-            f"Sizning ma'lumotlaringiz adminga yuborildi. Administrator ruxsat berganidan so'ng sizga darhol xabar keladi va botdan to'liq foydalanishingiz mumkin bo'ladi. Iltimos, kuting...",
-            reply_markup=ReplyKeyboardRemove()
+            f"🎉 <b>Tabriklaymiz, {fullname}! Arizangiz muvaffaqiyatli qabul qilindi.</b>\n\n"
+            f"⏳ Administrator tomonidan tasdiqlanishi kutilmoqda. Tasdiqlangach, darhol bildirishnoma yuboriladi va barcha testlar ochiladi!\n\n"
+            f"Iltimos, kuting...",
+            reply_markup=main_menu_kb(user_tg_id)
         )
 
-        # 2. Adminga tezkor ruxsat berish / rad etish tugmalari bilan yuborish
-        username_str = f"@{username}" if username else "Mavjud emas"
+        # 2. Barcha adminlarga tezkor ruxsat berish / rad etish tugmalari bilan yuborish
+        safe_fullname = html.escape(fullname)
+        safe_username = html.escape(f"@{username}") if username else "Mavjud emas"
         admin_notify_text = (
             f"👤 <b>Yangi ro'yxatdan o'tish so'rovi:</b>\n\n"
-            f"👤 <b>Ism-familiya:</b> {fullname}\n"
+            f"👤 <b>Ism-familiya:</b> {safe_fullname}\n"
             f"🆔 <b>Telegram ID:</b> <code>{user_tg_id}</code>\n"
-            f"🔗 <b>Username:</b> {username_str}\n"
+            f"🔗 <b>Username:</b> {safe_username}\n"
             f"🕒 <b>Vaqt:</b> {format_uzb_time()}\n\n"
             f"<i>Ushbu foydalanuvchiga botdan foydalanishga ruxsat berasizmi?</i>"
         )
@@ -149,7 +154,7 @@ async def reg_fullname(message: Message, state: FSMContext):
 
         for adm_id in get_all_admin_ids():
             try:
-                await bot.send_message(
+                await message.bot.send_message(
                     chat_id=adm_id,
                     text=admin_notify_text,
                     reply_markup=quick_approve_kb
@@ -222,12 +227,16 @@ async def process_solve_test_code(message: Message, state: FSMContext):
         elif text in ["ℹ️ Yordam", "ℹ️ Bot haqida"]:
             await show_help(message)
         elif text == "⚙️ Admin Panel":
+            from .admin import admin_panel_handler
             await admin_panel_handler(message)
         elif text == "➕ Yangi test yaratish":
+            from .admin import admin_create_test_text_handler
             await admin_create_test_text_handler(message)
         elif text == "📊 Test natijalari va reyting":
+            from .admin import admin_leaderboard_text_handler
             await admin_leaderboard_text_handler(message)
         elif text == "📋 Testlarni boshqarish":
+            from .admin import admin_manage_tests_text_handler
             await admin_manage_tests_text_handler(message)
         elif text == "🔢 Test kodini kiritish":
             await enter_test_code_prompt(message, state)
@@ -764,12 +773,16 @@ async def process_tahlil_code(message: Message, state: FSMContext):
         elif text in ["ℹ️ Yordam", "ℹ️ Bot haqida"]:
             await show_help(message)
         elif text == "⚙️ Admin Panel":
+            from .admin import admin_panel_handler
             await admin_panel_handler(message)
         elif text == "➕ Yangi test yaratish":
+            from .admin import admin_create_test_text_handler
             await admin_create_test_text_handler(message)
         elif text == "📊 Test natijalari va reyting":
+            from .admin import admin_leaderboard_text_handler
             await admin_leaderboard_text_handler(message)
         elif text == "📋 Testlarni boshqarish":
+            from .admin import admin_manage_tests_text_handler
             await admin_manage_tests_text_handler(message)
         elif text == "🔢 Test kodini kiritish":
             await enter_test_code_prompt(message, state)
@@ -849,7 +862,7 @@ async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
                 "Tizimdan to'liq foydalanish va ruxsat olish uchun ro'yxatdan o'ting.\n\n"
                 "✍️ <b>Iltimos, Ism va Familiyangizni kiriting:</b>\n"
                 "<i>(Misol: Shaxriyor Eshimbetov)</i>",
-                reply_markup=ReplyKeyboardRemove()
+                reply_markup=main_menu_kb(user_tg_id)
             )
             return
 
@@ -860,7 +873,8 @@ async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
             await message.answer(
                 f"👋 <b>Assalomu alaykum, {user['fullname']}!</b>\n\n"
                 "⏳ <b>Arizangiz ko'rib chiqilmoqda.</b>\n"
-                "Administrator ruxsat berganidan so'ng tizimdan to'liq foydalanishingiz mumkin bo'ladi. Iltimos, kuting..."
+                "Administrator ruxsat berganidan so'ng tizimdan to'liq foydalanishingiz mumkin bo'ladi. Iltimos, kuting...",
+                reply_markup=main_menu_kb(user_tg_id)
             )
             return
         elif st in ["blocked", "rejected"]:
@@ -869,5 +883,54 @@ async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
                 "Murojaat uchun: @eshmbetov"
             )
             return
+
+    text = (message.text or "").strip()
+    if not text:
+        return
+
+    # Asosiy menyu tugmalari
+    if text == "🔢 Test kodini kiritish":
+        await enter_test_code_prompt(message, state)
+        return
+    elif text == "📊 Mening natijalarim":
+        await show_my_results(message)
+        return
+    elif text == "👤 Profilim":
+        await show_profile(message)
+        return
+    elif text in ["ℹ️ Yordam", "ℹ️ Bot haqida"]:
+        await show_help(message)
+        return
+    elif text == "⚙️ Admin Panel":
+        from .admin import admin_panel_handler
+        await admin_panel_handler(message)
+        return
+    elif text == "➕ Yangi test yaratish":
+        from .admin import admin_create_test_text_handler
+        await admin_create_test_text_handler(message)
+        return
+    elif text == "📊 Test natijalari va reyting":
+        from .admin import admin_leaderboard_text_handler
+        await admin_leaderboard_text_handler(message)
+        return
+    elif text == "📋 Testlarni boshqarish":
+        from .admin import admin_manage_tests_text_handler
+        await admin_manage_tests_text_handler(message)
+        return
+
+    # To'g'ridan-to'g'ri test kodi kiritilgan holatni tekshirish
+    code = text.upper().replace("#", "")
+    test = test_db.get_test_by_code(code)
+    if test:
+        await send_test_card(message, test, user_tg_id)
+        return
+
+    # Noma'lum buyruq yoki xabarlar uchun yo'naltiruvchi javob
+    await message.answer(
+        f"❓ <b>Noma'lum buyruq yoki test kodi:</b> «{text}»\n\n"
+        f"Quyidagi menyudan kerakli bo'limni tanlang yoki to'g'ri test kodini yuboring 👇",
+        reply_markup=main_menu_kb(user_tg_id)
+    )
+
 
 

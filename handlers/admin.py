@@ -3,6 +3,7 @@ Admin Telegram bot handlers and routers.
 """
 from __future__ import annotations
 import asyncio
+import html
 import json
 import logging
 import os
@@ -10,6 +11,7 @@ import re
 import sys
 import time
 import urllib.parse
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, Tuple, List
 
@@ -25,7 +27,7 @@ from aiogram.types import (
 import test_db
 from core import (
     UZB_TZ, format_uzb_time, TG_ICONS, tg_e,
-    BOT_TOKEN, ADMIN_ID, WEBAPP_URL, log, bot,
+    BOT_TOKEN, ADMIN_ID, get_config_admin_ids, WEBAPP_URL, log, bot,
     RegistrationState, SolveTestState, UploadPostPdfState, AddAdminState,
     SetTimeLimitState, BroadcastState, ScheduleState, SetYoutubeState,
     ContactUserState,
@@ -36,13 +38,15 @@ from core import (
 from services import (
     MAINT_START_TEXT, MAINT_END_TEXT,
     send_broadcast_to_users, delete_broadcast_batch_from_users,
-    delete_recent_bot_messages_from_all_users
+    delete_recent_bot_messages_from_all_users,
+    process_pdf_watermark_async
 )
 from .common import (
     get_all_admin_ids, check_access, clean_blocked_users_from_db,
     get_inactive_target_users, send_inactive_warning_messages,
     get_warn_inactive_step1_kb, build_user_contact_card,
-    notify_admins_test_results_published
+    notify_admins_test_results_published, send_test_card,
+    build_detailed_tahlil_text
 )
 
 admin_router = Router(name="admin_router")
@@ -490,6 +494,7 @@ async def admin_process_contact_user_id(message: Message, state: FSMContext):
         if query == "/admin":
             await admin_panel_handler(message)
         elif query == "/start":
+            from .user import start_handler
             await start_handler(message, state)
         else:
             await message.answer("Bekor qilindi.", reply_markup=admin_menu_kb())
@@ -747,6 +752,7 @@ async def admin_start_add_test(call: CallbackQuery, state: FSMContext):
     if not test_db.is_admin(call.from_user.id, ADMIN_ID):
         return
     await state.clear()
+    from .user import admin_webapp_info_cb
     await admin_webapp_info_cb(call)
 
 
@@ -1092,6 +1098,85 @@ async def process_post_create_pdf(message: Message, state: FSMContext):
     test_db.update_test_pdf(test_id, pdf_file_id, pdf_file_name)
     await message.answer(f"✅ <b>PDF fayl muvaffaqiyatli biriktirildi!</b>\n📄 Fayl: {pdf_file_name}")
     await state.clear()
+
+
+# ── PDF WATERMARK QAYTA ISHLASH (FAQAT ADMINLAR UCHUN) ──
+@admin_router.message(F.document)
+async def admin_pdf_watermark_handler(message: Message, state: FSMContext):
+    # Agar post uchun PDF biriktirish holatida bo'lsa, o'sha handler ishlasin
+    cur_state = await state.get_state()
+    if cur_state == UploadPostPdfState.pdf_file:
+        await process_post_create_pdf(message, state)
+        return
+
+    doc = message.document
+    fname = (doc.file_name or "").lower()
+    mime = (doc.mime_type or "").lower()
+    is_pdf = fname.endswith(".pdf") or ("pdf" in mime)
+    if not is_pdf:
+        return
+
+    user_tg_id = message.from_user.id
+    is_adm = test_db.is_admin(user_tg_id, ADMIN_ID) or (user_tg_id in get_config_admin_ids())
+    if not is_adm:
+        await message.answer("⛔️ Sizda ushbu funksiyadan foydalanish huquqi yo'q.")
+        return
+
+    # Admin PDF yuborgan holatda:
+    status_msg = await message.answer(
+        "⏳ <b>PDF qabul qilindi. Watermark qo'yish jarayoni boshlanmoqda...</b>\n"
+        "<i>PyMuPDF va Pillow orqali har bir sahifa oq fonga ko'chirilib, markaziga shaffof logotip joylashtirilmoqda. Iltimos, kuting...</i>"
+    )
+
+    temp_id = uuid.uuid4().hex
+    raw_filename = doc.file_name or "document.pdf"
+    base_name = os.path.splitext(raw_filename)[0]
+    input_path = f"/tmp/input_{temp_id}.pdf"
+    output_path = f"/tmp/watermarked_{temp_id}.pdf"
+
+    try:
+        await message.bot.download(doc, destination=input_path)
+
+        logo_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logo.png")
+        if not os.path.exists(logo_file):
+            logo_file = "logo.png"
+
+        total_pages = await process_pdf_watermark_async(
+            input_pdf_path=input_path,
+            output_pdf_path=output_path,
+            logo_path=logo_file,
+            opacity=0.22
+        )
+
+        output_filename = f"{base_name}_watermarked.pdf"
+        doc_to_send = FSInputFile(output_path, filename=output_filename)
+
+        caption = (
+            f"✅ <b>PDF muvaffaqiyatli tayyorlandi!</b>\n\n"
+            f"📄 <b>Fayl:</b> <code>{html.escape(output_filename)}</code>\n"
+            f"📑 <b>Sahifalar soni:</b> {total_pages} ta\n"
+            f"🎨 <b>Watermark:</b> Akbarali Boymirzayev logotipi sahifa markaziga joylashtirildi."
+        )
+
+        await message.answer_document(
+            document=doc_to_send,
+            caption=caption
+        )
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+    except Exception as ex:
+        log.exception(f"PDF qayta ishlashda xatolik: {ex}")
+        await message.answer(f"❌ <b>PDF qayta ishlashda xatolik yuz berdi:</b>\n<code>{html.escape(str(ex))}</code>")
+    finally:
+        for p in [input_path, output_path]:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+
 
 # 3. Foydalanuvchilar boshqaruvi to'liq Asosiy Web Ilovaga (Main App) ko'chirildi
 @admin_router.callback_query(F.data.in_(["admin_view_users", "admin_webapp_redirect_info"]))
