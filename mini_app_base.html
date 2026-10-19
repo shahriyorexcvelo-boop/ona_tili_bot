@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Telegram Mini App — Universal Asos va Tugma Animatsiyalari</title>
+
+  <!-- Google Fonts: Inter & Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <style>
+    /* ==========================================================================
+       1. CSS VARIABLES VA DESIGN TOKENS (LIGHT & DARK REJIM)
+       ========================================================================== */
+    :root {
+      --font-main: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+
+      /* Ranglar palitrasi (Light rejim) */
+      --bg-body: #F4F6FB;
+      --bg-card: rgba(255, 255, 255, 0.85);
+      --bg-card-solid: #FFFFFF;
+      --bg-card-border: rgba(226, 232, 240, 0.8);
+      
+      --text-main: #0F172A;
+      --text-secondary: #64748B;
+      --text-muted: #94A3B8;
+
+      /* Brend ranglar */
+      --primary: #4F46E5;
+      --primary-hover: #4338CA;
+      --primary-glow: rgba(79, 70, 229, 0.35);
+
+      --accent-teal: #0D9488;
+      --accent-emerald: #10B981;
+      --accent-amber: #F59E0B;
+      --accent-rose: #F43F5E;
+      --accent-purple: #8B5CF6;
+
+      /* 3D va soyalar */
+      --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.04);
+      --shadow-md: 0 8px 24px -4px rgba(15, 23, 42, 0.08);
+      --shadow-lg: 0 16px 36px -6px rgba(15, 23, 42, 0.12);
+
+      --radius-sm: 10px;
+      --radius-md: 14px;
+      --radius-lg: 18px;
+      --radius-xl: 24px;
+      --radius-pill: 9999px;
+
+      /* Animatsiya vaqtlari */
+      --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+      --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Dark Mode (Telegram yoki foydalanuvchi tanlovi) */
+    body.dark-mode {
+      --bg-body: #0B0F19;
+      --bg-card: rgba(22, 28, 45, 0.75);
+      --bg-card-solid: #151C2C;
+      --bg-card-border: rgba(255, 255, 255, 0.08);
+      
+      --text-main: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --text-muted: #64748B;
+
+      --primary: #6366F1;
+      --primary-hover: #4F46E5;
+      --primary-glow: rgba(99, 102, 241, 0.45);
+
+      --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.45);
+      --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.6);
+    }
+
+    /* ==========================================================================
+       2. ASOSIY RESET VA MOBIL MOSLASHUVLAR
+       ========================================================================== */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      font-family: var(--font-main);
+      background-color: var(--bg-body);
+      color: var(--text-main);
+      min-height: 100vh;
+      width: 100%;
+      overflow-x: hidden;
+      touch-action: manipulation;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+
+    /* Safe Area insets (iOS iPhone ekran o'yiqlari uchun) */
+    .app-container {
+      max-width: 540px;
+      margin: 0 auto;
+      padding: env(safe-area-inset-top, 16px) 16px calc(env(safe-area-inset-bottom, 20px) + 90px) 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ==========================================================================
+       3. TUGMALARNING BARCHA ANIMATSIYA SINFLARI (REUSABLE UI KIT)
+       ========================================================================== */
+
+    /* Universal TMA Button bazasi */
+    .btn {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 14px 20px;
+      font-family: var(--font-main);
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.2;
+      text-decoration: none;
+      border: none;
+      outline: none;
+      cursor: pointer;
+      user-select: none;
+      border-radius: var(--radius-md);
+      transition: all 0.2s var(--ease-smooth);
+      overflow: hidden;
+    }
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      pointer-events: none;
+      filter: grayscale(40%);
+    }
+
+    /* ----------------------------------------------------
+       ANIMATSIYA 1: SPRING / BOUNCE (Yumshoq sakrash bosilishi)
+       Foydalanish: class="btn btn-bounce"
+       ---------------------------------------------------- */
+    .btn-bounce {
+      background: linear-gradient(135deg, var(--primary) 0%, #3B82F6 100%);
+      color: #FFFFFF;
+      box-shadow: 0 8px 20px var(--primary-glow);
+    }
+    .btn-bounce:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 24px var(--primary-glow);
+    }
+    .btn-bounce:active {
+      transform: scale(0.93);
+      transition: transform 0.12s var(--ease-bounce);
+    }
+
+    /* ----------------------------------------------------
+       ANIMATSIYA 2: LIQUID GLASSMORPHISM (Shaffof shisha & Nur yugurishi)
+       Foydalanish: class="btn btn-liquid"
+       ---------------------------------------------------- */
+    .btn-liquid {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.1) 100%);
+      color: var(--text-main);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1.5px solid rgba(255, 255, 255, 0.5);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.9);
+      position: relative;
+    }
+    body.dark-mode .btn-liquid {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.04) 100%);
+      border: 1.5px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+    }
+    /* Shisha nuri yugurish effekti */
+    .btn-liquid::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -60%;
+      width: 40%;
+      height: 200%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+      transform: rotate(25deg);
+      transition: none;
+    }
+    .btn-liquid:hover::before {
+      left: 130%;
+      transition: left 0.75s ease-in-out;
+    }
+    .btn-liquid:active {
+      transform: scale(0.96) translateY(1px);
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
+    }
+
+    /* ----------------------------------------------------
+       ANIMATSIYA 3: 3D TACTILE / GAME PUSH (Duolingo uslubi - pastga bosilish)
+       Foydalanish: class="btn btn-3d"
+       ---------------------------------------------------- */
+    .btn-3d {
+      background: #10B981;
+      color: #FFFFFF;
+      border-radius: var(--radius-md);
+      box-shadow: 0 6px 0 #059669, 0 10px 18px rgba(16, 185, 129, 0.35);
+      transform: translateY(0);
+      transition: all 0.08s ease;
+    }
+    .btn-3d:hover {
+      filter: brightness(1.05);
+    }
+    .btn-3d:active {
+      transform: translateY(5px);
+      box-shadow: 0 1px 0 #059669, 0 3px 6px rgba(16, 185, 129, 0.2);
+    }
+
+    /* ----------------------------------------------------
+       ANIMATSIYA 4: NEON GLOW PULSE (Kiber nurlanish)
+       Foydalanish: class="btn btn-neon"
+       ---------------------------------------------------- */
+    .btn-neon {
+      background: linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%);
+      color: #FFFFFF;
+      box-shadow: 0 0 15px rgba(236, 72, 153, 0.4), 0 0 30px rgba(139, 92, 246, 0.2);
+      animation: neonPulse 2.4s infinite ease-in-out;
+    }
+    @keyframes neonPulse {
+      0%, 100% {
+        box-shadow: 0 0 14px rgba(236, 72, 153, 0.45), 0 0 28px rgba(139, 92, 246, 0.25);
+      }
+      50% {
+        box-shadow: 0 0 24px rgba(236, 72, 153, 0.75), 0 0 45px rgba(139, 92, 246, 0.45);
+      }
+    }
+    .btn-neon:hover {
+      transform: translateY(-2px) scale(1.01);
+    }
+    .btn-neon:active {
+      transform: scale(0.95);
+      filter: brightness(1.2);
+    }
+
+    /* ----------------------------------------------------
+       ANIMATSIYA 5: RIPPLE (Suv to'lqini effekti - Material)
+       Foydalanish: class="btn btn-ripple" + data-ripple="true"
+       ---------------------------------------------------- */
+    .btn-ripple {
+      background: #0284C7;
+      color: #FFFFFF;
+      box-shadow: 0 6px 16px rgba(2, 132, 199, 0.35);
+    }
+    .btn-ripple:active {
+      transform: scale(0.97);
+    }
+    .ripple-ink {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.45);
+      transform: scale(0);
+      animation: rippleAnim 0.6s linear;
+      pointer-events: none;
+    }
+    @keyframes rippleAnim {
+      to {
+        transform: scale(4);
+        opacity: 0;
+      }
+    }
+
+    /* ----------------------------------------------------
+       ANIMATSIYA 6: MINI CARDS / ICON TUGMALAR (Menyu & Variantlar)
+       Foydalanish: class="card-btn"
+       ---------------------------------------------------- */
+    .card-btn {
+      background: var(--bg-card-solid);
+      border: 1.5px solid var(--bg-card-border);
+      border-radius: var(--radius-lg);
+      padding: 16px 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      text-align: center;
+      cursor: pointer;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.2s var(--ease-smooth);
+      user-select: none;
+      position: relative;
+    }
+    .card-btn:hover {
+      border-color: var(--primary);
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-md);
+    }
+    .card-btn:active {
+      transform: scale(0.92);
+      border-color: var(--primary);
+      background: rgba(99, 102, 241, 0.08);
+    }
+    .card-btn.active {
+      border-color: var(--primary);
+      background: rgba(99, 102, 241, 0.12);
+      box-shadow: 0 0 0 2px var(--primary-glow);
+    }
+    .card-btn-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      background: rgba(79, 70, 229, 0.1);
+      color: var(--primary);
+      transition: transform 0.2s var(--ease-bounce);
+    }
+    .card-btn:active .card-btn-icon {
+      transform: scale(1.15) rotate(-6deg);
+    }
+    .card-btn-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .card-btn-desc {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    /* ----------------------------------------------------
+       ANIMATSIYA 7: LOADING SPINNER TUGMASI (Serverga so'rov yuborishda)
+       Foydalanish: class="btn btn-loading"
+       ---------------------------------------------------- */
+    .btn-loading-state .btn-text {
+      visibility: hidden;
+      opacity: 0;
+    }
+    .btn-spinner {
+      display: none;
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: #FFFFFF;
+      animation: spin 0.75s infinite linear;
+    }
+    .btn-loading-state .btn-spinner {
+      display: block;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ----------------------------------------------------
+       ANIMATSIYA 8: TELEGRAM NATIVE MAIN BUTTON (Pastki qotirilgan CTA)
+       Foydalanish: class="sticky-cta-btn"
+       ---------------------------------------------------- */
+    .sticky-bottom-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 12px 16px calc(env(safe-area-inset-bottom, 14px) + 8px) 16px;
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-top: 1px solid var(--bg-card-border);
+      display: flex;
+      justify-content: center;
+      z-index: 100;
+      box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.05);
+    }
+    body.dark-mode .sticky-bottom-bar {
+      background: rgba(15, 23, 42, 0.85);
+      box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+    }
+    .sticky-cta-inner {
+      width: 100%;
+      max-width: 540px;
+    }
+    .btn-main-action {
+      background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+      color: #FFFFFF;
+      font-size: 16px;
+      font-weight: 800;
+      padding: 16px 24px;
+      border-radius: var(--radius-lg);
+      box-shadow: 0 8px 20px rgba(37, 99, 235, 0.4);
+      letter-spacing: 0.3px;
+    }
+    .btn-main-action:hover {
+      box-shadow: 0 12px 28px rgba(37, 99, 235, 0.55);
+      transform: translateY(-2px);
+    }
+    .btn-main-action:active {
+      transform: scale(0.96);
+      box-shadow: 0 3px 10px rgba(37, 99, 235, 0.3);
+    }
+
+    /* ==========================================================================
+       4. MINI APP ASOSIY SAHIFA STRUKTURASI VA BLOKLARI
+       ========================================================================== */
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      background: var(--bg-card);
+      border: 1px solid var(--bg-card-border);
+      border-radius: var(--radius-xl);
+      backdrop-filter: blur(12px);
+      box-shadow: var(--shadow-sm);
+    }
+    .user-profile {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .user-avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #6366F1 0%, #EC4899 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 800;
+      font-size: 18px;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+    }
+    .user-info h2 {
+      font-size: 15px;
+      font-weight: 800;
+    }
+    .user-info p {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 600;
+    }
+
+    .theme-toggle-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid var(--bg-card-border);
+      background: var(--bg-card-solid);
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 18px;
+      transition: all 0.2s var(--ease-bounce);
+    }
+    .theme-toggle-btn:active {
+      transform: scale(0.85) rotate(25deg);
+    }
+
+    /* Karta bloklari */
+    .section-card {
+      background: var(--bg-card);
+      border: 1px solid var(--bg-card-border);
+      border-radius: var(--radius-xl);
+      padding: 20px 18px;
+      backdrop-filter: blur(14px);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .section-card-title {
+      font-size: 16px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-main);
+    }
+    .section-card-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-top: -6px;
+      line-height: 1.4;
+    }
+
+    /* 2 ustunli tugmalar to'ri */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    /* Kod nusxalash yorlig'i */
+    .badge-code {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(99, 102, 241, 0.1);
+      color: var(--primary);
+      font-weight: 600;
+      margin-top: 4px;
+    }
+
+    /* Log / Bildirishnoma qutisi */
+    .toast-box {
+      background: var(--bg-card-solid);
+      border: 1px dashed var(--bg-card-border);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .toast-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #10B981;
+      box-shadow: 0 0 8px #10B981;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ==========================================================================
+       MAIN APP CONTAINER
+       ========================================================================== -->
+  <div class="app-container">
+    
+    <!-- Yuqori qism: Profil va Dark/Light almashtirgich -->
+    <header class="app-header">
+      <div class="user-profile">
+        <div class="user-avatar" id="user-avatar">TG</div>
+        <div class="user-info">
+          <h2 id="user-name">Foydalanuvchi</h2>
+          <p id="user-status">Mini App Tayyor</p>
+        </div>
+      </div>
+      <button class="theme-toggle-btn" id="theme-toggle-btn" title="Rejimni o'zgartirish">
+        🌓
+      </button>
+    </header>
+
+    <!-- Info Banner -->
+    <div class="toast-box">
+      <div class="toast-dot"></div>
+      <span id="feedback-text">Har bir tugmani bosing — haptic titrash va animatsiya ishlaydi!</span>
+    </div>
+
+    <!-- 1-BO'LIM: ASOSIY ANIMATSIYALI HARAKAT TUGMALARI -->
+    <section class="section-card">
+      <h3 class="section-card-title">✨ Asosiy Harakat Tugmalari</h3>
+      <p class="section-card-subtitle">Istalgan mini app sahifalarida asosiy amallarni bajarish uchun universal uslublar.</p>
+
+      <!-- 1. Bounce / Spring -->
+      <div>
+        <button class="btn btn-bounce" data-haptic="medium" onclick="demoClick(this, 'Bounce (Spring) bosildi!')">
+          <span>🚀 Spring / Bouncy Tugma</span>
+        </button>
+        <div class="badge-code">class="btn btn-bounce"</div>
+      </div>
+
+      <!-- 2. Liquid Glass -->
+      <div>
+        <button class="btn btn-liquid" data-haptic="light" onclick="demoClick(this, 'Liquid Glass bosildi!')">
+          <span>💎 Liquid Glass (Shaffof Nur)</span>
+        </button>
+        <div class="badge-code">class="btn btn-liquid"</div>
+      </div>
+
+      <!-- 3. 3D Game Push -->
+      <div>
+        <button class="btn btn-3d" data-haptic="heavy" onclick="demoClick(this, '3D Tactile Tugma bosildi!')">
+          <span>🎮 3D Tactile (Duolingo Style)</span>
+        </button>
+        <div class="badge-code">class="btn btn-3d"</div>
+      </div>
+
+      <!-- 4. Neon Glow Pulse -->
+      <div>
+        <button class="btn btn-neon" data-haptic="medium" onclick="demoClick(this, 'Neon Glow bosildi!')">
+          <span>⚡ Neon Pulse (Kiber Nur)</span>
+        </button>
+        <div class="badge-code">class="btn btn-neon"</div>
+      </div>
+
+      <!-- 5. Material Ripple -->
+      <div>
+        <button class="btn btn-ripple" data-ripple="true" data-haptic="light" onclick="demoClick(this, 'To‘lqin (Ripple) bosildi!')">
+          <span>🌊 To‘lqin Effekti (Ripple Wave)</span>
+        </button>
+        <div class="badge-code">class="btn btn-ripple" data-ripple="true"</div>
+      </div>
+    </section>
+
+    <!-- 2-BO'LIM: MENYU VA TANLOV KARTALARI -->
+    <section class="section-card">
+      <h3 class="section-card-title">🗂 Menyu & Karta Tugmalari</h3>
+      <p class="section-card-subtitle">Mini ilova bo'limlari, testlar, tovarlar yoki opsiyalarni tanlash uchun.</p>
+
+      <div class="grid-2">
+        <div class="card-btn active" data-haptic="selection" onclick="selectCard(this, 'Testlar tanlandi')">
+          <div class="card-btn-icon">📝</div>
+          <div class="card-btn-title">Testlar</div>
+          <div class="card-btn-desc">30 ta savol</div>
+        </div>
+
+        <div class="card-btn" data-haptic="selection" onclick="selectCard(this, 'Reyting tanlandi')">
+          <div class="card-btn-icon">🏆</div>
+          <div class="card-btn-title">Reyting</div>
+          <div class="card-btn-desc">Top 100 natija</div>
+        </div>
+
+        <div class="card-btn" data-haptic="selection" onclick="selectCard(this, 'Hamyon tanlandi')">
+          <div class="card-btn-icon">💳</div>
+          <div class="card-btn-title">Balans</div>
+          <div class="card-btn-desc">50,000 UZS</div>
+        </div>
+
+        <div class="card-btn" data-haptic="selection" onclick="selectCard(this, 'Sozlamalar tanlandi')">
+          <div class="card-btn-icon">⚙️</div>
+          <div class="card-btn-title">Sozlamalar</div>
+          <div class="card-btn-desc">Profil va til</div>
+        </div>
+      </div>
+      <div class="badge-code">class="card-btn" data-haptic="selection"</div>
+    </section>
+
+    <!-- 3-BO'LIM: YUKLANISH (LOADING STATE) TUGMASI -->
+    <section class="section-card">
+      <h3 class="section-card-title">⏳ Yuklanish Holati (Loading State)</h3>
+      <p class="section-card-subtitle">Serverga ma'lumot jo'natilganda aylanadigan spinnerga o'tish.</p>
+
+      <div>
+        <button class="btn btn-bounce" id="btn-submit-demo" data-haptic="medium" onclick="demoLoading(this)">
+          <span class="btn-text">📤 Serverga Jo‘natish</span>
+          <div class="btn-spinner"></div>
+        </button>
+        <div class="badge-code">Tugmaga .btn-loading-state sinfini qo'shish</div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ==========================================================================
+       PASTKI QOTIRILGAN ASOSIY HARAKAT TUGMASI (STICKY MAIN CTA)
+       ========================================================================== -->
+  <div class="sticky-bottom-bar">
+    <div class="sticky-cta-inner">
+      <button class="btn btn-main-action" data-haptic="heavy" onclick="demoClick(this, 'Asosiy Tasdiqlash Tugmasi Bosildi! 🎉')">
+        <span>Tasdiqlash va Davom etish</span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+          <polyline points="12 5 19 12 12 19"></polyline>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       5. JAVASCRIPT: TELEGRAM SDK, HAPTIC FEEDBACK VA RIPPLE MENEJERI
+       ========================================================================== -->
+  <script>
+    /**
+     * TMA HELPER - Telegram Mini App va Haptic Feedback vositasi
+     * Har qanday mini ilovada qayta ishlatish mumkin.
+     */
+    const TMA = {
+      tg: window.Telegram?.WebApp,
+
+      init() {
+        if (this.tg) {
+          // Telegram Mini App oynasini kengaytirish
+          this.tg.ready();
+          this.tg.expand();
+          if (this.tg.disableVerticalSwipes) {
+            this.tg.disableVerticalSwipes();
+          }
+
+          // Foydalanuvchi ma'lumotlarini o'qish (mavjud bo'lsa)
+          const user = this.tg.initDataUnsafe?.user;
+          if (user) {
+            const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ');
+            document.getElementById('user-name').innerText = fullName || user.username || 'Foydalanuvchi';
+            
+            const initials = (user.first_name?.[0] || 'T') + (user.last_name?.[0] || 'G');
+            document.getElementById('user-avatar').innerText = initials.toUpperCase();
+          }
+
+          // Telegram ranglarini moslash
+          this.syncThemeWithTelegram();
+        }
+
+        // Ripple hodisasini ulash
+        this.initRipple();
+
+        // Universal Haptic tinglovchi
+        this.initHaptics();
+      },
+
+      // Haptic Feedback turlari
+      haptic(type = 'light') {
+        if (!this.tg?.HapticFeedback) return;
+
+        try {
+          switch (type) {
+            case 'light':
+            case 'medium':
+            case 'heavy':
+            case 'rigid':
+            case 'soft':
+              this.tg.HapticFeedback.impactOccurred(type);
+              break;
+            case 'selection':
+              this.tg.HapticFeedback.selectionChanged();
+              break;
+            case 'success':
+            case 'warning':
+            case 'error':
+              this.tg.HapticFeedback.notificationOccurred(type);
+              break;
+            default:
+              this.tg.HapticFeedback.impactOccurred('light');
+          }
+        } catch (e) {
+          console.warn('Haptic xatoligi:', e);
+        }
+      },
+
+      // HTML elementlariga [data-haptic] orqali avtomatik tebranish ulash
+      initHaptics() {
+        document.addEventListener('click', (e) => {
+          const el = e.target.closest('[data-haptic]');
+          if (el) {
+            const hapticType = el.getAttribute('data-haptic') || 'light';
+            this.haptic(hapticType);
+          }
+        }, { passive: true });
+      },
+
+      // Material Ripple (To'lqin) effekti generatori
+      initRipple() {
+        document.addEventListener('click', (e) => {
+          const btn = e.target.closest('[data-ripple="true"]');
+          if (!btn) return;
+
+          const rect = btn.getBoundingClientRect();
+          const circle = document.createElement('span');
+          const diameter = Math.max(rect.width, rect.height);
+          const radius = diameter / 2;
+
+          circle.style.width = circle.style.height = `${diameter}px`;
+          circle.style.left = `${e.clientX - rect.left - radius}px`;
+          circle.style.top = `${e.clientY - rect.top - radius}px`;
+          circle.classList.add('ripple-ink');
+
+          const existingRipple = btn.querySelector('.ripple-ink');
+          if (existingRipple) existingRipple.remove();
+
+          btn.appendChild(circle);
+          setTimeout(() => circle.remove(), 650);
+        });
+      },
+
+      // Telegram mavzusi bilan sinxronlash
+      syncThemeWithTelegram() {
+        const isDark = this.tg?.colorScheme === 'dark';
+        if (isDark) {
+          document.body.classList.add('dark-mode');
+        }
+      }
+    };
+
+    // Appni ishga tushirish
+    TMA.init();
+
+    // ==========================================================================
+    // INTERAKTIV DEMO FUNKSIYALARI
+    // ==========================================================================
+
+    function demoClick(button, message) {
+      const feedback = document.getElementById('feedback-text');
+      feedback.innerText = message;
+      feedback.style.color = 'var(--primary)';
+      setTimeout(() => {
+        feedback.style.color = 'var(--text-secondary)';
+      }, 1500);
+    }
+
+    function selectCard(card, label) {
+      document.querySelectorAll('.card-btn').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      demoClick(card, label);
+    }
+
+    function demoLoading(button) {
+      if (button.classList.contains('btn-loading-state')) return;
+
+      button.classList.add('btn-loading-state');
+      button.disabled = true;
+      demoClick(button, 'Yuklanmoqda... Kuting...');
+
+      setTimeout(() => {
+        button.classList.remove('btn-loading-state');
+        button.disabled = false;
+        TMA.haptic('success');
+        demoClick(button, 'Muvaffaqiyatli yakunlandi! ✅');
+      }, 2000);
+    }
+
+    // Dark/Light rejim tugmasi
+    const themeBtn = document.getElementById('theme-toggle-btn');
+    themeBtn.addEventListener('click', () => {
+      document.body.classList.toggle('dark-mode');
+      TMA.haptic('medium');
+      const isDark = document.body.classList.contains('dark-mode');
+      themeBtn.innerText = isDark ? '☀️' : '🌓';
+      demoClick(themeBtn, isDark ? 'Tungi rejim yoqildi 🌙' : 'Kunduzgi rejim yoqildi ☀️');
+    });
+  </script>
+</body>
+</html>

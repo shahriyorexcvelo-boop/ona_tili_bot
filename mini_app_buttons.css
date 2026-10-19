@@ -1,0 +1,273 @@
+/* ==========================================================================
+   MINI APP BUTTON ANIMATIONS & UI KIT (Universal & Reusable)
+   Har qanday Telegram Mini App yoki mobil web ilovada ishlatish mumkin.
+   ========================================================================== */
+
+/* Universal tugma asosi */
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 20px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 14px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(40%);
+}
+
+/* ----------------------------------------------------
+   1. SPRING / BOUNCE (Yumshoq sakrash)
+   Foydalanish: class="btn btn-bounce"
+   ---------------------------------------------------- */
+.btn-bounce {
+  background: linear-gradient(135deg, #4F46E5 0%, #3B82F6 100%);
+  color: #FFFFFF;
+  box-shadow: 0 8px 20px rgba(79, 70, 229, 0.35);
+}
+.btn-bounce:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(79, 70, 229, 0.45);
+}
+.btn-bounce:active {
+  transform: scale(0.93);
+  transition: transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ----------------------------------------------------
+   2. LIQUID GLASS (Shaffof shisha + nur yugurishi)
+   Foydalanish: class="btn btn-liquid"
+   ---------------------------------------------------- */
+.btn-liquid {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.1) 100%);
+  color: inherit;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1.5px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06), inset 0 1px 1px rgba(255, 255, 255, 0.9);
+  position: relative;
+}
+body.dark-mode .btn-liquid, [data-theme="dark"] .btn-liquid {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.04) 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+}
+.btn-liquid::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -60%;
+  width: 40%;
+  height: 200%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  transform: rotate(25deg);
+  transition: none;
+}
+.btn-liquid:hover::before {
+  left: 130%;
+  transition: left 0.75s ease-in-out;
+}
+.btn-liquid:active {
+  transform: scale(0.96) translateY(1px);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
+}
+
+/* ----------------------------------------------------
+   3. 3D TACTILE PUSH (Duolingo o'yin uslubi - chuqur bosilish)
+   Foydalanish: class="btn btn-3d"
+   ---------------------------------------------------- */
+.btn-3d {
+  background: #10B981;
+  color: #FFFFFF;
+  border-radius: 14px;
+  box-shadow: 0 6px 0 #059669, 0 10px 18px rgba(16, 185, 129, 0.35);
+  transform: translateY(0);
+  transition: all 0.08s ease;
+}
+.btn-3d:hover {
+  filter: brightness(1.05);
+}
+.btn-3d:active {
+  transform: translateY(5px);
+  box-shadow: 0 1px 0 #059669, 0 3px 6px rgba(16, 185, 129, 0.2);
+}
+
+/* ----------------------------------------------------
+   4. NEON GLOW PULSE (Kiber nurlanish)
+   Foydalanish: class="btn btn-neon"
+   ---------------------------------------------------- */
+.btn-neon {
+  background: linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%);
+  color: #FFFFFF;
+  box-shadow: 0 0 15px rgba(236, 72, 153, 0.4), 0 0 30px rgba(139, 92, 246, 0.2);
+  animation: neonPulseAnim 2.4s infinite ease-in-out;
+}
+@keyframes neonPulseAnim {
+  0%, 100% {
+    box-shadow: 0 0 14px rgba(236, 72, 153, 0.45), 0 0 28px rgba(139, 92, 246, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(236, 72, 153, 0.75), 0 0 45px rgba(139, 92, 246, 0.45);
+  }
+}
+.btn-neon:hover {
+  transform: translateY(-2px) scale(1.01);
+}
+.btn-neon:active {
+  transform: scale(0.95);
+  filter: brightness(1.2);
+}
+
+/* ----------------------------------------------------
+   5. MATERIAL RIPPLE (Suv to'lqini)
+   Foydalanish: class="btn btn-ripple" data-ripple="true"
+   ---------------------------------------------------- */
+.btn-ripple {
+  background: #0284C7;
+  color: #FFFFFF;
+  box-shadow: 0 6px 16px rgba(2, 132, 199, 0.35);
+}
+.btn-ripple:active {
+  transform: scale(0.97);
+}
+.ripple-ink {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+  transform: scale(0);
+  animation: rippleInkAnim 0.6s linear;
+  pointer-events: none;
+}
+@keyframes rippleInkAnim {
+  to {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+/* ----------------------------------------------------
+   6. CARD BUTTON (Bo'lim va menyu kartalari)
+   Foydalanish: class="card-btn"
+   ---------------------------------------------------- */
+.card-btn {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1.5px solid rgba(226, 232, 240, 0.8);
+  border-radius: 18px;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+body.dark-mode .card-btn, [data-theme="dark"] .card-btn {
+  background: #151C2C;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.card-btn:hover {
+  border-color: #6366F1;
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px -4px rgba(15, 23, 42, 0.1);
+}
+.card-btn:active {
+  transform: scale(0.92);
+  border-color: #6366F1;
+  background: rgba(99, 102, 241, 0.08);
+}
+.card-btn.active {
+  border-color: #6366F1;
+  background: rgba(99, 102, 241, 0.12);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.4);
+}
+
+/* ----------------------------------------------------
+   7. LOADING STATE (Spinner animatsiyasi)
+   Foydalanish: class="btn btn-loading-state"
+   ---------------------------------------------------- */
+.btn-loading-state .btn-text {
+  visibility: hidden;
+  opacity: 0;
+}
+.btn-spinner {
+  display: none;
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #FFFFFF;
+  animation: btnSpin 0.75s infinite linear;
+}
+.btn-loading-state .btn-spinner {
+  display: block;
+}
+@keyframes btnSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ----------------------------------------------------
+   8. FIXED BOTTOM MAIN ACTION (Telegram uslubidagi pastki CTA)
+   Foydalanish: .sticky-bottom-bar > .btn-main-action
+   ---------------------------------------------------- */
+.sticky-bottom-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 16px calc(env(safe-area-inset-bottom, 14px) + 8px) 16px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(226, 232, 240, 0.8);
+  display: flex;
+  justify-content: center;
+  z-index: 100;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.05);
+}
+body.dark-mode .sticky-bottom-bar, [data-theme="dark"] .sticky-bottom-bar {
+  background: rgba(15, 23, 42, 0.85);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+}
+.btn-main-action {
+  background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+  color: #FFFFFF;
+  font-size: 16px;
+  font-weight: 800;
+  padding: 16px 24px;
+  border-radius: 18px;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.4);
+  letter-spacing: 0.3px;
+}
+.btn-main-action:hover {
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.55);
+  transform: translateY(-2px);
+}
+.btn-main-action:active {
+  transform: scale(0.96);
+  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.3);
+}
