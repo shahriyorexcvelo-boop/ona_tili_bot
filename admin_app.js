@@ -964,6 +964,64 @@ const AdminApp = {
     }
   },
 
+  triggerPdfWatermark() {
+    const input = document.getElementById('adm-pdf-watermark-input');
+    if (input) input.click();
+  },
+
+  async handlePdfWatermarkSelected(input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      alert("Iltimos, faqat PDF formatidagi faylni tanlang!");
+      input.value = '';
+      return;
+    }
+
+    const btn = document.getElementById('btn-watermark-pdf');
+    const btnText = document.getElementById('btn-wm-text');
+    const originalText = btnText ? btnText.textContent : 'PDF Tanlash';
+
+    try {
+      if (btn) btn.disabled = true;
+      if (btnText) btnText.textContent = 'Qayta ishlanmoqda...';
+
+      const formData = new FormData();
+      formData.append('pdf', file);
+
+      const resp = await fetch('/api/admin/pdf-watermark', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!resp.ok) {
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.message || `Xatolik: HTTP ${resp.status}`);
+      }
+
+      const blob = await resp.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const baseName = file.name.replace(/\.pdf$/i, '');
+      a.download = `${baseName}_watermarked.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+        a.remove();
+      }, 1000);
+
+      alert(`✅ PDF muvaffaqiyatli tayyorlandi va yuklab olindi! (${file.name})`);
+    } catch (err) {
+      alert("❌ Watermark qo'yishda xatolik: " + err.message);
+    } finally {
+      if (btn) btn.disabled = false;
+      if (btnText) btnText.textContent = originalText;
+      input.value = '';
+    }
+  },
+
   sanitizeMath(val) {
     if (!val) return '';
     let s = String(val).trim();

@@ -64,6 +64,13 @@ function initApp() {
     var urlParams = new URLSearchParams(window.location.search);
     var queryTgId = urlParams.get('tg_id');
     var tgU = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if (!tgU && tg && tg.initData) {
+      try {
+        var sp = new URLSearchParams(tg.initData);
+        var uStr = sp.get('user');
+        if (uStr) tgU = JSON.parse(uStr);
+      } catch(e) {}
+    }
 
     var tgPlatform = tg ? (tg.platform || '').toLowerCase() : '';
     var isTg = !!(tg && (
@@ -330,14 +337,18 @@ async function apiGet(path) {
 
 async function loadUserProfile() {
   var urlParams = new URLSearchParams(window.location.search);
-  var tgId = (state.tgUser && state.tgUser.id) || parseInt(urlParams.get('tg_id')) || 0;
-  if (!tgId) {
-    var tg = window.Telegram && window.Telegram.WebApp;
-    if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
-      tgId = tg.initDataUnsafe.user.id;
-      state.tgUser = tg.initDataUnsafe.user;
-    }
+  var tg = window.Telegram && window.Telegram.WebApp;
+  var tgU = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  if (!tgU && tg && tg.initData) {
+    try {
+      var sp = new URLSearchParams(tg.initData);
+      var uStr = sp.get('user');
+      if (uStr) tgU = JSON.parse(uStr);
+    } catch(e) {}
   }
+  if (tgU) state.tgUser = tgU;
+
+  var tgId = (state.tgUser && state.tgUser.id) || (tgU && tgU.id) || parseInt(urlParams.get('tg_id')) || 0;
   var isPreview = urlParams.get('preview') === 'user' || urlParams.get('mode') === 'user' || urlParams.get('demo') === '1';
   if (isPreview) {
     state.userInfo = {
@@ -356,13 +367,10 @@ async function loadUserProfile() {
     checkRegistrationStatus();
     return;
   }
-  if (!tgId || tgId === 0) {
-    checkRegistrationStatus();
-    return;
-  }
+
   try {
     var data = await apiGet('/api/app/profile?tg_id=' + tgId);
-    if (data.success) {
+    if (data.success && data.user) {
       if (data.bot_username) window.BOT_USERNAME = data.bot_username;
       state.userInfo = data.user;
       if (data.is_admin) {
@@ -381,7 +389,10 @@ async function loadUserProfile() {
       if (adminTab) adminTab.style.display = state.isAdmin ? 'flex' : 'none';
       var banner = document.getElementById('admin-simulation-banner');
       if (banner) banner.style.display = state.isSimulatedUser ? 'flex' : 'none';
-      if (data.user && data.user.is_registered) {
+
+      // Ro'yxatdan o'tgan bo'lsa yoki admin bo'lsa, modalni yopamiz
+      var isReg = (state.isAdmin || data.user.is_registered === true || data.user.status === 'approved' || data.user.status === 'pending');
+      if (isReg) {
         var unregModal = document.getElementById('unregistered-modal');
         if (unregModal) unregModal.style.display = 'none';
       } else {
@@ -2623,10 +2634,18 @@ function checkRegistrationStatus() {
   var modal = document.getElementById('unregistered-modal');
   var tg = window.Telegram && window.Telegram.WebApp;
   var tgU = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
-  var tgId = (state.tgUser && state.tgUser.id) || (tgU && tgU.id) || 0;
+  if (!tgU && tg && tg.initData) {
+    try {
+      var sp = new URLSearchParams(tg.initData);
+      var uStr = sp.get('user');
+      if (uStr) tgU = JSON.parse(uStr);
+    } catch(e) {}
+  }
+  var urlParams = new URLSearchParams(window.location.search);
+  var tgId = (state.tgUser && state.tgUser.id) || (tgU && tgU.id) || (state.userInfo && state.userInfo.tg_id) || parseInt(urlParams.get('tg_id')) || 0;
 
-  // 1. Agar admin simulyatsiya rejimida bo'lsa (User mode), modal chiqmaydi
-  if (state.isSimulatedUser || window._unregBypassed) {
+  // 1. Agar admin bo'lsa yoki simulyatsiya rejimida bo'lsa, modal mutlaqo chiqmaydi!
+  if (state.isAdmin || state.isActualAdmin || state.isSimulatedUser || window._unregBypassed) {
     if (modal) modal.style.display = 'none';
     return false;
   }
@@ -2639,7 +2658,8 @@ function checkRegistrationStatus() {
 
   // 3. Botda ro'yxatdan o'tganligini tekshirish
   var u = state.userInfo;
-  var isUnreg = (!tgId || tgId === 0 || u.status === 'not_registered' || u.is_registered === false);
+  var isRegistered = (u.is_registered === true || u.status === 'approved' || u.status === 'pending');
+  var isUnreg = !isRegistered;
   if (modal) {
     modal.style.display = isUnreg ? 'flex' : 'none';
   }

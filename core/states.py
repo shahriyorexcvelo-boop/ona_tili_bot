@@ -39,3 +39,6 @@ class EditProfileState(StatesGroup):
 class ContactUserState(StatesGroup):
     waiting_for_user_id = State()
     waiting_for_message = State()
+
+class AdminPdfWatermarkState(StatesGroup):
+    waiting_for_pdf = State()

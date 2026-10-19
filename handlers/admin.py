@@ -30,7 +30,7 @@ from core import (
     BOT_TOKEN, ADMIN_ID, get_config_admin_ids, WEBAPP_URL, log, bot,
     RegistrationState, SolveTestState, UploadPostPdfState, AddAdminState,
     SetTimeLimitState, BroadcastState, ScheduleState, SetYoutubeState,
-    ContactUserState,
+    ContactUserState, AdminPdfWatermarkState,
     main_menu_kb, profile_webapp_kb, results_webapp_kb,
     contact_share_kb, admin_menu_kb, make_webapp_button,
     get_test_schedule_status, get_test_min_submit_info
@@ -1101,6 +1101,40 @@ async def process_post_create_pdf(message: Message, state: FSMContext):
 
 
 # ── PDF WATERMARK QAYTA ISHLASH (FAQAT ADMINLAR UCHUN) ──
+@admin_router.callback_query(F.data == "admin_pdf_watermark_info")
+@admin_router.message(Command("pdf"))
+@admin_router.message(Command("watermark"))
+async def admin_pdf_watermark_info_handler(event: Message | CallbackQuery, state: FSMContext):
+    user_tg_id = event.from_user.id
+    if not (test_db.is_admin(user_tg_id, ADMIN_ID) or user_tg_id in get_config_admin_ids()):
+        if isinstance(event, CallbackQuery):
+            await event.answer("⛔️ Faqat administratorlar uchun!", show_alert=True)
+        else:
+            await event.answer("⛔️ Ushbu bo'lim faqat administratorlar uchun!")
+        return
+
+    await state.set_state(AdminPdfWatermarkState.waiting_for_pdf)
+
+    text = (
+        "📄 <b>PDF WATERMARK VA QAYTA ISHLASH XIZMATI</b>\n\n"
+        "Ushbu bo'lim orqali istalgan test yoki darslik PDF faylini botga yuborishingiz mumkin.\n\n"
+        "✨ <b>Tizim nimalar qiladi:</b>\n"
+        "• Har bir sahifani tiniq oq fonga ko'chiradi (PyMuPDF)\n"
+        "• Sahifa qoq markaziga Akbarali Boymirzayevning rasmiy shaffof logotipini tushiradi\n"
+        "• Chop etish va tarqatishga to'liq tayyor PDF fayl ko'rinishida sizga yuboradi!\n\n"
+        "👇 <b>Iltimos, qayta ishlanadigan PDF faylni botga yuboring (fayl / document sifatida):</b>"
+    )
+    back_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔙 Admin panelga qaytish", callback_data="admin_panel_back")
+    ]])
+
+    if isinstance(event, CallbackQuery):
+        await event.message.edit_text(text, reply_markup=back_kb)
+    else:
+        await event.answer(text, reply_markup=back_kb)
+
+
+@admin_router.message(AdminPdfWatermarkState.waiting_for_pdf, F.document)
 @admin_router.message(F.document)
 async def admin_pdf_watermark_handler(message: Message, state: FSMContext):
     # Agar post uchun PDF biriktirish holatida bo'lsa, o'sha handler ishlasin
@@ -1162,6 +1196,7 @@ async def admin_pdf_watermark_handler(message: Message, state: FSMContext):
             document=doc_to_send,
             caption=caption
         )
+        await state.clear()
         try:
             await status_msg.delete()
         except Exception:
@@ -2880,43 +2915,6 @@ async def admin_test_res_pdf(call: CallbackQuery):
                 pass
     else:
         await status_msg.edit_text("⚠️ PDF hisobotini shakllantirishda xatolik yuz berdi.")
-
-# Foydalanuvchi to'g'ridan-to'g'ri test kodini yuborganida
-@admin_router.message(F.text)
-async def handle_direct_text(message: Message, state: FSMContext):
-    cur_state = await state.get_state()
-    if cur_state is not None:
-        return
-
-    raw_text = (message.text or "").strip()
-    if not raw_text:
-        return
-
-    if not await check_access(message):
-        return
-
-    menu_cmds = [
-        "🔢 Test kodini kiritish", "📊 Mening natijalarim", "👤 Profilim",
-        "ℹ️ Yordam", "ℹ️ Bot haqida", "⚙️ Admin Panel",
-        "➕ Yangi test yaratish", "📊 Test natijalari va reyting", "📋 Testlarni boshqarish"
-    ]
-    if raw_text in menu_cmds:
-        return
-
-    code = raw_text.upper().replace("#", "")
-    test = test_db.get_test_by_code(code)
-    if test:
-        await send_test_card(message, test, message.from_user.id)
-    else:
-        user_info = test_db.get_user(message.from_user.id)
-        name = user_info['fullname'] if user_info else (message.from_user.first_name or "Foydalanuvchi")
-        await message.answer(
-            f"👋 Salom, <b>{name}</b>!\n\n"
-            f"Test topshirish uchun «🔢 Test kodini kiritish» tugmasini bosing yoki menyudan foydalaning 👇",
-            reply_markup=main_menu_kb(message.from_user.id)
-        )
-
-
 
 
 @admin_router.callback_query(F.data.startswith("adm_schedule_"))

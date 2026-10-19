@@ -30,8 +30,8 @@
       });
     })();
   </script>
-  <script src="/logo_data.js?v=20261019_fs8"></script>
-  <link rel="stylesheet" href="/test_style.css?v=20261019_fs8">
+  <script src="/logo_data.js?v=20261020_v1"></script>
+  <link rel="stylesheet" href="/test_style.css?v=20261020_v1">
   <style>
     .admin-card {
       background: var(--bg-card);
@@ -226,7 +226,7 @@
     <main style="padding: 14px;">
       
       <!-- KALITLAR VARAQASI RASMINI YUKLASH (AI VISION OCR) -->
-      <div class="admin-scan-card" style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(124, 58, 237, 0.08)); border: 1.5px solid rgba(124, 58, 237, 0.35); border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; box-shadow: 0 2px 10px rgba(124, 58, 237, 0.06);">
+      <div class="admin-scan-card" style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(124, 58, 237, 0.08)); border: 1.5px solid rgba(124, 58, 237, 0.35); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; box-shadow: 0 2px 10px rgba(124, 58, 237, 0.06);">
         <div style="display: flex; align-items: center; gap: 10px;">
           <div style="width: 40px; height: 40px; border-radius: 10px; background: linear-gradient(135deg, #7C3AED, #2563EB); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3);">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
@@ -247,6 +247,26 @@
           <span id="btn-scan-text">Rasm yuklash</span>
         </button>
         <input type="file" id="adm-keys-photo-input" accept="image/*" style="display: none;" onchange="AdminApp.handleKeysPhotoSelected(this)">
+      </div>
+
+      <!-- PDF WATERMARK VA LOGOTIP QO'YISH ASBOBI -->
+      <div class="admin-scan-card" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(59, 130, 246, 0.08)); border: 1.5px solid rgba(16, 185, 129, 0.35); border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; box-shadow: 0 2px 10px rgba(16, 185, 129, 0.06);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="width: 40px; height: 40px; border-radius: 10px; background: linear-gradient(135deg, #10B981, #2563EB); display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </div>
+          <div>
+            <div style="font-size: 13px; font-weight: 800; color: var(--text-main);">📄 PDF Watermark Qo'yish</div>
+            <div style="font-size: 11px; color: var(--text-muted);">PDF testni oq fonga ko'chirib, markaziga shaffof logotip qo'yish</div>
+          </div>
+        </div>
+        <button type="button" class="btn-scan-keys" id="btn-watermark-pdf" onclick="AdminApp.triggerPdfWatermark()" style="background: linear-gradient(135deg, #10B981, #059669); color: white; border: none; border-radius: 10px; padding: 9px 14px; font-size: 12px; font-weight: 800; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);">
+          <span id="btn-wm-icon" style="display:inline-flex;align-items:center;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </span>
+          <span id="btn-wm-text">PDF Tanlash</span>
+        </button>
+        <input type="file" id="adm-pdf-watermark-input" accept="application/pdf" style="display: none;" onchange="AdminApp.handlePdfWatermarkSelected(this)">
       </div>
 
       <!-- 1. ASOSIY TEST MA'LUMOTLARI -->
@@ -419,8 +439,8 @@
 
   </div> <!-- /.test-container -->
 
-  <script src="/logo_data.js?v=20261019_fs8"></script>
-  <script src="/admin_app.js?v=20261019_fs8"></script>
+  <script src="/logo_data.js?v=20261020_v1"></script>
+  <script src="/admin_app.js?v=20261020_v1"></script>
   <script>
     (function() {
       window.finishAdminSplash = function() {

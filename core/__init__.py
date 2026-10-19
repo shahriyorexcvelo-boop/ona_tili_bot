@@ -9,7 +9,7 @@ from .bot import bot, dp, MaintenanceMiddleware
 from .states import (
     RegistrationState, SolveTestState, UploadPostPdfState, AddAdminState,
     SetTimeLimitState, BroadcastState, ScheduleState, SetYoutubeState,
-    StudentTahlilState, EditProfileState, ContactUserState
+    StudentTahlilState, EditProfileState, ContactUserState, AdminPdfWatermarkState
 )
 from .keyboards import (
     main_menu_kb, profile_webapp_kb, results_webapp_kb,
@@ -28,7 +28,7 @@ __all__ = [
     "bot", "dp", "MaintenanceMiddleware",
     "RegistrationState", "SolveTestState", "UploadPostPdfState", "AddAdminState",
     "SetTimeLimitState", "BroadcastState", "ScheduleState", "SetYoutubeState",
-    "StudentTahlilState", "EditProfileState", "ContactUserState",
+    "StudentTahlilState", "EditProfileState", "ContactUserState", "AdminPdfWatermarkState",
     "main_menu_kb", "profile_webapp_kb", "results_webapp_kb",
     "contact_share_kb", "admin_menu_kb", "make_webapp_button",
     "HighLoadRateLimiter", "GLOBAL_RATE_LIMITER",

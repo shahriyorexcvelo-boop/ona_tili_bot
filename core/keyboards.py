@@ -17,8 +17,8 @@ def make_webapp_button(text: str, url: str, fallback_cb: str = "open_webapp_info
 def main_menu_kb(user_tg_id: int) -> ReplyKeyboardMarkup:
     is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
     
-    app_url = f"{WEBAPP_URL}/app.html?tg_id={user_tg_id}&v=20261002_fresh"
-    admin_webapp_url = f"{WEBAPP_URL}/admin.html?tg_id={user_tg_id}&v=20261002_fresh"
+    app_url = f"{WEBAPP_URL}/app.html?tg_id={user_tg_id}&v=20261020_v1"
+    admin_webapp_url = f"{WEBAPP_URL}/admin.html?tg_id={user_tg_id}&v=20261020_v1"
 
     # Agar HTTPS bo'lsa to'g'ridan-to'g'ri Telegram WebApp ochadi
     if app_url.startswith("https://"):
@@ -54,7 +54,7 @@ def main_menu_kb(user_tg_id: int) -> ReplyKeyboardMarkup:
 
 def profile_webapp_kb(user_tg_id: int) -> InlineKeyboardMarkup:
     """Shaxsiy profil mini ilovasini ochish tugmasi."""
-    app_url = f"{WEBAPP_URL}/app.html?tg_id={user_tg_id}&v=20261002_fresh"
+    app_url = f"{WEBAPP_URL}/app.html?tg_id={user_tg_id}&v=20261020_v1"
     buttons = [
         [make_webapp_button("📱 Shaxsiy profilni ochish", app_url, fallback_cb="open_app_info")]
     ]
@@ -62,7 +62,7 @@ def profile_webapp_kb(user_tg_id: int) -> InlineKeyboardMarkup:
 
 def results_webapp_kb(user_tg_id: int = 0) -> InlineKeyboardMarkup:
     """Natijalarni ko'rish mini ilovasi tugmasi."""
-    qs = f"?tg_id={user_tg_id}&v=20261002_fresh" if user_tg_id else "?v=20261002_fresh"
+    qs = f"?tg_id={user_tg_id}&v=20261020_v1" if user_tg_id else "?v=20261020_v1"
     app_url = f"{WEBAPP_URL}/app.html{qs}"
     buttons = [
         [make_webapp_button("📊 Asosiy ilovani ochish", app_url, fallback_cb="open_app_info")]
@@ -88,6 +88,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
 
     buttons = [
         [InlineKeyboardButton(text="💻 MacBook Dashboard (Katta Baza)", url=f"{WEBAPP_URL}/dashboard")],
+        [InlineKeyboardButton(text="📄 PDF Watermark qo'yish / Tayyorlash", callback_data="admin_pdf_watermark_info")],
         [InlineKeyboardButton(text="💬 Foydalanuvchiga yozish / Chat", callback_data="admin_contact_user_prompt")],
         [InlineKeyboardButton(text="📢 O'quvchilarga xabar yuborish", callback_data="admin_broadcast_menu")],
         [InlineKeyboardButton(text="⚠️ Faoliyatsizlarga ogohlantirish", callback_data="admin_warn_inactive_menu")],

@@ -332,7 +332,7 @@ async def show_my_results(message: Message):
             btn_title = f"📊 #{t_code} tahlili" if t_code else f"📊 {t_title[:20]} tahlili"
             kb_rows.append([InlineKeyboardButton(text=btn_title, callback_data=f"user_req_tahlil_{s['test_id']}")])
 
-    kb_rows.append([make_webapp_button("📱 Barcha natijalar va tahlillar (Mini App)", f"{WEBAPP_URL}/app.html?tab=tests")])
+    kb_rows.append([make_webapp_button("📱 Barcha natijalar va tahlillar (Mini App)", f"{WEBAPP_URL}/app.html?tab=tests&tg_id={message.from_user.id}")])
 
     await message.answer(
         "📊 <b>Mening natijalarim va tahlillar</b>\n\n"
@@ -688,7 +688,7 @@ async def user_unblocked_bot_handler(event: ChatMemberUpdated):
 async def show_help(message: Message):
     contact_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✍️ Adminga murojaat (@eshmbetov)", url="https://t.me/eshmbetov")],
-        [make_webapp_button("📱 Ona tili Test (Mini App)", f"{WEBAPP_URL}/app.html")]
+        [make_webapp_button("📱 Ona tili Test (Mini App)", f"{WEBAPP_URL}/app.html?tg_id={message.from_user.id}")]
     ])
     await message.answer(
         "ℹ️ <b>YORDAM VA QO'LLAB-QUVVATLASH</b>\n\n"
@@ -835,7 +835,7 @@ async def process_tahlil_code(message: Message, state: FSMContext):
     yt_url = (test.get("youtube_url") or "").strip()
     if yt_url:
         kb_rows.append([InlineKeyboardButton(text="🎬 Video tahlilni ko'rish (YouTube)", url=yt_url)])
-    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app.html?tab=tests"))])
+    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app.html?tab=tests&tg_id={message.from_user.id}"))])
 
     await message.answer(
         tahlil_text,
@@ -848,23 +848,34 @@ async def process_tahlil_code(message: Message, state: FSMContext):
 @user_router.message(F.text, StateFilter(None))
 async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
     user_tg_id = message.from_user.id
+    raw_text = (message.text or "").strip()
+    if not raw_text:
+        return
+
+    # Buyruq bo'lsa (masalan /profile, /help), bu yerda to'xtatish (buyruq handlerlari ishlasin)
+    if raw_text.startswith("/"):
+        return
+
     user = test_db.get_user(user_tg_id)
     if not user:
-        raw_text = (message.text or "").strip()
-        is_valid, _ = validate_fullname(raw_text)
-        if is_valid:
-            await reg_fullname(message, state)
-            return
+        if test_db.is_admin(user_tg_id, ADMIN_ID):
+            test_db.add_or_update_user(user_tg_id, message.from_user.full_name or "Administrator", "", message.from_user.username, status="approved")
+            user = test_db.get_user(user_tg_id)
         else:
-            await state.set_state(RegistrationState.fullname)
-            await message.answer(
-                "👋 <b>Assalomu alaykum! Ona tili test tizimiga xush kelibsiz!</b>\n\n"
-                "Tizimdan to'liq foydalanish va ruxsat olish uchun ro'yxatdan o'ting.\n\n"
-                "✍️ <b>Iltimos, Ism va Familiyangizni kiriting:</b>\n"
-                "<i>(Misol: Shaxriyor Eshimbetov)</i>",
-                reply_markup=main_menu_kb(user_tg_id)
-            )
-            return
+            is_valid, _ = validate_fullname(raw_text)
+            if is_valid:
+                await reg_fullname(message, state)
+                return
+            else:
+                await state.set_state(RegistrationState.fullname)
+                await message.answer(
+                    "👋 <b>Assalomu alaykum! Ona tili test tizimiga xush kelibsiz!</b>\n\n"
+                    "Tizimdan to'liq foydalanish va ruxsat olish uchun ro'yxatdan o'ting.\n\n"
+                    "✍️ <b>Iltimos, Ism va Familiyangizni kiriting:</b>\n"
+                    "<i>(Misol: Shaxriyor Eshimbetov)</i>",
+                    reply_markup=main_menu_kb(user_tg_id)
+                )
+                return
 
     # Agar ro'yxatdan o'tgan bo'lsa va ruxsat berilmagan bo'lsa
     st = user.get("status", "pending")
@@ -884,9 +895,7 @@ async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
             )
             return
 
-    text = (message.text or "").strip()
-    if not text:
-        return
+    text = raw_text
 
     # Asosiy menyu tugmalari
     if text == "🔢 Test kodini kiritish":
@@ -927,8 +936,8 @@ async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
 
     # Noma'lum buyruq yoki xabarlar uchun yo'naltiruvchi javob
     await message.answer(
-        f"❓ <b>Noma'lum buyruq yoki test kodi:</b> «{text}»\n\n"
-        f"Quyidagi menyudan kerakli bo'limni tanlang yoki to'g'ri test kodini yuboring 👇",
+        f"👋 Salom, <b>{user['fullname']}</b>!\n\n"
+        f"Test topshirish uchun «🔢 Test kodini kiritish» tugmasini bosing yoki quyidagi menyudan foydalaning 👇",
         reply_markup=main_menu_kb(user_tg_id)
     )
 

@@ -352,6 +352,7 @@ function switchDashboardTab(tabId) {
     users: { t: 'Foydalanuvchilar Bazasi', sub: 'Bot a\'zolari va o\'quvchilar ro\'yxati' },
     tests: { t: 'Testlar Boshqaruvi', sub: 'Yaratilgan barcha milliy sertifikat va blok testlar' },
     broadcast: { t: 'Xabarnomalar Markazi (Broadcast)', sub: 'Barcha yoki tanlangan o\'quvchilarga Telegram orqali xabar, e\'lon va rasm yuborish' },
+    pdfwatermark: { t: 'PDF Watermark & Professional Tayyorlash', sub: 'Har qanday test PDF faylini oq fonga ko\'chirish va Akbarali Boymirzayev logotipini tushirish' },
     activity: { t: 'Jarayonlar & Audit', sub: 'Tizimda sodir bo\'lgan barcha hodisalar jurnali' },
     database: { t: 'Baza & SQL Konsoli', sub: 'PostgreSQL Cloud ma\'lumotlar bazasi va to\'g\'ridan-to\'g\'ri so\'rovlar' }
   };
@@ -3476,5 +3477,61 @@ window.closeBroadcastConfirmModal = closeBroadcastConfirmModal;
 window.executeBroadcastSend = executeBroadcastSend;
 window.fetchBroadcastHistory = fetchBroadcastHistory;
 window.deleteBroadcastBatch = deleteBroadcastBatch;
+
+async function handleDashboardPdfWatermark(input) {
+  if (!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    alert("Iltimos, faqat PDF (.pdf) formatidagi faylni tanlang!");
+    input.value = '';
+    return;
+  }
+
+  const titleEl = document.getElementById('dash-pdf-status-title');
+  const descEl = document.getElementById('dash-pdf-status-desc');
+  const originalTitle = titleEl ? titleEl.textContent : 'PDF faylni tanlash uchun bosing';
+  const originalDesc = descEl ? descEl.textContent : '';
+
+  try {
+    if (titleEl) titleEl.textContent = '⏳ Watermark qo\'yilmoqda... Iltimos, kuting';
+    if (descEl) descEl.textContent = `«${file.name}» qayta ishlanmoqda (PyMuPDF + Pillow)...`;
+
+    const formData = new FormData();
+    formData.append('pdf', file);
+
+    const resp = await fetch('/api/admin/pdf-watermark', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!resp.ok) {
+      const errJson = await resp.json().catch(() => ({}));
+      throw new Error(errJson.message || `HTTP ${resp.status}`);
+    }
+
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const baseName = file.name.replace(/\.pdf$/i, '');
+    a.download = `${baseName}_watermarked.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      window.URL.revokeObjectURL(url);
+      a.remove();
+    }, 1000);
+
+    alert(`✅ PDF muvaffaqiyatli tayyorlandi va yuklab olindi! (${file.name})`);
+  } catch (err) {
+    alert("❌ Watermark qo'yishda xatolik yuz berdi: " + err.message);
+  } finally {
+    if (titleEl) titleEl.textContent = originalTitle;
+    if (descEl) descEl.textContent = originalDesc;
+    input.value = '';
+  }
+}
+window.handleDashboardPdfWatermark = handleDashboardPdfWatermark;
+
 
 

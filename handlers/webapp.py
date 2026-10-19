@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import time
+import uuid
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, Tuple, List
@@ -29,7 +30,8 @@ from core import (
 )
 from services import (
     MAINT_START_TEXT, MAINT_END_TEXT,
-    send_broadcast_to_users, delete_broadcast_batch_from_users
+    send_broadcast_to_users, delete_broadcast_batch_from_users,
+    process_pdf_watermark_async
 )
 from .common import (
     get_all_admin_ids, send_test_card_to_user_chat,
@@ -998,13 +1000,103 @@ def _fetch_profile_data_sync(tg_id: int):
             pass
     return user, is_admin, submissions, pending_users
 
+async def handle_admin_pdf_watermark(request):
+    """Admin uchun WebApp orqali PDF faylga watermark qo'yish va natijaviy faylni yuklab berish."""
+    temp_id = uuid.uuid4().hex
+    input_path = f"/tmp/web_in_{temp_id}.pdf"
+    output_path = f"/tmp/web_out_{temp_id}.pdf"
+    try:
+        reader = await request.multipart()
+        field = await reader.next()
+        if not field or field.name != 'pdf':
+            return web.json_response({"success": False, "message": "PDF fayl yuborilmadi"}, status=400)
+
+        raw_filename = field.filename or "test.pdf"
+        base_name = os.path.splitext(raw_filename)[0]
+
+        with open(input_path, 'wb') as f:
+            while True:
+                chunk = await field.read_chunk()
+                if not chunk:
+                    break
+                f.write(chunk)
+
+        logo_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logo.png")
+        if not os.path.exists(logo_file):
+            logo_file = "logo.png"
+
+        total_pages = await process_pdf_watermark_async(
+            input_pdf_path=input_path,
+            output_pdf_path=output_path,
+            logo_path=logo_file,
+            opacity=0.22
+        )
+
+        with open(output_path, 'rb') as f:
+            out_bytes = f.read()
+
+        out_fname = f"{base_name}_watermarked.pdf"
+        quoted_fname = urllib.parse.quote(out_fname)
+        resp = web.Response(
+            body=out_bytes,
+            content_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{out_fname}\"; filename*=UTF-8''{quoted_fname}",
+                "X-Total-Pages": str(total_pages)
+            }
+        )
+        return resp
+    except Exception as ex:
+        log.exception(f"Web PDF watermark xatolik: {ex}")
+        return web.json_response({"success": False, "message": str(ex)}, status=500)
+    finally:
+        for p in [input_path, output_path]:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+
+
 async def handle_app_profile(request):
     """Foydalanuvchi profili va statistikasi (Asosiy Mini App uchun)."""
     try:
         bot_user = CACHED_BOT_USERNAME
 
-        tg_id = int(request.rel_url.query.get('tg_id', 0))
-        if not tg_id or tg_id == 0:
+        tg_id = 0
+        try:
+            tg_id = int(request.rel_url.query.get('tg_id', 0))
+        except (ValueError, TypeError):
+            tg_id = 0
+
+        # Agar tg_id query orqali kelmagan bo'lsa, Telegram init_data dan olishga harakat qilamiz
+        if not tg_id or tg_id <= 0:
+            init_data = (
+                request.headers.get("X-Telegram-Init-Data") or 
+                request.rel_url.query.get("init_data") or 
+                request.rel_url.query.get("tgWebAppData") or ""
+            )
+            if init_data:
+                try:
+                    parsed = dict(urllib.parse.parse_qsl(init_data))
+                    if "user" in parsed:
+                        u_dict = json.loads(parsed["user"])
+                        if u_dict and u_dict.get("id"):
+                            tg_id = int(u_dict["id"])
+                except Exception as ex:
+                    log.warning(f"handle_app_profile init_data parse xatolik: {ex}")
+
+        # Agar foydalanuvchi admin bo'lsa va hali bazada yo'q bo'lsa, avtomatik yaratamiz
+        is_admin_user = test_db.is_admin(tg_id or 0, ADMIN_ID)
+        if is_admin_user and tg_id and tg_id > 0:
+            existing_user = await asyncio.to_thread(test_db.get_user, tg_id)
+            if not existing_user:
+                await asyncio.to_thread(
+                    test_db.add_or_update_user,
+                    tg_id, "Administrator", "", "", "approved"
+                )
+
+        if not tg_id or tg_id <= 0:
             return web.json_response({
                 "success": True,
                 "user": {
@@ -1035,18 +1127,32 @@ async def handle_app_profile(request):
             max_score_val = max(scores) if scores else 0
 
         if not user:
-            user_data = {
-                'tg_id': tg_id,
-                'fullname': 'Foydalanuvchi',
-                'phone': '—',
-                'status': 'not_registered',
-                'is_registered': False,
-                'registered_at': int(time.time()),
-                'tests_count': 0,
-                'avg_score': 0,
-                'max_score': 0,
-                'has_pin': False
-            }
+            if is_admin:
+                user_data = {
+                    'tg_id': tg_id,
+                    'fullname': 'Administrator',
+                    'phone': '—',
+                    'status': 'approved',
+                    'is_registered': True,
+                    'registered_at': int(time.time()),
+                    'tests_count': 0,
+                    'avg_score': 0,
+                    'max_score': 0,
+                    'has_pin': False
+                }
+            else:
+                user_data = {
+                    'tg_id': tg_id,
+                    'fullname': 'Foydalanuvchi',
+                    'phone': '—',
+                    'status': 'not_registered',
+                    'is_registered': False,
+                    'registered_at': int(time.time()),
+                    'tests_count': 0,
+                    'avg_score': 0,
+                    'max_score': 0,
+                    'has_pin': False
+                }
         else:
             user_data = dict(user)
             user_data['is_registered'] = True
@@ -2431,6 +2537,7 @@ async def create_web_app():
     app.router.add_post('/api/admin/update-test-keys', handle_admin_update_test_keys)
     app.router.add_post('/api/scan-keys', handle_scan_keys_api)
     app.router.add_post('/api/set-gemini-key', handle_set_gemini_key_api)
+    app.router.add_post('/api/admin/pdf-watermark', handle_admin_pdf_watermark)
     # Asosiy Mini App API
     app.router.add_get('/api/app/profile', handle_app_profile)
     app.router.add_post('/api/app/update-profile', handle_app_update_profile)
