@@ -24,7 +24,7 @@ from core import (
     UZB_TZ, format_uzb_time, TG_ICONS, tg_e,
     _dashboard_overview_cache, _dashboard_users_cache, _dashboard_tests_cache, invalidate_dashboard_cache,
     get_test_schedule_status, get_test_min_submit_info,
-    BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, log, bot,
+    BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, CACHED_BOT_USERNAME, log, bot,
     GLOBAL_RATE_LIMITER, SUBMIT_CONCURRENCY_SEMAPHORE, COMPARE_CONCURRENCY_SEMAPHORE
 )
 from services import (
