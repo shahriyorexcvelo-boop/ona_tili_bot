@@ -15,7 +15,5 @@ services:
         value: "8039427064"
       - key: BOT_USERNAME
         value: demo_rashonatili_bot
-      - key: PORT
-        value: "8080"
       - key: PYTHON_VERSION
         value: 3.11.9
