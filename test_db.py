@@ -108,6 +108,8 @@ def _close_conn(conn):
     except Exception:
         pass
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 if not USE_POSTGRES:
     import sqlite3
     data_dir = os.getenv("DATA_DIR")
@@ -118,7 +120,23 @@ if not USE_POSTGRES:
             pass
         DB_FILE = os.path.join(data_dir, "test_system.db")
     else:
-        DB_FILE = os.getenv("DB_PATH", "test_system.db")
+        db_path_env = os.getenv("DB_PATH", "").strip()
+        if db_path_env:
+            DB_FILE = db_path_env if os.path.isabs(db_path_env) else os.path.join(BASE_DIR, db_path_env)
+        else:
+            DB_FILE = os.path.join(BASE_DIR, "test_system.db")
+
+_db_initialized = False
+
+def ensure_db_initialized():
+    """Baza jadvallari yaratilganligini tekshirish va lozim bo'lsa darhol yaratish."""
+    global _db_initialized
+    if _db_initialized:
+        return
+    try:
+        init_db()
+    except Exception as e:
+        print(f"Baza initializatsiya xatosi: {e}")
 
 
 def format_uzb_time(timestamp: Optional[float] = None, fmt: str = "%d.%m.%Y %H:%M") -> str:
@@ -200,6 +218,18 @@ def get_connection():
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA busy_timeout=20000;")
         conn.execute("PRAGMA synchronous=NORMAL;")
+        global _db_initialized
+        if not _db_initialized:
+            try:
+                cur_c = conn.cursor()
+                cur_c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'")
+                if not cur_c.fetchone():
+                    _db_initialized = True
+                    _init_sqlite_tables_on_conn(conn)
+                else:
+                    _db_initialized = True
+            except Exception:
+                pass
         return conn
 
 
@@ -235,7 +265,151 @@ def _ph() -> str:
 # JADVALLARNI YARATISH
 # ──────────────────────────────────────────────────────────
 
+def _init_sqlite_tables_on_conn(conn):
+    """SQLite uchun barcha jadvallar va indekslarni xavfsiz yaratish hamda yangilash."""
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tg_id INTEGER UNIQUE NOT NULL,
+        fullname TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        username TEXT,
+        status TEXT DEFAULT 'approved',
+        pin_code TEXT,
+        registered_at INTEGER NOT NULL
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        test_code TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        subject TEXT DEFAULT 'Matematika',
+        pdf_file_id TEXT,
+        pdf_file_name TEXT,
+        answers_json TEXT NOT NULL,
+        total_questions INTEGER DEFAULT 45,
+        time_limit_min INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        key_access_code TEXT,
+        results_published INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        created_by INTEGER DEFAULT 0,
+        created_by_name TEXT DEFAULT ''
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS submissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        test_id INTEGER NOT NULL,
+        test_code TEXT NOT NULL,
+        user_tg_id INTEGER NOT NULL,
+        fullname TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        answers_json TEXT NOT NULL,
+        score REAL NOT NULL,
+        max_score REAL DEFAULT 100.0,
+        correct_count INTEGER NOT NULL,
+        total_count INTEGER DEFAULT 45,
+        details_json TEXT NOT NULL,
+        submitted_at INTEGER NOT NULL,
+        is_late INTEGER DEFAULT 0,
+        FOREIGN KEY(test_id) REFERENCES tests(id)
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS admins (
+        tg_id INTEGER PRIMARY KEY,
+        fullname TEXT,
+        username TEXT,
+        added_by INTEGER,
+        created_at INTEGER NOT NULL
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS system_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS broadcast_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id TEXT UNIQUE NOT NULL,
+        sender_tg_id INTEGER DEFAULT 0,
+        message_text TEXT DEFAULT '',
+        photo_id TEXT DEFAULT '',
+        total_sent INTEGER DEFAULT 0,
+        is_deleted INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS broadcast_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id TEXT NOT NULL,
+        chat_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        status TEXT DEFAULT 'sent',
+        created_at INTEGER NOT NULL
+    )
+    """)
+
+    cur.execute("""
+    INSERT OR IGNORE INTO admins (tg_id, fullname, username, added_by, created_at)
+    VALUES (8039427064, 'Bosh Admin', 'admin', 0, 1789300000)
+    """)
+
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_users_tg_id ON users(tg_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_submissions_user_tg_id ON submissions(user_tg_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_submissions_test_id ON submissions(test_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tests_test_code ON tests(test_code)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tests_is_active ON tests(is_active)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_bc_msg_batch ON broadcast_messages(batch_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_bc_msg_chat ON broadcast_messages(chat_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_bc_hist_created ON broadcast_history(created_at)")
+
+    for col, coltype in [
+        ("scheduled_date", "TEXT"),
+        ("scheduled_start", "TEXT"),
+        ("scheduled_end", "TEXT"),
+        ("created_by", "INTEGER"),
+        ("created_by_name", "TEXT"),
+        ("auto_notified", "TEXT"),
+        ("youtube_url", "TEXT"),
+        ("stopped_at", "INTEGER"),
+    ]:
+        try:
+            cur.execute(f"ALTER TABLE tests ADD COLUMN {col} {coltype} DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            pass
+
+    for col, coltype in [
+        ("is_late", "INTEGER DEFAULT 0"),
+        ("status", "TEXT DEFAULT 'accepted'"),
+        ("reject_reason", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            cur.execute(f"ALTER TABLE submissions ADD COLUMN {col} {coltype}")
+            conn.commit()
+        except Exception:
+            pass
+
+    conn.commit()
+
+
 def init_db():
+    global _db_initialized
+    _db_initialized = True
     conn = get_connection()
     try:
         cur = conn.cursor()
@@ -365,120 +539,6 @@ def init_db():
             except Exception:
                 pass
 
-        else:
-            # SQLite jadvallar (fallback)
-            cur.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tg_id INTEGER UNIQUE NOT NULL,
-                fullname TEXT NOT NULL,
-                phone TEXT NOT NULL,
-                username TEXT,
-                status TEXT DEFAULT 'approved',
-                pin_code TEXT,
-                registered_at INTEGER NOT NULL
-            )
-            """)
-
-            cur.execute("""
-            CREATE TABLE IF NOT EXISTS tests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                test_code TEXT UNIQUE NOT NULL,
-                title TEXT NOT NULL,
-                subject TEXT DEFAULT 'Matematika',
-                pdf_file_id TEXT,
-                pdf_file_name TEXT,
-                answers_json TEXT NOT NULL,
-                total_questions INTEGER DEFAULT 45,
-                time_limit_min INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                key_access_code TEXT,
-                results_published INTEGER DEFAULT 0,
-                created_at INTEGER NOT NULL,
-                created_by INTEGER DEFAULT 0,
-                created_by_name TEXT DEFAULT ''
-            )
-            """)
-
-            cur.execute("""
-            CREATE TABLE IF NOT EXISTS submissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                test_id INTEGER NOT NULL,
-                test_code TEXT NOT NULL,
-                user_tg_id INTEGER NOT NULL,
-                fullname TEXT NOT NULL,
-                phone TEXT NOT NULL,
-                answers_json TEXT NOT NULL,
-                score REAL NOT NULL,
-                max_score REAL DEFAULT 100.0,
-                correct_count INTEGER NOT NULL,
-                total_count INTEGER DEFAULT 45,
-                details_json TEXT NOT NULL,
-                submitted_at INTEGER NOT NULL,
-                is_late INTEGER DEFAULT 0,
-                FOREIGN KEY(test_id) REFERENCES tests(id)
-            )
-            """)
-
-            cur.execute("""
-            CREATE TABLE IF NOT EXISTS admins (
-                tg_id INTEGER PRIMARY KEY,
-                fullname TEXT,
-                username TEXT,
-                added_by INTEGER,
-                created_at INTEGER NOT NULL
-            )
-            """)
-
-            cur.execute("""
-            CREATE TABLE IF NOT EXISTS system_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-            """)
-
-            cur.execute("""
-            CREATE TABLE IF NOT EXISTS broadcast_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                batch_id TEXT UNIQUE NOT NULL,
-                sender_tg_id INTEGER DEFAULT 0,
-                message_text TEXT DEFAULT '',
-                photo_id TEXT DEFAULT '',
-                total_sent INTEGER DEFAULT 0,
-                is_deleted INTEGER DEFAULT 0,
-                created_at INTEGER NOT NULL
-            )
-            """)
-
-            cur.execute("""
-            CREATE TABLE IF NOT EXISTS broadcast_messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                batch_id TEXT NOT NULL,
-                chat_id INTEGER NOT NULL,
-                message_id INTEGER NOT NULL,
-                status TEXT DEFAULT 'sent',
-                created_at INTEGER NOT NULL
-            )
-            """)
-
-            cur.execute("""
-            INSERT OR IGNORE INTO admins (tg_id, fullname, username, added_by, created_at)
-            VALUES (8039427064, 'Bosh Admin', 'admin', 0, 1789300000)
-            """)
-
-            # SQLite indekslar (Tezkor qidiruv va yuklamaga chidamlilik)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_tg_id ON users(tg_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_submissions_user_tg_id ON submissions(user_tg_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_submissions_test_id ON submissions(test_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_tests_test_code ON tests(test_code)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_tests_is_active ON tests(is_active)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_bc_msg_batch ON broadcast_messages(batch_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_bc_msg_chat ON broadcast_messages(chat_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_bc_hist_created ON broadcast_history(created_at)")
-
-        # Jadval vaqt va qo'shimcha ustunlar migration (mavjud bo'lsa xato bermaydi)
-        if USE_POSTGRES:
             for col, coltype in [
                 ("scheduled_date", "TEXT"),
                 ("scheduled_start", "TEXT"),
@@ -494,25 +554,7 @@ def init_db():
                     conn.commit()
                 except Exception:
                     conn.rollback()
-        else:
-            for col, coltype in [
-                ("scheduled_date", "TEXT"),
-                ("scheduled_start", "TEXT"),
-                ("scheduled_end", "TEXT"),
-                ("created_by", "INTEGER"),
-                ("created_by_name", "TEXT"),
-                ("auto_notified", "TEXT"),
-                ("youtube_url", "TEXT"),
-                ("stopped_at", "INTEGER"),
-            ]:
-                try:
-                    cur.execute(f"ALTER TABLE tests ADD COLUMN {col} {coltype} DEFAULT NULL")
-                    conn.commit()
-                except Exception:
-                    pass
 
-        # submissions jadvaliga is_late, status va reject_reason ustunlarini qo'shish
-        if USE_POSTGRES:
             try:
                 cur.execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS is_late INTEGER DEFAULT 0")
                 cur.execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'accepted'")
@@ -520,22 +562,10 @@ def init_db():
                 conn.commit()
             except Exception:
                 conn.rollback()
-        else:
-            try:
-                cur.execute("ALTER TABLE submissions ADD COLUMN is_late INTEGER DEFAULT 0")
-            except Exception:
-                pass
-            try:
-                cur.execute("ALTER TABLE submissions ADD COLUMN status TEXT DEFAULT 'accepted'")
-            except Exception:
-                pass
-            try:
-                cur.execute("ALTER TABLE submissions ADD COLUMN reject_reason TEXT DEFAULT ''")
-            except Exception:
-                pass
-            conn.commit()
 
-        conn.commit()
+            conn.commit()
+        else:
+            _init_sqlite_tables_on_conn(conn)
     finally:
         _close_conn(conn)
 
@@ -3425,7 +3455,12 @@ def recalculate_all_submissions_globally() -> int:
         _close_conn(conn)
 
 
-# Baza inicializatsiyasi faqat bevosita ishga tushirilganda
+# Baza inicializatsiyasi
+try:
+    ensure_db_initialized()
+except Exception:
+    pass
+
 if __name__ == '__main__':
     init_db()
 

@@ -988,9 +988,20 @@ async def handle_static_file(request):
 # ── ASOSIY MINI APP API ENDPOINTLARI ────────────────────────────────────────
 
 def _fetch_profile_data_sync(tg_id: int):
-    user = test_db.get_user(tg_id)
-    is_admin = test_db.is_admin(tg_id, ADMIN_ID)
-    submissions = test_db.get_user_submissions(tg_id)
+    try:
+        user = test_db.get_user(tg_id)
+    except Exception as ex:
+        log.warning(f"_fetch_profile_data_sync get_user error: {ex}")
+        user = None
+    try:
+        is_admin = test_db.is_admin(tg_id, ADMIN_ID)
+    except Exception:
+        is_admin = (tg_id == ADMIN_ID)
+    try:
+        submissions = test_db.get_user_submissions(tg_id)
+    except Exception as ex:
+        log.warning(f"_fetch_profile_data_sync get_user_submissions error: {ex}")
+        submissions = []
     pending_users = 0
     if is_admin:
         try:
@@ -2497,6 +2508,11 @@ async def handle_clean_blocked_users(request):
 
 
 async def create_web_app():
+    try:
+        test_db.ensure_db_initialized()
+    except Exception as ex:
+        log.warning(f"create_web_app ensure_db_initialized xatolik: {ex}")
+
     app = web.Application()
     app.router.add_post('/api/admin/clean-blocked-users', handle_clean_blocked_users)
     app.router.add_get('/api/admin/clean-blocked-users', handle_clean_blocked_users)

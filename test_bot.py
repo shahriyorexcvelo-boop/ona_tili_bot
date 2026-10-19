@@ -29,7 +29,14 @@ dp.include_router(user_router)
 async def main():
     global WEBAPP_URL
 
-    # 1. aiohttp serverini DARHOL ishga tushirish (Render /healthz tekshiruvidan darhol o'tishi uchun)
+    # 1. Baza jadvallarini serverdan oldin yaratish/tekshirish (juda tez bajariladi)
+    try:
+        test_db.init_db()
+        log.info("✅ Ma'lumotlar bazasi jadvallari muvaffaqiyatli ishga tushirildi.")
+    except Exception as dbe:
+        log.error(f"❌ DB init xatolik: {dbe}")
+
+    # 2. aiohttp serverini DARHOL ishga tushirish (Render /healthz tekshiruvidan darhol o'tishi uchun)
     app = await create_web_app()
     runner = web.AppRunner(app)
     await runner.setup()
@@ -48,23 +55,22 @@ async def main():
             else:
                 raise e
 
-    # 2. Orqa fonda bazani tozalash (Server javob berishini to'xtatib qo'ymaslik uchun)
+    # 3. Orqa fonda bloklangan foydalanuvchilarni tozalash
     async def run_startup_db_tasks():
         try:
-            await asyncio.to_thread(test_db.init_db)
             cleaned = await asyncio.to_thread(test_db.delete_all_blocked_users)
             if cleaned:
                 log.info(f"🧹 Bot ishga tushganda {len(cleaned)} ta oldindan bloklangan foydalanuvchi bazadan o'chirildi")
         except Exception as ex:
             log.warning(f"Startup clean blocked xatolik: {ex}")
 
-    asyncio.create_task(run_startup_db_tasks())
+    _cleanup_task = asyncio.create_task(run_startup_db_tasks())
 
-    # 3. Fon rejimida HTTPS Tunnelni boshlash
-    asyncio.create_task(maintain_tunnel(current_port))
+    # 4. Fon rejimida HTTPS Tunnelni boshlash
+    _tunnel_task = asyncio.create_task(maintain_tunnel(current_port))
 
-    # 4. Avtomatik jadval tekshiruvchisini ishga tushirish
-    asyncio.create_task(schedule_checker())
+    # 5. Avtomatik jadval tekshiruvchisini ishga tushirish
+    _sched_task = asyncio.create_task(schedule_checker())
 
     # 5. Telegram Botni ishga tushirish
     log.info("🤖 Telegram Bot Polling rejimida ishga tushmoqda...")
