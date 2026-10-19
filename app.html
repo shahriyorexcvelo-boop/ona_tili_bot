@@ -50,7 +50,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
     rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app_style.css?v=20261003_smoothsplash" />
+  <link rel="stylesheet" href="/css/app_style.css?v=20261019_fs8" />
   <script>
     (function () {
       var saved = localStorage.getItem('app_theme') || 'light';
@@ -58,15 +58,29 @@
       var bg = saved === 'dark' ? '#0a0b14' : '#f0f4ff';
       var metaTheme = document.querySelector('meta[name="theme-color"]');
       if (metaTheme) metaTheme.setAttribute('content', bg);
-      if (window.Telegram && window.Telegram.WebApp) {
-        var tg = window.Telegram.WebApp;
-        try {
-          if (tg.setHeaderColor) tg.setHeaderColor(bg);
-          if (tg.setBackgroundColor) tg.setBackgroundColor(bg);
-          if (tg.setBottomBarColor) tg.setBottomBarColor(bg);
-          tg.expand();
-        } catch (e) {}
+
+      function activateTelegramFullscreen() {
+        if (window.Telegram && window.Telegram.WebApp) {
+          var tg = window.Telegram.WebApp;
+          try {
+            if (typeof tg.ready === 'function') tg.ready();
+            if (typeof tg.expand === 'function') tg.expand();
+            if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+            if (typeof tg.requestFullscreen === 'function') tg.requestFullscreen();
+            if (tg.setHeaderColor) tg.setHeaderColor(bg);
+            if (tg.setBackgroundColor) tg.setBackgroundColor(bg);
+            if (tg.setBottomBarColor) tg.setBottomBarColor(bg);
+          } catch (e) {}
+        }
       }
+
+      activateTelegramFullscreen();
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', activateTelegramFullscreen);
+      }
+      ['click', 'touchstart', 'pointerdown'].forEach(function (evt) {
+        window.addEventListener(evt, activateTelegramFullscreen, { passive: true });
+      });
     })();
   </script>
 </head>
@@ -512,11 +526,11 @@
   <!-- TOAST -->
   <div id="toast"></div>
 
-  <script src="/logo_data.js?v=20261003_smoothsplash"></script>
-  <script src="/js/i18n.js?v=20261003_smoothsplash"></script>
-  <script src="/js/math-utils.js?v=20261003_smoothsplash"></script>
-  <script src="/js/app.js?v=20261003_smoothsplash"></script>
-  <script src="/js/search-engine.js?v=20261003_smoothsplash"></script>
+  <script src="/logo_data.js?v=20261019_fs8"></script>
+  <script src="/js/i18n.js?v=20261019_fs8"></script>
+  <script src="/js/math-utils.js?v=20261019_fs8"></script>
+  <script src="/js/app.js?v=20261019_fs8"></script>
+  <script src="/js/search-engine.js?v=20261019_fs8"></script>
 
 </body>
 

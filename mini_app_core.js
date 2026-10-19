@@ -24,6 +24,11 @@ const MiniApp = {
           this.tg.disableVerticalSwipes();
         }
 
+        // Telegram 8.0+ Fullscreen rejimini yoqish
+        if (typeof this.tg?.requestFullscreen === 'function') {
+          try { this.tg.requestFullscreen(); } catch (err) {}
+        }
+
         // Tasodifan yopilib ketishining oldini olish (agar kerak bo'lsa)
         if (options.confirmClose && this.tg.enableClosingConfirmation) {
           this.tg.enableClosingConfirmation();

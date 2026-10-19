@@ -49,6 +49,12 @@
 
   --nav-h: 72px;
   --header-h: 60px;
+
+  /* Telegram 8.0 Fullscreen Safe Areas */
+  --tg-safe-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px));
+  --tg-safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px));
+  --tg-safe-left: max(env(safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px), var(--tg-content-safe-area-inset-left, 0px));
+  --tg-safe-right: max(env(safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px), var(--tg-content-safe-area-inset-right, 0px));
 }
 
 /* ── LIGHT MODE (MACOS 27 ICY LIQUID GLASS) ───────────────── */
@@ -591,6 +597,10 @@ body {
   height: 100vh;
   height: 100dvh;
   position: relative;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  overflow: hidden;
 }
 
 #app.visible { display: flex; }
@@ -598,12 +608,15 @@ body {
 
 /* ── MACOS 27 LIQUID GLASS HEADER ─────────────────── */
 .app-header {
-  height: var(--header-h);
-  min-height: var(--header-h);
+  height: calc(var(--header-h) + var(--tg-safe-top));
+  min-height: calc(var(--header-h) + var(--tg-safe-top));
+  padding-top: var(--tg-safe-top);
+  padding-left: max(18px, var(--tg-safe-left));
+  padding-right: max(18px, var(--tg-safe-right));
+  padding-bottom: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 18px;
   background: rgba(10, 14, 26, 0.72);
   backdrop-filter: var(--liquid-glass-blur);
   -webkit-backdrop-filter: var(--liquid-glass-blur);
@@ -821,7 +834,7 @@ body {
 /* ── ULTRA LIQUID GLASS FLOATING BOTTOM DOCK (AYNAN 4-RASMDAGIDEK) ── */
 .bottom-dock-wrapper {
   position: fixed;
-  bottom: calc(14px + env(safe-area-inset-bottom, 10px));
+  bottom: calc(14px + var(--tg-safe-bottom));
   left: 12px;
   right: 12px;
   max-width: 440px;
@@ -5148,6 +5161,61 @@ body {
 
 .btn-switch-to-admin:active {
   transform: scale(0.98);
+}
+
+/* ===============================================================
+   DESKTOP / MACBOOK MOSLASHUV: KATTA BO'LIB OCHILIB KETISHNI TO'XTATISH
+   Smartfon formati: max-width 480px markazlashtirilgan, premium frame
+   =============================================================== */
+@media (min-width: 600px) {
+  html {
+    background-color: #060913;
+  }
+  body {
+    background: radial-gradient(circle at 50% 15%, rgba(37, 99, 235, 0.12), transparent 70%), #070a14 !important;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow-y: auto;
+  }
+  #app {
+    max-width: 480px !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    height: 100vh;
+    height: 100dvh;
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
+    border-right: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 0 60px rgba(0, 0, 0, 0.55), 0 0 120px rgba(37, 99, 235, 0.08);
+    position: relative;
+    background: var(--bg);
+  }
+  [data-theme="light"] body {
+    background: radial-gradient(circle at 50% 15%, rgba(59, 130, 246, 0.10), transparent 70%), #edf1f8 !important;
+  }
+  [data-theme="light"] #app {
+    border-left: 1px solid rgba(0, 0, 0, 0.08);
+    border-right: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 0 50px rgba(15, 23, 42, 0.15);
+  }
+  .bottom-dock-wrapper {
+    left: 50% !important;
+    right: auto !important;
+    transform: translateX(-50%) !important;
+    width: 100% !important;
+    max-width: 460px !important;
+  }
+  .modal-box {
+    max-width: 460px !important;
+    margin: 0 auto 20px auto !important;
+    border-radius: 28px !important;
+    border: 1px solid var(--border) !important;
+  }
+  .admin-simulation-banner {
+    max-width: 480px !important;
+    margin: 0 auto;
+  }
 }
 
 

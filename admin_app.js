@@ -12,9 +12,25 @@ const AdminApp = {
       try {
         tg.ready();
         tg.expand();
-        if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+        if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+        if (typeof tg.requestFullscreen === 'function') {
+          try { tg.requestFullscreen(); } catch (e) {}
+        }
       } catch(e) {}
     }
+    const tryEnsureFs = () => {
+      if (window.Telegram && window.Telegram.WebApp) {
+        const t = window.Telegram.WebApp;
+        try {
+          if (typeof t.expand === 'function') t.expand();
+          if (typeof t.disableVerticalSwipes === 'function') t.disableVerticalSwipes();
+          if (typeof t.requestFullscreen === 'function') t.requestFullscreen();
+        } catch (e) {}
+      }
+    };
+    ['click', 'touchstart', 'pointerdown'].forEach(evt => {
+      window.addEventListener(evt, tryEnsureFs, { passive: true });
+    });
     const params = new URLSearchParams(window.location.search);
     const queryTgId = params.get('tg_id');
     const tgU = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
