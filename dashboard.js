@@ -1406,10 +1406,18 @@ function renderTestKeysGrid(t) {
   }
 
   const keysList = [];
-  const totalQ = t.total_questions || 55;
-  if (totalQ === 55 || totalQ >= 45) {
+  const totalQ = t.total_questions || 51;
+  if (totalQ >= 40 || totalQ === 51 || totalQ === 55) {
     for (let i = 1; i <= 35; i++) keysList.push(String(i));
-    for (let i = 36; i <= 45; i++) {
+    for (let i = 36; i <= 39; i++) {
+      if (`${i}a` in keysObj) {
+        keysList.push(`${i}a`);
+        keysList.push(`${i}b`);
+      } else {
+        keysList.push(String(i));
+      }
+    }
+    for (let i = 40; i <= 45; i++) {
       keysList.push(`${i}a`);
       keysList.push(`${i}b`);
     }
@@ -1622,10 +1630,18 @@ function renderSubmissionAnswersGrid(s) {
   const details = s.details || {};
   const userAnswers = s.answers || {};
 
-  // Build list of keys: 1..35, 36a..45b
+  // Build list of keys: 1..35, 36..39, 40a..45b
   const keys = [];
   for (let i = 1; i <= 35; i++) keys.push(String(i));
-  for (let i = 36; i <= 45; i++) {
+  for (let i = 36; i <= 39; i++) {
+    if (`${i}a` in details || `${i}a` in userAnswers) {
+      keys.push(`${i}a`);
+      keys.push(`${i}b`);
+    } else {
+      keys.push(String(i));
+    }
+  }
+  for (let i = 40; i <= 45; i++) {
     keys.push(`${i}a`);
     keys.push(`${i}b`);
   }

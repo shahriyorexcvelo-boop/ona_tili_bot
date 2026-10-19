@@ -59,6 +59,33 @@
       var metaTheme = document.querySelector('meta[name="theme-color"]');
       if (metaTheme) metaTheme.setAttribute('content', bg);
 
+      function syncSafeArea() {
+        if (window.Telegram && window.Telegram.WebApp) {
+          var tg = window.Telegram.WebApp;
+          var topInset = 0;
+          var botInset = 0;
+          if (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.top === 'number') {
+            topInset = Math.max(topInset, tg.contentSafeAreaInset.top);
+          }
+          if (tg.safeAreaInset && typeof tg.safeAreaInset.top === 'number') {
+            topInset = Math.max(topInset, tg.safeAreaInset.top + 50);
+          }
+          if (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.bottom === 'number') {
+            botInset = Math.max(botInset, tg.contentSafeAreaInset.bottom);
+          }
+          var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || tg.platform === 'ios' || tg.platform === 'android';
+          if (isMobile && topInset < 88) topInset = 92;
+          if (topInset > 0) {
+            document.documentElement.style.setProperty('--tg-content-safe-area-inset-top', topInset + 'px');
+            document.documentElement.style.setProperty('--tg-safe-top', topInset + 'px');
+          }
+          if (botInset > 0) {
+            document.documentElement.style.setProperty('--tg-content-safe-area-inset-bottom', botInset + 'px');
+            document.documentElement.style.setProperty('--tg-safe-bottom', botInset + 'px');
+          }
+        }
+      }
+
       function activateTelegramFullscreen() {
         if (window.Telegram && window.Telegram.WebApp) {
           var tg = window.Telegram.WebApp;
@@ -70,14 +97,22 @@
             if (tg.setHeaderColor) tg.setHeaderColor(bg);
             if (tg.setBackgroundColor) tg.setBackgroundColor(bg);
             if (tg.setBottomBarColor) tg.setBottomBarColor(bg);
+            syncSafeArea();
+            if (typeof tg.onEvent === 'function') {
+              tg.onEvent('contentSafeAreaChanged', syncSafeArea);
+              tg.onEvent('safeAreaChanged', syncSafeArea);
+              tg.onEvent('fullscreenChanged', syncSafeArea);
+            }
           } catch (e) {}
         }
       }
 
+      syncSafeArea();
       activateTelegramFullscreen();
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', activateTelegramFullscreen);
       }
+      window.addEventListener('resize', syncSafeArea);
       ['click', 'touchstart', 'pointerdown'].forEach(function (evt) {
         window.addEventListener(evt, activateTelegramFullscreen, { passive: true });
       });

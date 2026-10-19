@@ -180,7 +180,15 @@ const AdminApp = {
               this.answers[String(q)].ans = ansVal;
             }
           }
-          for (let q = 36; q <= 45; q++) {
+          for (let q = 36; q <= 39; q++) {
+            const k = String(q);
+            const val = t.answers[k];
+            const ansVal = (typeof val === 'object' && val !== null) ? (val.ans || '') : String(val || '');
+            if (this.answers[k]) {
+              this.answers[k].ans = ansVal;
+            }
+          }
+          for (let q = 40; q <= 45; q++) {
             for (let sub of ['a', 'b']) {
               const k = `${q}${sub}`;
               const val = t.answers[k];
@@ -345,8 +353,12 @@ const AdminApp = {
     for (let q = 33; q <= 35; q++) {
       this.answers[String(q)] = { ans: '' };
     }
-    // 36a-45b (ochiq yozma javoblar)
-    for (let q = 36; q <= 45; q++) {
+    // 36-39 (1 ta variantli yopiq savollar)
+    for (let q = 36; q <= 39; q++) {
+      this.answers[String(q)] = { ans: '' };
+    }
+    // 40-45 (2 qismli yopiq savollar: a va b)
+    for (let q = 40; q <= 45; q++) {
       this.answers[`${q}a`] = { ans: '' };
       this.answers[`${q}b`] = { ans: '' };
     }
@@ -356,12 +368,13 @@ const AdminApp = {
     const part1 = document.getElementById('admin-part-1');
     const part2 = document.getElementById('admin-part-2');
     const part3 = document.getElementById('admin-part-3');
+    const part4 = document.getElementById('admin-part-4');
 
     // 1. 1-32 savollar (A, B, C, D)
     if (part1) {
       let html = '';
       for (let q = 1; q <= 32; q++) {
-        const curAns = this.answers[String(q)].ans;
+        const curAns = this.answers[String(q)] ? this.answers[String(q)].ans : '';
         html += `
           <div class="q-admin-row">
             <span class="q-admin-num">${q}.</span>
@@ -382,7 +395,7 @@ const AdminApp = {
     if (part2) {
       let html = '';
       for (let q = 33; q <= 35; q++) {
-        const curAns = this.answers[String(q)].ans;
+        const curAns = this.answers[String(q)] ? this.answers[String(q)].ans : '';
         html += `
           <div class="q-admin-row" style="flex-direction: column; align-items: stretch; gap: 8px; margin-bottom: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -401,38 +414,70 @@ const AdminApp = {
       part2.innerHTML = html;
     }
 
-    // 3. 36-45 (ochiq yozma javoblar)
+    // 3. 36-39 (1 ta variantli yopiq savollar)
     if (part3) {
       let html = '';
-      for (let q = 36; q <= 45; q++) {
-        const itemA = this.answers[`${q}a`];
-        const itemB = this.answers[`${q}b`];
+      for (let q = 36; q <= 39; q++) {
+        const item = this.answers[String(q)] || { ans: '' };
+        const val = (item.ans || '').replace(/"/g, '&quot;');
         html += `
-          <div class="open-admin-box">
-            <span style="font-size: 13px; font-weight: 800;">${q}-savol (Ochiq yozma)</span>
-            
-            <!-- a -->
-            <div class="open-admin-sub-row">
-              <span style="font-size: 12px; font-weight: 800; color: var(--primary); min-width: 28px;">${q}a:</span>
-              <div class="savol-input-box" id="box-${q}a" onclick="MathKeyboard.openFor('${q}a')" style="height: 38px; flex: 1; padding: 0 8px; cursor: pointer;">
-                <input type="text" class="savol-input" id="input-${q}a" readonly inputmode="none" placeholder="Kalitni klaviaturadan kiriting" value="${itemA.ans}" onclick="MathKeyboard.openFor('${q}a')" style="font-size: 13px; cursor: pointer;">
-              </div>
-              <button type="button" class="btn-kb-icon" style="width: 36px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px;" onclick="MathKeyboard.openFor('${q}a')" title="Matematik klaviatura"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="8" x2="6.01" y2="8"/><line x1="10" y1="8" x2="10.01" y2="8"/><line x1="14" y1="8" x2="14.01" y2="8"/><line x1="18" y1="8" x2="18.01" y2="8"/><line x1="6" y1="12" x2="6.01" y2="12"/><line x1="10" y1="12" x2="10.01" y2="12"/><line x1="14" y1="12" x2="14.01" y2="12"/><line x1="18" y1="12" x2="18.01" y2="12"/><line x1="7" y1="16" x2="17" y2="16"/></svg></button>
+          <div class="open-admin-box" style="margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+              <span style="font-size: 13px; font-weight: 800; color: var(--text-main);">${q}-savol (1 ta variantli kalit)</span>
             </div>
-
-            <!-- b -->
-            <div class="open-admin-sub-row">
-              <span style="font-size: 12px; font-weight: 800; color: var(--primary); min-width: 28px;">${q}b:</span>
-              <div class="savol-input-box" id="box-${q}b" onclick="MathKeyboard.openFor('${q}b')" style="height: 38px; flex: 1; padding: 0 8px; cursor: pointer;">
-                <input type="text" class="savol-input" id="input-${q}b" readonly inputmode="none" placeholder="Kalitni klaviaturadan kiriting" value="${itemB.ans}" onclick="MathKeyboard.openFor('${q}b')" style="font-size: 13px; cursor: pointer;">
-              </div>
-              <button type="button" class="btn-kb-icon" style="width: 36px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px;" onclick="MathKeyboard.openFor('${q}b')" title="Matematik klaviatura"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="8" x2="6.01" y2="8"/><line x1="10" y1="8" x2="10.01" y2="8"/><line x1="14" y1="8" x2="14.01" y2="8"/><line x1="18" y1="8" x2="18.01" y2="8"/><line x1="6" y1="12" x2="6.01" y2="12"/><line x1="10" y1="12" x2="10.01" y2="12"/><line x1="14" y1="12" x2="14.01" y2="12"/><line x1="18" y1="12" x2="18.01" y2="12"/><line x1="7" y1="16" x2="17" y2="16"/></svg></button>
+            <div class="savol-input-box ${item.ans ? 'filled' : ''}" id="box-${q}" style="height: 42px; width: 100%; padding: 0 12px;">
+              <input type="text" class="savol-input open-native-input" id="input-${q}" placeholder="${q}-savol to'g'ri kalitini kiriting..." value="${val}" oninput="AdminApp.handleOpenInput('${q}', this.value)" autocomplete="off" autocapitalize="none" style="font-size: 13.5px; width: 100%; border: none; background: transparent; outline: none; color: var(--text-main);">
             </div>
           </div>
         `;
       }
       part3.innerHTML = html;
     }
+
+    // 4. 40-45 (2 qismli yopiq savollar: a va b)
+    if (part4) {
+      let html = '';
+      for (let q = 40; q <= 45; q++) {
+        const itemA = this.answers[`${q}a`] || { ans: '' };
+        const itemB = this.answers[`${q}b`] || { ans: '' };
+        const valA = (itemA.ans || '').replace(/"/g, '&quot;');
+        const valB = (itemB.ans || '').replace(/"/g, '&quot;');
+        html += `
+          <div class="open-admin-box" style="margin-bottom: 12px;">
+            <div style="font-size: 13px; font-weight: 800; color: var(--text-main); margin-bottom: 8px;">${q}-savol (2 qismli kalit: a va b)</div>
+            
+            <!-- a -->
+            <div class="open-admin-sub-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+              <span style="font-size: 12.5px; font-weight: 800; color: #2563EB; min-width: 28px;">${q}a:</span>
+              <div class="savol-input-box ${itemA.ans ? 'filled' : ''}" id="box-${q}a" style="height: 40px; flex: 1; padding: 0 10px;">
+                <input type="text" class="savol-input open-native-input" id="input-${q}a" placeholder="${q}a javobini kiriting..." value="${valA}" oninput="AdminApp.handleOpenInput('${q}a', this.value)" autocomplete="off" autocapitalize="none" style="font-size: 13px; width: 100%; border: none; background: transparent; outline: none; color: var(--text-main);">
+              </div>
+            </div>
+
+            <!-- b -->
+            <div class="open-admin-sub-row" style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 12.5px; font-weight: 800; color: #2563EB; min-width: 28px;">${q}b:</span>
+              <div class="savol-input-box ${itemB.ans ? 'filled' : ''}" id="box-${q}b" style="height: 40px; flex: 1; padding: 0 10px;">
+                <input type="text" class="savol-input open-native-input" id="input-${q}b" placeholder="${q}b javobini kiriting..." value="${valB}" oninput="AdminApp.handleOpenInput('${q}b', this.value)" autocomplete="off" autocapitalize="none" style="font-size: 13px; width: 100%; border: none; background: transparent; outline: none; color: var(--text-main);">
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      part4.innerHTML = html;
+    }
+  },
+
+  handleOpenInput(key, val) {
+    if (!this.answers[key]) {
+      this.answers[key] = { ans: '' };
+    }
+    this.answers[key].ans = val;
+    const box = document.getElementById(`box-${key}`);
+    if (box) {
+      box.classList.toggle('filled', (val || '').trim().length > 0);
+    }
+    this.updateUnfilledStats();
   },
 
   selectChoice(qNum, option) {
@@ -478,8 +523,6 @@ const AdminApp = {
 
   updateUnfilledStats() {
     let closedUnfilled = 0;
-    let openUnfilled = 0;
-
     let sec1Unfilled = 0;
     for (let q = 1; q <= 32; q++) {
       const item = this.answers[String(q)];
@@ -498,17 +541,27 @@ const AdminApp = {
       }
     }
 
-    for (let q = 36; q <= 45; q++) {
+    let sec3Unfilled = 0;
+    for (let q = 36; q <= 39; q++) {
+      const item = this.answers[String(q)];
+      if (!item || !item.ans || !String(item.ans).trim()) {
+        sec3Unfilled++;
+      }
+    }
+
+    let sec4Unfilled = 0;
+    for (let q = 40; q <= 45; q++) {
       for (let sub of ['a', 'b']) {
         const item = this.answers[`${q}${sub}`];
         if (!item || !item.ans || !String(item.ans).trim()) {
-          openUnfilled++;
+          sec4Unfilled++;
         }
       }
     }
 
+    const openUnfilled = sec3Unfilled + sec4Unfilled;
     const totalUnfilled = closedUnfilled + openUnfilled;
-    const totalQuestions = 55;
+    const totalQuestions = 51; // 35 yopiq + 4 yakka ochiq + 12 juft ochiq = 51
     const totalFilled = totalQuestions - totalUnfilled;
 
     // 1. Top status bar
@@ -520,12 +573,12 @@ const AdminApp = {
 
     if (totalBadge) {
       if (totalUnfilled === 0) {
-        totalBadge.textContent = 'Barchasi to\'ldirildi (55/55)';
+        totalBadge.textContent = 'Barchasi to\'ldirildi (51/51)';
         totalBadge.style.background = '#10B981';
         if (statusIcon) statusIcon.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
         if (statusTitle) statusTitle.textContent = 'Barcha savollar tayyor:';
       } else {
-        totalBadge.textContent = `${totalUnfilled} ta belgilanmagan (${totalFilled}/55)`;
+        totalBadge.textContent = `${totalUnfilled} ta belgilanmagan (${totalFilled}/51)`;
         totalBadge.style.background = '#EF4444';
         if (statusIcon) statusIcon.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
         if (statusTitle) statusTitle.textContent = 'Javoblar to\'ldirilishi:';
@@ -544,10 +597,10 @@ const AdminApp = {
 
     if (openCountEl) {
       if (openUnfilled === 0) {
-        openCountEl.textContent = 'Barchasi kiritildi (20/20)';
+        openCountEl.textContent = 'Barchasi kiritildi (16/16)';
         openCountEl.style.color = '#10B981';
       } else {
-        openCountEl.textContent = `${openUnfilled} ta kiritilmagan (${20 - openUnfilled}/20)`;
+        openCountEl.textContent = `${openUnfilled} ta kiritilmagan (${16 - openUnfilled}/16)`;
         openCountEl.style.color = '#EF4444';
       }
     }
@@ -577,12 +630,23 @@ const AdminApp = {
 
     const sec3El = document.getElementById('cnt-sec-3');
     if (sec3El) {
-      if (openUnfilled === 0) {
-        sec3El.textContent = 'Barchasi kiritildi (20/20)';
+      if (sec3Unfilled === 0) {
+        sec3El.textContent = 'Barchasi kiritildi (4/4)';
         sec3El.style.color = '#10B981';
       } else {
-        sec3El.textContent = `${openUnfilled} ta kiritilmagan`;
+        sec3El.textContent = `${sec3Unfilled} ta kiritilmagan`;
         sec3El.style.color = '#EF4444';
+      }
+    }
+
+    const sec4El = document.getElementById('cnt-sec-4');
+    if (sec4El) {
+      if (sec4Unfilled === 0) {
+        sec4El.textContent = 'Barchasi kiritildi (12/12)';
+        sec4El.style.color = '#10B981';
+      } else {
+        sec4El.textContent = `${sec4Unfilled} ta kiritilmagan`;
+        sec4El.style.color = '#EF4444';
       }
     }
 
@@ -590,7 +654,7 @@ const AdminApp = {
     const dockUnfilled = document.getElementById('admin-dock-unfilled');
     if (dockUnfilled) {
       if (totalUnfilled === 0) {
-        dockUnfilled.textContent = '55/55 to\'liq belgilandi';
+        dockUnfilled.textContent = '51/51 to\'liq belgilandi';
         dockUnfilled.style.color = '#10B981';
       } else {
         dockUnfilled.textContent = `${totalUnfilled} ta javob qoldi (Yopiq: ${closedUnfilled}, Ochiq: ${openUnfilled})`;
@@ -602,8 +666,8 @@ const AdminApp = {
   },
 
   async saveTest() {
-    const title = (document.getElementById('adm-test-title')?.value || '').trim() || 'Matematika Milliy Sertifikat Testi';
-    const subject = (document.getElementById('adm-test-subject')?.value || '').trim() || 'Matematika';
+    const title = (document.getElementById('adm-test-title')?.value || '').trim() || 'Ona tili Milliy Sertifikat Testi';
+    const subject = (document.getElementById('adm-test-subject')?.value || '').trim() || 'Ona tili';
     let code = (document.getElementById('adm-test-code')?.value || '').trim().toUpperCase();
     const timeLimit = parseInt(document.getElementById('adm-test-time')?.value) || 0;
 
@@ -616,8 +680,18 @@ const AdminApp = {
       if (!code) code = '1';
     }
 
-    // 36a-45b savollarni to'g'ridan-to'g'ri DOM inputlaridan ham tekshirib olish (100% kafolat)
-    for (let q = 36; q <= 45; q++) {
+    // 36-39 va 40-45 savollarni to'g'ridan-to'g'ri DOM inputlaridan ham tekshirib olish (100% kafolat)
+    for (let q = 36; q <= 39; q++) {
+      const key = String(q);
+      const input = document.getElementById(`input-${key}`);
+      if (!this.answers[key]) {
+        this.answers[key] = { ans: '' };
+      }
+      if (input && input.value !== undefined) {
+        this.answers[key].ans = input.value.trim();
+      }
+    }
+    for (let q = 40; q <= 45; q++) {
       for (let sub of ['a', 'b']) {
         const key = `${q}${sub}`;
         const input = document.getElementById(`input-${key}`);
@@ -633,7 +707,7 @@ const AdminApp = {
     const { totalUnfilled, closedUnfilled, openUnfilled } = this.updateUnfilledStats();
 
     if (totalUnfilled > 0) {
-      const confirmMsg = `DIQQAT! Jami 55 ta savoldan ${totalUnfilled} tasiga javob belgilanmagan:\n\n` +
+      const confirmMsg = `DIQQAT! Jami 51 ta savoldan ${totalUnfilled} tasiga javob belgilanmagan:\n\n` +
         `• Yopiq savollarda (1-35): ${closedUnfilled} ta belgilanmagan\n` +
         `• Ochiq savollarda (36-45): ${openUnfilled} ta kiritilmagan\n\n` +
         `Iltimos, avval barcha savollarga to'g'ri javobni belgilang!`;

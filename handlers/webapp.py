@@ -586,31 +586,49 @@ def _sync_extract_keys_gemini(image_bytes: bytes, mime_type: str = "image/jpeg")
         raise ValueError("GEMINI_API_KEY o'rnatilmagan")
 
     prompt = (
-        "Ushbu rasmda test javoblari/kalitlari varaqasi yoki jadvali berilgan.\n"
+        "Ushbu rasmda Ona tili fanidan Milliy sertifikat test javoblari/kalitlari jadvali berilgan (masalan, Smart books Milliy sertifikat javoblar jadvali).\n"
         "Iltimos, rasmdagi har bir savol javobini diqqat bilan o'qib, faqat to'g'ri JSON formatida qaytar.\n\n"
-        "Test strukturasi (55 ta element):\n"
-        "- 1 dan 32 gacha: 4 variantli yopiq savollar (A, B, C, D)\n"
-        "- 33, 34, 35: 6 variantli yopiq savollar (A, B, C, D, E, F)\n"
-        "- 36a dan 45b gacha: ochiq matematik javoblar (masalan: 25, -4, 25/6, √29, 8√58, ∛8, π/4, 120 + 36π va h.k.)\n\n"
-        "MUHIM VA QAT'IY TALAB:\n"
-        "Matematik ifodalarda HECH QACHON LaTeX (\\frac, \\sqrt, \\pi, \\cdot) ishlatma! Faqat oddiy Unicode belgilaridan foydalan:\n"
-        "- Kasrlar uchun: a/b (masalan, 25/6, 3π/2)\n"
-        "- Ildizlar uchun: √x (masalan, √29, 8√58, ∛8)\n"
-        "- Pi soni uchun: π (masalan, π/4, 120 + 36π)\n"
-        "- Bo'shliqlar va ishoralarni (+, -, *, /) aniq saqla.\n\n"
+        "TEST TUZILISHI VA QAT'IY QOIDALAR:\n"
+        "1. 1 dan 35 gacha: Variantli savollar. Kalitlar: '1' dan '35' gacha. Qiymati faqat bitta katta harf (A, B, C, D, E, F).\n"
+        "2. 36, 37, 38, 39: BITTALIK (1 ta variantli) yopiq/ochiq yozma savollar! DIQQAT: Ularda 'a' va 'b' bandlari BO'LMAYDI. Kalitlar aniq '36', '37', '38', '39' bo'lishi shart!\n"
+        "   - Masalan: '36': 'tiniq'\n"
+        "   - '37': ': -' (tinish belgilari)\n"
+        "   - '38': 'tengdoshlariga (dan)'\n"
+        "   - '39': \"o'shanda muharrir edi\"\n"
+        "3. 40 va undan keyingilar (40, 41, 42, 43, 44...): 2 QISMLI yozma savollar (har bir savolning a va b bandlari bor)!\n"
+        "   Kalitlar: '40a', '40b', '41a', '41b', '42a', '42b', '43a', '43b', '44a', '44b', ...\n"
+        "   - Masalan:\n"
+        "     '40a': 'kesim', '40b': 'kechishini'\n"
+        "     '41a': 'chunki', '41b': 'sabab-oqibat'\n"
+        "     '42a': \"ta'did\", '42b': \"yor og'zi/labi\"\n"
+        "     '43a': 'sh', '43b': 'mutlaq'\n"
+        "     '44a': 'qanoat', '44b': 'isrof'\n\n"
+        "MUHIM KO'RSATMALAR:\n"
+        "- Jadvaldagi o'qituvchi texnik izohlarini (masalan, '(28 talik katakka sig\\'dirish kerak)', '(: xato)', '(- to\\'g\\'ri)') kalit matnidan tozalab tashla yoki asosiy kalitni qoldir.\n"
+        "- Tutuq belgilarini (apostroflarni) to'g'ri saqla (masalan: o'shanda, ta'did, og'zi).\n"
+        "- Defisli so'zlarni defisi bilan saqla (masalan: sabab-oqibat).\n"
+        "- Alternativ variantlarni slesh bilan saqla (masalan: yor og'zi/labi).\n\n"
         "Qaytadigan javob aynan toza JSON obyekti bo'lsin:\n"
         "{\n"
-        '  "1": "A",\n'
+        '  "1": "B",\n'
         '  "2": "B",\n'
-        '  "33": "C",\n'
-        '  "36a": "25/6",\n'
-        '  "36b": "√29",\n'
-        '  "37a": "8√58",\n'
-        '  "37b": "π/4",\n'
-        '  ...\n'
-        '  "45b": "5"\n'
+        '  "35": "D",\n'
+        '  "36": "tiniq",\n'
+        '  "37": ": -",\n'
+        '  "38": "tengdoshlariga (dan)",\n'
+        '  "39": "o\'shanda muharrir edi",\n'
+        '  "40a": "kesim",\n'
+        '  "40b": "kechishini",\n'
+        '  "41a": "chunki",\n'
+        '  "41b": "sabab-oqibat",\n'
+        '  "42a": "ta\'did",\n'
+        '  "42b": "yor og\'zi/labi",\n'
+        '  "43a": "sh",\n'
+        '  "43b": "mutlaq",\n'
+        '  "44a": "qanoat",\n'
+        '  "44b": "isrof"\n'
         "}\n\n"
-        "DIQQAT: Faqat toza JSON matnini qaytar, hech qanday qo'shimcha so'z, sharh yoki izoh yozma!"
+        "DIQQAT: Faqat toza JSON matnini qaytar, hech qanday qo'shimcha so'z yoki sharh yozma!"
     )
 
     models_to_try = [
@@ -652,10 +670,18 @@ def _sync_extract_keys_gemini(image_bytes: bytes, mime_type: str = "image/jpeg")
                 for k, v in parsed.items():
                     k_clean = str(k).strip().lower().replace("q", "").replace("-savol", "").replace("savol", "").strip()
                     v_str = str(v).strip()
+                    # Apostroflar va tirelarni me'yorga keltirish
+                    v_str = re.sub(r"[\u2018\u2019\u02BB\u02BC\u00B4`ʼʻ\‘\’\']", "'", v_str)
+                    v_str = re.sub(r"[\u2212\u2013\u2014\u2012\u2015\uFE63\uFF0D\u00ad]", "-", v_str)
                     if k_clean.isdigit() and int(k_clean) <= 35:
                         v_str = v_str.upper()
                     else:
-                        v_str = sanitize_math_expression(v_str)
+                        # Ochiq savollar uchun izohlarni tozalash
+                        if k_clean == "37" and (": -" in v_str or ":-" in v_str):
+                            v_str = ": -"
+                        elif "katakka" in v_str or "sig'dirish" in v_str:
+                            v_str = re.sub(r"\s*\([^)]*katak[^)]*\)", "", v_str).strip()
+                        v_str = re.sub(r"\s+", " ", v_str).strip()
                     cleaned[k_clean] = v_str
                 if cleaned:
                     return cleaned

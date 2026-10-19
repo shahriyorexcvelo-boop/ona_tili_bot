@@ -1907,13 +1907,95 @@ def count_binary_plus_minus(s: str) -> int:
     return cnt
 
 
+def normalize_uzbek_text(s: Any) -> str:
+    """Ona tili matnlarini me'yorga keltirish (tutuq belgilari, defislar, probellar, registri)."""
+    if s is None:
+        return ""
+    text = str(s).strip()
+    # 1. Barcha apostrof va tutuq belgilarini standart ' belgisiga keltirish
+    text = re.sub(r"[\u2018\u2019\u02BB\u02BC\u00B4`ʼʻ\‘\’\']", "'", text)
+    # 2. Barcha defis va tirelarni '-' belgisiga keltirish
+    text = re.sub(r"[\u2212\u2013\u2014\u2012\u2015\uFE63\uFF0D\u00ad]", "-", text)
+    # 3. Qo'shtirnoqlarni tozalash
+    text = re.sub(r'["“”«»]', '"', text)
+    # 4. So'ngidagi keraksiz nuqtani tozalash (masalan: "tiniq." -> "tiniq")
+    text = text.strip()
+    if text.endswith(".") and not text.endswith("..") and not re.search(r"\d\.\d$", text):
+        text = text[:-1].strip()
+    # 5. Ketma-ket kelgan bo'shliqlarni bittaga keltirish
+    text = re.sub(r"\s+", " ", text)
+    return text.lower().strip()
+
+
+def extract_uzbek_alternatives(c_str: str) -> List[str]:
+    """
+    Ona tili kalitlaridagi alternativ variantlar va o'qituvchi izohlarini ajratish:
+    1. Izohlarni tozalash: "(28 talik katakka sig'dirish kerak)", "(: xato) (- to'g'ri)"
+    2. Qo'shimcha variantlar: "tengdoshlariga (dan)" -> ["tengdoshlariga", "tengdoshlaridan"]
+    3. Sleshli variantlar: "yor og'zi/labi" -> ["yor og'zi", "yor labi", "yor og'zi/labi", "og'zi", "labi"]
+    4. Belgilar: ": -" -> [": -", ":-", "-", ":"]
+    5. Bo'luvchilar: ";", "|", "yoki", "or"
+    """
+    raw = str(c_str).strip()
+    norm = normalize_uzbek_text(raw)
+    results = set()
+    results.add(norm)
+
+    # 1. Agar tinish belgilari bo'lsa (masalan: ": -")
+    if ": -" in norm or ":-" in norm:
+        results.update([": -", ":-", "-", ":", "- :"])
+
+    # 2. O'qituvchi izohlarini tozalash: masalan "(28 talik katakka sig'dirish kerak)", "(: xato)", "(- to'g'ri)"
+    cleaned = re.sub(r"\s*\([^)]*(?:katak|sig'dir|kerak|xato|to'g'ri|izoh)[^)]*\)", "", norm).strip()
+    if cleaned and cleaned != norm:
+        results.add(cleaned)
+
+    # 3. Qo'shimchalar varianti: masalan "tengdoshlariga (dan)" yoki "so'zga(dan)"
+    m_suf = re.search(r"(\b\w+)(?:ga|ka|qa|da|ni|ning)?\s*\((dan|ga|ka|qa|da|ni|ning|lar|i|si)\)", norm)
+    if m_suf:
+        base_word = m_suf.group(1)
+        suffix = m_suf.group(2)
+        without_paren = re.sub(r"\s*\([^)]*\)", "", norm).strip()
+        results.add(without_paren)
+        if without_paren.endswith("ga") or without_paren.endswith("da"):
+            results.add(without_paren[:-2] + suffix)
+        elif without_paren.endswith("ka") or without_paren.endswith("qa"):
+            results.add(without_paren[:-2] + suffix)
+        else:
+            results.add(base_word + suffix)
+
+    # 4. Sleshli variantlar: masalan "yor og'zi/labi" yoki "katta/kichik"
+    if "/" in norm:
+        parts = [p.strip() for p in norm.split("/") if p.strip()]
+        if len(parts) >= 2:
+            p1, p2 = parts[0], parts[1]
+            results.add(p1)
+            results.add(p2)
+            words1 = p1.split()
+            if len(words1) > 1:
+                results.add(" ".join(words1[:-1]) + " " + p2)
+            for p in parts:
+                for w in p.split():
+                    if len(w) > 2:
+                        results.add(w)
+
+    # 5. Bo'luvchilar (;, |, yoki, or)
+    for sep in [";", "|", " yoki ", " or "]:
+        if sep in norm:
+            for piece in norm.split(sep):
+                if piece.strip():
+                    results.add(piece.strip())
+
+    return [r for r in results if r]
+
+
 def check_answer_match(user_ans: Any, correct_ans: Any) -> Tuple[bool, float, str]:
     """
     Foydalanuvchi javobini to'g'ri kalitga solishtirish va moslik koeffitsientini hisoblash:
     Returns:
         (is_matched, ratio, status)
         - is_matched: bool (True agar qabul qilinsa)
-        - ratio: float (1.0 = 100% to'liq to'g'ri, 0.3 = 30% oxirgacha hisoblanmagan, 0.0 = noto'g'ri)
+        - ratio: float (1.0 = 100% to'liq to'g'ri, 0.3 = 30% qisman, 0.0 = noto'g'ri)
         - status: str ("correct", "partial", "incorrect")
     """
     if user_ans is None or correct_ans is None:
@@ -1923,7 +2005,33 @@ def check_answer_match(user_ans: Any, correct_ans: Any) -> Tuple[bool, float, st
     if not u_str or not c_str:
         return (False, 0.0, "incorrect")
 
-    # Kalitda bir nechta to'g'ri variant berilgan bo'lsa (masalan: "2; 5" yoki "-3π/2 | 3π/2")
+    # 1. Ona tili matnli solishtirish (tutuq belgilari, defislar, tinish belgilari)
+    u_uz = normalize_uzbek_text(u_str)
+    c_uz = normalize_uzbek_text(c_str)
+
+    # 1a. Aniq matnli moslik
+    if u_uz == c_uz:
+        return (True, 1.0, "correct")
+
+    # 1b. Probellarsiz moslik (masalan: "sabab - oqibat" vs "sabab-oqibat", ": -" vs ":-")
+    if u_uz.replace(" ", "") == c_uz.replace(" ", ""):
+        return (True, 1.0, "correct")
+
+    # 1c. Ona tili alternativ variantlari (qo'shimchalar, sleshlar, izohlar)
+    c_alts = extract_uzbek_alternatives(c_str)
+    for alt in c_alts:
+        if u_uz == alt or u_uz.replace(" ", "") == alt.replace(" ", ""):
+            return (True, 1.0, "correct")
+
+    # 1d. O'quvchi javobida ham ajratuvchi bo'lsa (masalan: "yor og'zi yoki yor labi")
+    for sep in [";", "/", "|", " yoki ", " or "]:
+        if sep in u_uz:
+            for u_part in u_uz.split(sep):
+                u_p = u_part.strip()
+                if u_p in c_alts or any(u_p.replace(" ", "") == a.replace(" ", "") for a in c_alts):
+                    return (True, 1.0, "correct")
+
+    # 2. Kalitda bir nechta to'g'ri variant berilgan bo'lsa
     if any(sep in c_str for sep in [";", "|", "yoki", "or"]):
         parts = [p.strip() for p in re.split(r";|\||\byoki\b|\bor\b", c_str) if p.strip()]
         best_res = (False, 0.0, "incorrect")
@@ -1933,39 +2041,33 @@ def check_answer_match(user_ans: Any, correct_ans: Any) -> Tuple[bool, float, st
                 best_res = res
             if best_res[1] >= 1.0:
                 return best_res
-        return best_res
+        if best_res[0]:
+            return best_res
 
+    # 3. Matematik formulalar / ifodalar (agar mavjud bo'lsa)
     u = normalize_answer(u_str)
     c = normalize_answer(c_str)
 
-    # 1. Aniq matnli moslik -> 100% to'g'ri
-    if u == c:
-        return (True, 1.0, "correct")
-
-    # 2. Yulduzcha ko'paytirish belgisi farqi: 8*√58 == 8√58, 36*π == 36π -> 100% to'g'ri
-    if u.replace("*", "") == c.replace("*", ""):
-        return (True, 1.0, "correct")
-
-    # 3. Yig'indi hadlarining o'rin almashuvi: 120 + 36π == 36π + 120, 6 + 2√2 == 2√2 + 6 -> 100% to'g'ri
-    if "+" in u and "+" in c:
-        u_terms = sorted([t.strip().replace("*", "") for t in u.split("+") if t.strip()])
-        c_terms = sorted([t.strip().replace("*", "") for t in c.split("+") if t.strip()])
-        if u_terms == c_terms:
+    if u and c:
+        if u == c:
             return (True, 1.0, "correct")
-
-    # 4. Matematik ifoda sonli qiymatlarini solishtirish
-    num_u = eval_numeric_val(u)
-    num_c = eval_numeric_val(c)
-    if num_u is not None and num_c is not None:
-        # Ishoralari qat'iy bir xil bo'lishi shart (-3π/2 musbat 3π/2 ga teng bo'lolmaydi)
-        if (num_u > 1e-6 and num_c < -1e-6) or (num_u < -1e-6 and num_c > 1e-6):
-            return (False, 0.0, "incorrect")
-        if abs(num_u - num_c) < 1e-4:
-            # Agar foydalanuvchi javobida hisoblanmay qolib ketgan + yoki - bo'lsa (masalan: 133+5/13 vs 1734/13):
-            # User talabi: "oxirgacha qisqartirilmagan... +,- bilan hisoblanib qolib ketgan misollarga 100% ball berilmasin, 30% berilsin"
-            if count_binary_plus_minus(u) > count_binary_plus_minus(c):
-                return (True, 0.3, "partial")
+        if u.replace("*", "") == c.replace("*", ""):
             return (True, 1.0, "correct")
+        if "+" in u and "+" in c:
+            u_terms = sorted([t.strip().replace("*", "") for t in u.split("+") if t.strip()])
+            c_terms = sorted([t.strip().replace("*", "") for t in c.split("+") if t.strip()])
+            if u_terms == c_terms:
+                return (True, 1.0, "correct")
+
+        num_u = eval_numeric_val(u)
+        num_c = eval_numeric_val(c)
+        if num_u is not None and num_c is not None:
+            if (num_u > 1e-6 and num_c < -1e-6) or (num_u < -1e-6 and num_c > 1e-6):
+                return (False, 0.0, "incorrect")
+            if abs(num_u - num_c) < 1e-4:
+                if count_binary_plus_minus(u) > count_binary_plus_minus(c):
+                    return (True, 0.3, "partial")
+                return (True, 1.0, "correct")
 
     return (False, 0.0, "incorrect")
 
@@ -2200,11 +2302,52 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
             "max_score": q_score
         }
 
-    # 36a–45b ochiq savollar (default 1.5 ball)
-    for q in range(36, 46):
+    # 36, 37, 38, 39 savollar (1 ta variantli yopiq/ochiq savollar)
+    for q in range(36, 40):
+        key = str(q)
+        q_raw = correct_answers_raw.get(key, "")
+        if not q_raw and f"{key}a" in correct_answers_raw:
+            q_raw = correct_answers_raw.get(f"{key}a", "")
+        correct_ans, q_score = get_key_and_score(q_raw, default_score=1.5)
+        total_possible_score += q_score
+        user_val = user_answers.get(key, "")
+        if not user_val and f"{key}a" in user_answers:
+            user_val = user_answers.get(f"{key}a", "")
+        is_matched, ratio, match_status = check_answer_match(user_val, correct_ans)
+        if not user_val or not str(user_val).strip():
+            status = "unanswered"
+            unanswered_count += 1
+            item_score = 0.0
+        elif is_matched:
+            if ratio >= 1.0:
+                status = "correct"
+                correct_count += 1
+                item_score = q_score
+                earned_score += q_score
+            else:
+                status = "partial"
+                item_score = round(q_score * 0.3, 2)
+                earned_score += item_score
+        else:
+            status = "incorrect"
+            incorrect_count += 1
+            item_score = 0.0
+
+        details[key] = {
+            "num": f"{key}-savol", "type": "open",
+            "user": user_val, "correct": correct_ans,
+            "status": status,
+            "score": item_score,
+            "max_score": q_score,
+            "ratio": ratio
+        }
+
+    # 40 dan boshlab 2 qismli (a va b) yopiq savollar
+    end_q = 45 if any(f"45{s}" in correct_answers_raw or "45" in correct_answers_raw for s in ["a", "b"]) else 44
+    for q in range(40, end_q + 1):
         for sub in ["a", "b"]:
             key = f"{q}{sub}"
-            q_raw = correct_answers_raw.get(key, "1")
+            q_raw = correct_answers_raw.get(key, "")
             correct_ans, q_score = get_key_and_score(q_raw, default_score=1.5)
             total_possible_score += q_score
             user_val = user_answers.get(key, "")
@@ -2237,11 +2380,12 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
                 "ratio": ratio
             }
 
+    total_questions = len(details)
     earned_score = round(earned_score, 1)
     if correct_count == 0:
         earned_score = 0.0
         grade = "—"
-    elif correct_count == 55:
+    elif correct_count == total_questions:
         earned_score = 100.0
         grade = "A+"
     else:
@@ -2779,11 +2923,52 @@ def update_test_keys(test_id: int, new_answers: Dict[str, Any],
                     "max_score": q_score
                 }
 
-            # 36a–45b ochiq savollar (default 1.5 ball)
-            for q in range(36, 46):
+            # 36, 37, 38, 39 savollar (1 ta variantli yopiq/ochiq savollar)
+            for q in range(36, 40):
+                key = str(q)
+                q_raw = correct_answers_raw.get(key, "")
+                if not q_raw and f"{key}a" in correct_answers_raw:
+                    q_raw = correct_answers_raw.get(f"{key}a", "")
+                correct_ans, q_score = get_key_and_score(q_raw, default_score=1.5)
+                total_possible_score += q_score
+                user_val = user_answers.get(key, "")
+                if not user_val and f"{key}a" in user_answers:
+                    user_val = user_answers.get(f"{key}a", "")
+                is_matched, ratio, match_status = check_answer_match(user_val, correct_ans)
+                if not user_val or not str(user_val).strip():
+                    status = "unanswered"
+                    unanswered_count += 1
+                    item_score = 0.0
+                elif is_matched:
+                    if ratio >= 1.0:
+                        status = "correct"
+                        correct_count += 1
+                        item_score = q_score
+                        earned_score += q_score
+                    else:
+                        status = "partial"
+                        item_score = round(q_score * 0.3, 2)
+                        earned_score += item_score
+                else:
+                    status = "incorrect"
+                    incorrect_count += 1
+                    item_score = 0.0
+
+                details[key] = {
+                    "num": f"{key}-savol", "type": "open",
+                    "user": user_val, "correct": correct_ans,
+                    "status": status,
+                    "score": item_score,
+                    "max_score": q_score,
+                    "ratio": ratio
+                }
+
+            # 40 dan boshlab 2 qismli (a va b) yopiq savollar
+            end_q = 45 if any(f"45{s}" in correct_answers_raw or "45" in correct_answers_raw for s in ["a", "b"]) else 44
+            for q in range(40, end_q + 1):
                 for sub_part in ["a", "b"]:
                     key = f"{q}{sub_part}"
-                    q_raw = correct_answers_raw.get(key, "1")
+                    q_raw = correct_answers_raw.get(key, "")
                     correct_ans, q_score = get_key_and_score(q_raw, default_score=1.5)
                     total_possible_score += q_score
                     user_val = user_answers.get(key, "")
@@ -3156,10 +3341,48 @@ def recalculate_all_submissions_globally() -> int:
                         "status": status, "score": score, "max_score": q_score
                     }
 
-                for q in range(36, 46):
+                # 36, 37, 38, 39 savollar (1 ta variantli yopiq/ochiq savollar)
+                for q in range(36, 40):
+                    key = str(q)
+                    q_raw = answers_dict.get(key, "")
+                    if not q_raw and f"{key}a" in answers_dict:
+                        q_raw = answers_dict.get(f"{key}a", "")
+                    correct_ans, q_score = get_key_and_score(q_raw, default_score=1.5)
+                    user_val = user_answers.get(key, "")
+                    if not user_val and f"{key}a" in user_answers:
+                        user_val = user_answers.get(f"{key}a", "")
+                    is_matched, ratio, _ = check_answer_match(user_val, correct_ans)
+                    if not user_val or not str(user_val).strip():
+                        status = "unanswered"
+                        unanswered_count += 1
+                        score = 0.0
+                    elif is_matched:
+                        if ratio >= 1.0:
+                            status = "correct"
+                            correct_count += 1
+                            score = q_score
+                            earned_score += q_score
+                        else:
+                            status = "partial"
+                            score = round(q_score * 0.3, 2)
+                            earned_score += score
+                    else:
+                        status = "incorrect"
+                        incorrect_count += 1
+                        score = 0.0
+                    details[key] = {
+                        "num": f"{key}-savol", "type": "open",
+                        "user": user_val, "correct": correct_ans,
+                        "status": status, "score": score, "max_score": q_score, "ratio": ratio
+                    }
+
+                # 40 dan boshlab 2 qismli (a va b) yopiq savollar
+                end_q = 45 if any(f"45{s}" in answers_dict or "45" in answers_dict for s in ["a", "b"]) else 44
+                for q in range(40, end_q + 1):
                     for sub_part in ["a", "b"]:
                         key = f"{q}{sub_part}"
-                        correct_ans, q_score = get_key_and_score(answers_dict.get(key, "1"), default_score=1.5)
+                        q_raw = answers_dict.get(key, "")
+                        correct_ans, q_score = get_key_and_score(q_raw, default_score=1.5)
                         user_val = user_answers.get(key, "")
                         is_matched, ratio, _ = check_answer_match(user_val, correct_ans)
                         if not user_val or not str(user_val).strip():

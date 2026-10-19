@@ -39,11 +39,22 @@
   --radius-full: 9999px;
   --font: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
 
-  /* Telegram 8.0 Fullscreen Safe Areas */
-  --tg-safe-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px));
-  --tg-safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px));
+  /* Telegram 8.0 Fullscreen Safe Areas (Yopish tugmalari va status bar bilan ustma-ust tushmasligi uchun) */
+  --tg-safe-top: max(
+    var(--tg-content-safe-area-inset-top, 0px),
+    calc(env(safe-area-inset-top, 0px) + 54px),
+    calc(var(--tg-safe-area-inset-top, 0px) + 52px),
+    92px
+  );
+  --tg-safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px), 16px);
   --tg-safe-left: max(env(safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px), var(--tg-content-safe-area-inset-left, 0px));
   --tg-safe-right: max(env(safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px), var(--tg-content-safe-area-inset-right, 0px));
+}
+
+@media (min-width: 769px) {
+  :root {
+    --tg-safe-top: max(var(--tg-content-safe-area-inset-top, 0px), env(safe-area-inset-top, 0px), 0px);
+  }
 }
 
 body.dark-mode {
@@ -596,7 +607,7 @@ body.dark-mode .ambient-orb-3,
    ========================================= */
 .test-header {
   background: var(--liquid-glass-bg);
-  padding: 10px 14px 10px 14px;
+  padding: calc(var(--tg-safe-top) + 6px) 14px 10px 14px;
   border-bottom: var(--liquid-glass-border);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05), var(--liquid-glass-specular);
   position: sticky;

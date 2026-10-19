@@ -2950,7 +2950,15 @@ function renderKeyComparison(data, container) {
       if (m.isOk) totalClosed++;
       results[k] = { status: m.status, user: uVal || '—' };
     }
-    for (var q = 36; q <= 45; q++) {
+    for (var q = 36; q <= 39; q++) {
+      var k = String(q);
+      var cVal = correct[k] !== undefined ? correct[k] : correct[k + 'a'];
+      var uVal = user[k] !== undefined ? user[k] : user[k + 'a'];
+      var m = (window.checkAnswerMatch ? window.checkAnswerMatch(cVal, uVal) : { isOk: (cVal === uVal), status: (cVal === uVal ? 'correct' : 'incorrect'), ratio: 1.0 });
+      if (m.isOk) totalOpen++;
+      results[k] = { status: m.status, user: uVal || '—', ratio: m.ratio };
+    }
+    for (var q = 40; q <= 45; q++) {
       ['a', 'b'].forEach(function(sub) {
         var k = q + sub;
         var cVal = correct[k];
@@ -2982,36 +2990,41 @@ function renderKeyComparison(data, container) {
     closedHtml += '</div>';
   }
 
-  // 2-bosqich: Ochiq yozma savollar (36a–45b)
-  var openHtml = '';
-  for (var q = 36; q <= 45; q++) {
-    ['a', 'b'].forEach(function(sub) {
-      var key = q + sub;
-      var item = results[key] || { status: 'incorrect', user: '—', ratio: 0 };
-      var isOk = item.status === 'correct';
-      var isPartial = item.status === 'partial';
-      var bg = isOk ? 'rgba(16, 185, 129, 0.15)' : (isPartial ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)');
-      var col = isOk ? '#10B981' : (isPartial ? '#F59E0B' : '#EF4444');
-      var iconSvg = isOk 
-        ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="display:inline-block;vertical-align:middle;"><polyline points="20 6 9 17 4 12"/></svg>' 
-        : (isPartial 
-          ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline-block;vertical-align:middle;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' 
-          : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="display:inline-block;vertical-align:middle;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>');
-      var uVal = item.user || '—';
-      var statusLabel = isOk ? t('result_correct') : (isPartial ? '30% (qisman)' : t('result_wrong'));
-
-      openHtml += '<div style="background:' + bg + ';color:' + col + ';border:1px solid ' + col + ';border-radius:8px;padding:6px 2px;text-align:center;font-size:11px;line-height:1.2;overflow:hidden;">';
-      openHtml += '<div style="font-weight:700;font-size:11px;margin-bottom:2px;display:flex;align-items:center;justify-content:center;gap:3px;">#' + key + ' ' + iconSvg + '</div>';
-      openHtml += '<div style="font-size:10px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;" title="' + escHtml(uVal) + '">' + t('compare_keys_you') + ' <b>' + escHtml(uVal) + '</b></div>';
-      openHtml += '<div style="font-size:10px;font-weight:600;">' + statusLabel + '</div>';
-      openHtml += '</div>';
-    });
+  // 2-bosqich: Ochiq yozma savollar (36–39 single, 40a–45b)
+  var openKeys = [];
+  for (var q = 36; q <= 39; q++) openKeys.push(String(q));
+  for (var q = 40; q <= 45; q++) {
+    openKeys.push(q + 'a');
+    openKeys.push(q + 'b');
   }
 
+  var openHtml = '';
+  openKeys.forEach(function(key) {
+    var item = results[key] || { status: 'incorrect', user: '—', ratio: 0 };
+    var isOk = item.status === 'correct';
+    var isPartial = item.status === 'partial';
+    var bg = isOk ? 'rgba(16, 185, 129, 0.15)' : (isPartial ? 'rgba(245, 158, 11, 0.15)' : 'rgba(239, 68, 68, 0.15)');
+    var col = isOk ? '#10B981' : (isPartial ? '#F59E0B' : '#EF4444');
+    var iconSvg = isOk 
+      ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="display:inline-block;vertical-align:middle;"><polyline points="20 6 9 17 4 12"/></svg>' 
+      : (isPartial 
+        ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline-block;vertical-align:middle;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' 
+        : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="display:inline-block;vertical-align:middle;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>');
+    var uVal = item.user || '—';
+    var statusLabel = isOk ? t('result_correct') : (isPartial ? '30% (qisman)' : t('result_wrong'));
+
+    openHtml += '<div style="background:' + bg + ';color:' + col + ';border:1px solid ' + col + ';border-radius:8px;padding:6px 2px;text-align:center;font-size:11px;line-height:1.2;overflow:hidden;">';
+    openHtml += '<div style="font-weight:700;font-size:11px;margin-bottom:2px;display:flex;align-items:center;justify-content:center;gap:3px;">#' + key + ' ' + iconSvg + '</div>';
+    openHtml += '<div style="font-size:10px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;" title="' + escHtml(uVal) + '">' + t('compare_keys_you') + ' <b>' + escHtml(uVal) + '</b></div>';
+    openHtml += '<div style="font-size:10px;font-weight:600;">' + statusLabel + '</div>';
+    openHtml += '</div>';
+  });
+
+  var totalItems = 35 + openKeys.length;
   var html = '<div class="key-comparison-box" style="margin-top:14px;background:var(--bg-card, #1A1D2D);border:1px solid var(--border, rgba(255,255,255,0.08));border-radius:14px;padding:16px;">';
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border, rgba(255,255,255,0.08));flex-wrap:wrap;gap:8px;">';
   html += '<div><h4 style="margin:0;font-size:15px;font-weight:700;color:var(--text, #FFF);">' + t('compare_keys_title') + '</h4><span style="font-size:12px;color:var(--text-muted, #94A3B8);">' + t('compare_keys_sub') + '</span></div>';
-  html += '<div style="font-size:13px;font-weight:700;padding:4px 12px;border-radius:999px;background:' + (totalCorrect >= 28 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)') + ';color:' + (totalCorrect >= 28 ? '#10B981' : '#EF4444') + ';border:1px solid ' + (totalCorrect >= 28 ? '#10B981' : '#EF4444') + ';">' + totalCorrect + ' / 55 ' + t('compare_keys_correct_suffix') + '</div>';
+  html += '<div style="font-size:13px;font-weight:700;padding:4px 12px;border-radius:999px;background:' + (totalCorrect >= Math.round(totalItems/2) ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)') + ';color:' + (totalCorrect >= Math.round(totalItems/2) ? '#10B981' : '#EF4444') + ';border:1px solid ' + (totalCorrect >= Math.round(totalItems/2) ? '#10B981' : '#EF4444') + ';">' + totalCorrect + ' / ' + totalItems + ' ' + t('compare_keys_correct_suffix') + '</div>';
   html += '</div>';
 
   // 1-bosqich bloki

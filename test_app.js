@@ -317,25 +317,56 @@ const TestApp = {
       part2.innerHTML = html2;
     }
 
-    // 3. 36-45 Yopiq Savollar (a va b qismlar alohida qator shaklida)
+    // 3. 36-39 Yopiq Savollar (1 ta variantli — bitta ochiq qator)
     if (part3) {
       let html3 = '';
-      for (let q = 36; q <= 45; q++) {
+      for (let q = 36; q <= 39; q++) {
+        const key = String(q);
+        html3 += `
+          <div class="open-question-row" id="qrow-${key}">
+            <div class="savol-badge">${key}-savol</div>
+            <div class="savol-input-box" id="box-${key}">
+              <input type="text" class="savol-input open-native-input" id="input-${key}" placeholder="Javobni kiriting..." autocomplete="off" autocapitalize="none" oninput="TestApp.handleOpenInput('${key}', this.value)">
+            </div>
+          </div>
+        `;
+      }
+      part3.innerHTML = html3;
+    }
+
+    // 4. 40 dan boshlab Yopiq Savollar (a va b qismlari bilan)
+    const part4 = document.getElementById('questions-part-4');
+    if (part4) {
+      let html4 = '';
+      const endQ = this.getEndQ();
+      for (let q = 40; q <= endQ; q++) {
         for (let sub of ['a', 'b']) {
           const key = `${q}${sub}`;
-          html3 += `
+          html4 += `
             <div class="open-question-row" id="qrow-${key}">
               <div class="savol-badge">${key}-savol</div>
-              <div class="savol-input-box" id="box-${key}" onclick="MathKeyboard.openFor('${key}')">
-                <input type="text" class="savol-input" id="input-${key}" readonly inputmode="none" placeholder="" onclick="MathKeyboard.openFor('${key}')">
+              <div class="savol-input-box" id="box-${key}">
+                <input type="text" class="savol-input open-native-input" id="input-${key}" placeholder="${key} javobini kiriting..." autocomplete="off" autocapitalize="none" oninput="TestApp.handleOpenInput('${key}', this.value)">
               </div>
-              <button type="button" class="btn-kb-icon" onclick="MathKeyboard.openFor('${key}')" title="Klaviaturani ochish" style="display:inline-flex;align-items:center;justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="8" x2="6.01" y2="8"/><line x1="10" y1="8" x2="10.01" y2="8"/><line x1="14" y1="8" x2="14.01" y2="8"/><line x1="18" y1="8" x2="18.01" y2="8"/><line x1="6" y1="12" x2="6.01" y2="12"/><line x1="10" y1="12" x2="10.01" y2="12"/><line x1="14" y1="12" x2="14.01" y2="12"/><line x1="18" y1="12" x2="18.01" y2="12"/><line x1="7" y1="16" x2="17" y2="16"/></svg></button>
             </div>
           `;
         }
       }
-      part3.innerHTML = html3;
+      part4.innerHTML = html4;
     }
+  },
+
+  getEndQ() {
+    if (this.testAnswers) {
+      if ('45a' in this.testAnswers || '45' in this.testAnswers) return 45;
+      if ('44a' in this.testAnswers || '44' in this.testAnswers) return 44;
+    }
+    return 44;
+  },
+
+  getTotalQuestionsCount() {
+    const endQ = this.getEndQ();
+    return 35 + 4 + ((endQ - 40 + 1) * 2);
   },
 
   // ----------------------------------------------------
@@ -350,8 +381,17 @@ const TestApp = {
   saveAnswersToStorage() {
     try {
       if (!this.testId) return;
-      // 36a-45b ochiq savollar qiymatini DOM dan olish
-      for (let q = 36; q <= 45; q++) {
+      // 36-39 savollar (1 ta variantli)
+      for (let q = 36; q <= 39; q++) {
+        const key = String(q);
+        const input = document.getElementById(`input-${key}`);
+        if (input && input.value !== undefined) {
+          this.answers[key] = input.value.trim();
+        }
+      }
+      // 40 dan boshlab savollar (a va b bandli)
+      const endQ = this.getEndQ();
+      for (let q = 40; q <= endQ; q++) {
         for (let sub of ['a', 'b']) {
           const key = `${q}${sub}`;
           const input = document.getElementById(`input-${key}`);
@@ -389,17 +429,33 @@ const TestApp = {
         }
       }
 
-      // 36a-45b ochiq savollarni tiklash
-      for (let q = 36; q <= 45; q++) {
+      // 36-39 (1 ta variantli) yopiq savollar
+      for (let q = 36; q <= 39; q++) {
+        const fieldKey = String(q);
+        const val = this.answers[fieldKey];
+        const input = document.getElementById(`input-${fieldKey}`);
+        const box = document.getElementById(`box-${fieldKey}`);
+        if (input && val !== undefined) {
+          input.value = val;
+          const isFilled = (val || '').trim().length > 0;
+          if (box) box.classList.toggle('filled', isFilled);
+          this.updateMapItem(fieldKey, isFilled);
+        }
+      }
+
+      // 40 dan boshlab (a va b) yopiq savollar
+      const endQ = this.getEndQ();
+      for (let q = 40; q <= endQ; q++) {
         for (let sub of ['a', 'b']) {
           const fieldKey = `${q}${sub}`;
           const val = this.answers[fieldKey];
-          if (val !== undefined && val !== null && String(val).trim().length > 0) {
-            const input = document.getElementById(`input-${fieldKey}`);
-            if (input) input.value = val;
-            const box = document.getElementById(`box-${fieldKey}`);
-            if (box) box.classList.add('filled');
-            this.updateMapItem(fieldKey, true);
+          const input = document.getElementById(`input-${fieldKey}`);
+          const box = document.getElementById(`box-${fieldKey}`);
+          if (input && val !== undefined) {
+            input.value = val;
+            const isFilled = (val || '').trim().length > 0;
+            if (box) box.classList.toggle('filled', isFilled);
+            this.updateMapItem(fieldKey, isFilled);
           }
         }
       }
@@ -468,8 +524,19 @@ const TestApp = {
       this.updateMapItem(String(q), false);
     }
 
-    // 36a-45b ochiq savollar inputlari va qutilarini tozalash
-    for (let q = 36; q <= 45; q++) {
+    // 36-39 (1 ta variantli) yopiq savollar inputlari va qutilarini tozalash
+    for (let q = 36; q <= 39; q++) {
+      const fieldKey = String(q);
+      const input = document.getElementById(`input-${fieldKey}`);
+      if (input) input.value = '';
+      const box = document.getElementById(`box-${fieldKey}`);
+      if (box) box.classList.remove('filled');
+      this.updateMapItem(fieldKey, false);
+    }
+
+    // 40 dan boshlab (a va b) yopiq savollar inputlari va qutilarini tozalash
+    const endQ = this.getEndQ();
+    for (let q = 40; q <= endQ; q++) {
       for (let sub of ['a', 'b']) {
         const fieldKey = `${q}${sub}`;
         const input = document.getElementById(`input-${fieldKey}`);
@@ -491,9 +558,6 @@ const TestApp = {
   // JAVOBNI TANLASH VA O'RNATISH
   // ----------------------------------------------------
   selectOption(qNum, option) {
-    if (typeof MathKeyboard !== 'undefined' && MathKeyboard.close) {
-      MathKeyboard.close();
-    }
     const key = String(qNum);
     const prev = this.answers[key];
 
@@ -518,8 +582,8 @@ const TestApp = {
     this.saveAnswersToStorage();
   },
 
-  setOpenAnswer(fieldKey, val) {
-    this.answers[fieldKey] = val;
+  handleOpenInput(fieldKey, val) {
+    this.answers[fieldKey] = (val || '').trim();
 
     const box = document.getElementById(`box-${fieldKey}`);
     if (box) {
@@ -532,8 +596,12 @@ const TestApp = {
     this.saveAnswersToStorage();
   },
 
+  setOpenAnswer(fieldKey, val) {
+    this.handleOpenInput(fieldKey, val);
+  },
+
   // ----------------------------------------------------
-  // PROGRESS VA XARITA (JAMI 55 TA SAVOL: 1-35 VA 36a-45b)
+  // PROGRESS VA XARITA (1-35, 36-39, 40+)
   // ----------------------------------------------------
   renderMapGrid() {
     const grid = document.getElementById('map-grid');
@@ -548,8 +616,17 @@ const TestApp = {
         </button>
       `;
     }
-    // 36a dan 45b gacha (20 ta alohida savol)
-    for (let q = 36; q <= 45; q++) {
+    // 36-39 (1 ta variantli)
+    for (let q = 36; q <= 39; q++) {
+      html += `
+        <button class="map-num-btn open-map-btn" id="map-btn-${q}" onclick="TestApp.scrollToQuestion('${q}')" style="font-size: 11.5px; font-weight: 800; min-width: 36px; padding: 4px 2px;">
+          ${q}
+        </button>
+      `;
+    }
+    // 40 dan boshlab (a va b)
+    const endQ = this.getEndQ();
+    for (let q = 40; q <= endQ; q++) {
       for (let sub of ['a', 'b']) {
         const key = `${q}${sub}`;
         html += `
@@ -590,13 +667,24 @@ const TestApp = {
   updateProgress() {
     let answeredQuestions = 0;
 
-    // 1-35 savollar (35 ta)
+    // 1-35 savollar
     for (let q = 1; q <= 35; q++) {
       if (this.answers[String(q)]) answeredQuestions++;
     }
 
-    // 36a-45b savollar (20 ta alohida savol)
-    for (let q = 36; q <= 45; q++) {
+    // 36-39 savollar (1 ta variantli)
+    for (let q = 36; q <= 39; q++) {
+      const key = String(q);
+      const input = document.getElementById(`input-${key}`);
+      const val = this.answers[key] !== undefined ? this.answers[key] : (input ? input.value : '');
+      if ((val || '').trim().length > 0) {
+        answeredQuestions++;
+      }
+    }
+
+    // 40 dan boshlab (a va b)
+    const endQ = this.getEndQ();
+    for (let q = 40; q <= endQ; q++) {
       for (let sub of ['a', 'b']) {
         const key = `${q}${sub}`;
         const input = document.getElementById(`input-${key}`);
@@ -607,7 +695,7 @@ const TestApp = {
       }
     }
 
-    const total = 55;
+    const total = this.getTotalQuestionsCount();
     const remaining = total - answeredQuestions;
     const percent = Math.round((answeredQuestions / total) * 100);
 
@@ -619,17 +707,13 @@ const TestApp = {
     if (countEl) countEl.textContent = `${answeredQuestions} / ${total}`;
     if (fillEl) fillEl.style.width = `${percent}%`;
     if (dockText) dockText.textContent = `${answeredQuestions} / ${total} ta belgilandi (${percent}%)`;
-    if (dockSub) dockSub.textContent = remaining === 0 ? "Barcha 55 ta savol to'ldirildi!" : `${remaining} ta savol qoldi`;
+    if (dockSub) dockSub.textContent = remaining === 0 ? "Barcha savollar to'ldirildi!" : `${remaining} ta savol qoldi`;
   },
 
   // ----------------------------------------------------
   // TESTNI TOPSHIRISH (SUBMIT) — 2 BOSQICHLI XAVFSIZ TIZIM
   // ----------------------------------------------------
   openConfirmSubmitModal() {
-    if (typeof MathKeyboard !== 'undefined' && MathKeyboard.close) {
-      MathKeyboard.close();
-    }
-
     // 45 daqiqalik topshirish cheklovini tekshirish
     if (this.minSubmitInfo && !this.minSubmitInfo.can_submit && !this.isAdmin) {
       this.openMinSubmitModal();
@@ -652,36 +736,31 @@ const TestApp = {
   },
 
   proceedToSubmitStep2() {
-    // 2-bosqichga o'tish: avval ochiq savollar inputlarini sinxronlashtirish va saqlash
-    for (let q = 36; q <= 45; q++) {
-      for (let sub of ['a', 'b']) {
-        const key = `${q}${sub}`;
-        const input = document.getElementById(`input-${key}`);
-        if (input && input.value !== undefined) {
-          this.answers[key] = input.value.trim();
-        }
-      }
-    }
+    // 2-bosqichga o'tish: avval barcha inputlarni saqlash
     this.saveAnswersToStorage();
 
     let answered = 0;
     for (let q = 1; q <= 35; q++) {
       if (this.answers[String(q)]) answered++;
     }
-    for (let q = 36; q <= 45; q++) {
+    for (let q = 36; q <= 39; q++) {
+      if ((this.answers[String(q)] || '').trim().length > 0) answered++;
+    }
+    const endQ = this.getEndQ();
+    for (let q = 40; q <= endQ; q++) {
       for (let sub of ['a', 'b']) {
         const key = `${q}${sub}`;
-        if ((this.answers[key] || '').trim().length > 0) {
-          answered++;
-        }
+        if ((this.answers[key] || '').trim().length > 0) answered++;
       }
     }
 
-    const total = 55;
+    const total = this.getTotalQuestionsCount();
     const empty = total - answered;
 
     const mAnswered = document.getElementById('m-stat-answered');
     const mEmpty = document.getElementById('m-stat-empty');
+    if (mAnswered) mAnswered.textContent = answered;
+    if (mEmpty) mEmpty.textContent = empty;
     if (mAnswered) mAnswered.textContent = answered;
     if (mEmpty) mEmpty.textContent = empty;
 
@@ -855,8 +934,16 @@ const TestApp = {
       return;
     }
 
-    // 36a-45b savollar qiymatlarini to'g'ridan-to'g'ri DOM dan olib yakuniy tekshirish
-    for (let q = 36; q <= 45; q++) {
+    // 36-39 savollar (1 ta variantli) va 40+ savollar (a va b) qiymatlarini to'g'ridan-to'g'ri DOM dan olib yakuniy tekshirish
+    for (let q = 36; q <= 39; q++) {
+      const key = String(q);
+      const input = document.getElementById(`input-${key}`);
+      if (input && input.value !== undefined) {
+        this.answers[key] = input.value.trim();
+      }
+    }
+    const endQ = this.getEndQ();
+    for (let q = 40; q <= endQ; q++) {
       for (let sub of ['a', 'b']) {
         const key = `${q}${sub}`;
         const input = document.getElementById(`input-${key}`);
@@ -871,15 +958,19 @@ const TestApp = {
     for (let q = 1; q <= 35; q++) {
       if (this.answers[String(q)]) answered++;
     }
-    for (let q = 36; q <= 45; q++) {
+    for (let q = 36; q <= 39; q++) {
+      if ((this.answers[String(q)] || '').trim().length > 0) answered++;
+    }
+    for (let q = 40; q <= endQ; q++) {
       for (let sub of ['a', 'b']) {
         const key = `${q}${sub}`;
         if ((this.answers[key] || '').trim().length > 0) answered++;
       }
     }
 
+    const totalQuestions = this.getTotalQuestionsCount();
     if (answered === 0 && !this.isAdmin) {
-      alert("Siz birorta ham savolga javob belgilamadingiz (0/55)!\n\nBo'sh testni topshirib bo'lmaydi. Iltimos, savollarni ishlab, javoblarni belgilang!");
+      alert(`Siz birorta ham savolga javob belgilamadingiz (0/${totalQuestions})!\n\nBo'sh testni topshirib bo'lmaydi. Iltimos, savollarni ishlab, javoblarni belgilang!`);
       this.closeConfirmSubmitModal();
       return;
     }

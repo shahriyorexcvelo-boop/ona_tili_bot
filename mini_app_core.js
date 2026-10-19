@@ -34,6 +34,15 @@ const MiniApp = {
           this.tg.enableClosingConfirmation();
         }
 
+        // Safe Area va Telegram tugmalari bilan moslashish
+        this.syncSafeArea();
+        if (typeof this.tg?.onEvent === 'function') {
+          this.tg.onEvent('contentSafeAreaChanged', () => this.syncSafeArea());
+          this.tg.onEvent('safeAreaChanged', () => this.syncSafeArea());
+          this.tg.onEvent('fullscreenChanged', () => this.syncSafeArea());
+        }
+        window.addEventListener('resize', () => this.syncSafeArea());
+
         // Ranglarni Telegram mavzusiga moslash
         this.syncTheme(options.onThemeChange);
       } catch (e) {
@@ -41,11 +50,49 @@ const MiniApp = {
       }
     }
 
+    this.syncSafeArea();
+
     // Bosilish tebranishlari (Haptic feedback) ni avtomatik ulash
     this.initHaptics();
 
     // To'lqin (Ripple) effektini avtomatik ulash
     this.initRipple();
+  },
+
+  /**
+   * Telegram Safe Area va Yopish/Notch tugmalari bilan moslashish
+   */
+  syncSafeArea() {
+    try {
+      const tg = this.tg || window.Telegram?.WebApp;
+      let topInset = 0;
+      let bottomInset = 0;
+      if (tg) {
+        if (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.top === 'number') {
+          topInset = Math.max(topInset, tg.contentSafeAreaInset.top);
+        }
+        if (tg.safeAreaInset && typeof tg.safeAreaInset.top === 'number') {
+          topInset = Math.max(topInset, tg.safeAreaInset.top + 50);
+        }
+        if (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.bottom === 'number') {
+          bottomInset = Math.max(bottomInset, tg.contentSafeAreaInset.bottom);
+        } else if (tg.safeAreaInset && typeof tg.safeAreaInset.bottom === 'number') {
+          bottomInset = Math.max(bottomInset, tg.safeAreaInset.bottom);
+        }
+      }
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || tg?.platform === 'ios' || tg?.platform === 'android';
+      if (isMobile && topInset < 88) {
+        topInset = 92;
+      }
+      if (topInset > 0) {
+        document.documentElement.style.setProperty('--tg-content-safe-area-inset-top', `${topInset}px`);
+        document.documentElement.style.setProperty('--tg-safe-top', `${topInset}px`);
+      }
+      if (bottomInset > 0) {
+        document.documentElement.style.setProperty('--tg-content-safe-area-inset-bottom', `${bottomInset}px`);
+        document.documentElement.style.setProperty('--tg-safe-bottom', `${bottomInset}px`);
+      }
+    } catch (e) {}
   },
 
   /**
