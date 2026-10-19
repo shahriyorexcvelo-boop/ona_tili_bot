@@ -12,7 +12,7 @@ import urllib.parse
 from typing import Optional, Dict, Any, Tuple, List
 
 from aiogram import Router, F
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, KICKED, MEMBER
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
@@ -31,7 +31,7 @@ from core import (
     is_working_hours, get_night_message
 )
 from .common import (
-    check_access, validate_fullname, send_test_card, send_test_card_to_user_chat,
+    get_all_admin_ids, check_access, validate_fullname, send_test_card, send_test_card_to_user_chat,
     BLACKLIST_NAME_WORDS
 )
 
@@ -51,7 +51,7 @@ async def start_handler(message: Message, state: FSMContext):
     if not user:
         await state.set_state(RegistrationState.fullname)
         await message.answer(
-            "👋 <b>Assalomu alaykum! Test Tekshirish Tizimiga xush kelibsiz!</b>\n\n"
+            "👋 <b>Assalomu alaykum! Ona tili test tizimiga xush kelibsiz!</b>\n\n"
             "Tizimdan to'liq foydalanish va ruxsat olish uchun ro'yxatdan o'ting.\n\n"
             "✍️ <b>Iltimos, Ism va Familiyangizni kiriting:</b>\n"
             "<i>(Misol: Shaxriyor Eshimbetov)</i>",
@@ -59,11 +59,18 @@ async def start_handler(message: Message, state: FSMContext):
         )
     else:
         is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
-        st = user.get("status", "approved")
+        st = user.get("status", "pending")
         if not is_adm:
-            if st in ["blocked", "rejected"]:
+            if st == "pending":
                 await message.answer(
-                    "⛔️ <b>Sizning botdan foydalanish huquqingiz to'xtatilgan!</b>\n\n"
+                    f"👋 <b>Assalomu alaykum, {user['fullname']}!</b>\n\n"
+                    "⏳ <b>Arizangiz ko'rib chiqilmoqda.</b>\n"
+                    "Administrator ruxsat berganidan so'ng tizimdan to'liq foydalanishingiz mumkin bo'ladi. Iltimos, kuting..."
+                )
+                return
+            elif st in ["blocked", "rejected"]:
+                await message.answer(
+                    "⛔️ <b>Sizning botdan foydalanish huquqingiz to'xtatilgan yoki rad etilgan!</b>\n\n"
                     "Murojaat uchun: @eshmbetov"
                 )
                 return
@@ -78,7 +85,7 @@ async def start_handler(message: Message, state: FSMContext):
 
 
 
-# Ro'yxatdan o'tish: Ism kiritildi (Telefon so'ralmaydi, darhol ro'yxatdan o'tadi)
+# Ro'yxatdan o'tish: Ism kiritildi (Admin ruxsati talab qilinadi)
 @user_router.message(RegistrationState.fullname)
 async def reg_fullname(message: Message, state: FSMContext):
     raw_fullname = (message.text or "").strip()
@@ -99,8 +106,9 @@ async def reg_fullname(message: Message, state: FSMContext):
     username = message.from_user.username
     phone = ""
 
-    # 1. Yangi foydalanuvchi to'g'ridan-to'g'ri faol (approved) bo'ladi
-    status = "approved"
+    is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
+    status = "approved" if is_adm else "pending"
+
     test_db.add_or_update_user(user_tg_id, fullname, phone, username, status=status)
     try:
         test_db.log_activity(user_tg_id, "user_register", f"Yangi o'quvchi ro'yxatdan o'tdi: {fullname}", {"tg_id": user_tg_id, "fullname": fullname, "username": username})
@@ -109,31 +117,45 @@ async def reg_fullname(message: Message, state: FSMContext):
     invalidate_dashboard_cache()
     await state.clear()
 
-    # 2. O'quvchiga darhol asosiy menyuni ochish
-    await message.answer(
-        f"🎉 <b>Tabriklaymiz, {fullname}! Siz muvaffaqiyatli ro'yxatdan o'tdingiz!</b>\n\n"
-        f"Kerakli bo'limni tanlang yoki to'g'ridan-to'g'ri test kodini yuboring 👇",
-        reply_markup=main_menu_kb(user_tg_id)
-    )
+    if is_adm:
+        await message.answer(
+            f"🎉 <b>Tabriklaymiz, {fullname}! Siz admin sifatida tizimga ulandingiz!</b>\n\n"
+            f"Kerakli bo'limni tanlang yoki to'g'ridan-to'g'ri test kodini yuboring 👇",
+            reply_markup=main_menu_kb(user_tg_id)
+        )
+    else:
+        # 1. Foydalanuvchiga arizasi qabul qilinganini bildirish
+        await message.answer(
+            f"⏳ <b>Arizangiz qabul qilindi, {fullname}!</b>\n\n"
+            f"Sizning ma'lumotlaringiz adminga yuborildi. Administrator ruxsat berganidan so'ng sizga darhol xabar keladi va botdan to'liq foydalanishingiz mumkin bo'ladi. Iltimos, kuting...",
+            reply_markup=ReplyKeyboardRemove()
+        )
 
-    # 3. Adminga shunchaki yangi a'zo haqida ma'lumot (so'rovsiz)
-    username_str = f"@{username}" if username else "Mavjud emas"
-    admin_notify_text = (
-        f"👤 <b>Yangi foydalanuvchi ro'yxatdan o'tdi:</b>\n\n"
-        f"👤 <b>Ism-familiya:</b> {fullname}\n"
-        f"🆔 <b>Telegram ID:</b> <code>{user_tg_id}</code>\n"
-        f"🔗 <b>Username:</b> {username_str}\n"
-        f"🕒 <b>Vaqt:</b> {format_uzb_time()}"
-    )
+        # 2. Adminga tezkor ruxsat berish / rad etish tugmalari bilan yuborish
+        username_str = f"@{username}" if username else "Mavjud emas"
+        admin_notify_text = (
+            f"👤 <b>Yangi ro'yxatdan o'tish so'rovi:</b>\n\n"
+            f"👤 <b>Ism-familiya:</b> {fullname}\n"
+            f"🆔 <b>Telegram ID:</b> <code>{user_tg_id}</code>\n"
+            f"🔗 <b>Username:</b> {username_str}\n"
+            f"🕒 <b>Vaqt:</b> {format_uzb_time()}\n\n"
+            f"<i>Ushbu foydalanuvchiga botdan foydalanishga ruxsat berasizmi?</i>"
+        )
 
-    for adm_id in get_all_admin_ids():
-        try:
-            await bot.send_message(
-                chat_id=adm_id,
-                text=admin_notify_text
-            )
-        except Exception as ex:
-            log.warning(f"Adminga ({adm_id}) yangi a'zo xabarini yuborishda xatolik: {ex}")
+        quick_approve_kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Ruxsat berish", callback_data=f"user_quick_approve_{user_tg_id}"),
+            InlineKeyboardButton(text="❌ Rad etish", callback_data=f"user_quick_reject_{user_tg_id}")
+        ]])
+
+        for adm_id in get_all_admin_ids():
+            try:
+                await bot.send_message(
+                    chat_id=adm_id,
+                    text=admin_notify_text,
+                    reply_markup=quick_approve_kb
+                )
+            except Exception as ex:
+                log.warning(f"Adminga ({adm_id}) ruxsat so'rovi yuborishda xatolik: {ex}")
 
 # Ixtiyoriy: Telefon yuborilgan holat uchun zaxira handler
 @user_router.message(RegistrationState.phone)
@@ -807,4 +829,45 @@ async def process_tahlil_code(message: Message, state: FSMContext):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows),
         disable_web_page_preview=False
     )
+
+
+# Ro'yxatdan o'tmagan yoki holati bo'sh bo'lgan foydalanuvchilar uchun umumiy matn handleri
+@user_router.message(F.text, StateFilter(None))
+async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
+    user_tg_id = message.from_user.id
+    user = test_db.get_user(user_tg_id)
+    if not user:
+        raw_text = (message.text or "").strip()
+        is_valid, _ = validate_fullname(raw_text)
+        if is_valid:
+            await reg_fullname(message, state)
+            return
+        else:
+            await state.set_state(RegistrationState.fullname)
+            await message.answer(
+                "👋 <b>Assalomu alaykum! Ona tili test tizimiga xush kelibsiz!</b>\n\n"
+                "Tizimdan to'liq foydalanish va ruxsat olish uchun ro'yxatdan o'ting.\n\n"
+                "✍️ <b>Iltimos, Ism va Familiyangizni kiriting:</b>\n"
+                "<i>(Misol: Shaxriyor Eshimbetov)</i>",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+
+    # Agar ro'yxatdan o'tgan bo'lsa va ruxsat berilmagan bo'lsa
+    st = user.get("status", "pending")
+    if not test_db.is_admin(user_tg_id, ADMIN_ID):
+        if st == "pending":
+            await message.answer(
+                f"👋 <b>Assalomu alaykum, {user['fullname']}!</b>\n\n"
+                "⏳ <b>Arizangiz ko'rib chiqilmoqda.</b>\n"
+                "Administrator ruxsat berganidan so'ng tizimdan to'liq foydalanishingiz mumkin bo'ladi. Iltimos, kuting..."
+            )
+            return
+        elif st in ["blocked", "rejected"]:
+            await message.answer(
+                "⛔️ <b>Sizning botdan foydalanish huquqingiz to'xtatilgan yoki rad etilgan!</b>\n\n"
+                "Murojaat uchun: @eshmbetov"
+            )
+            return
+
 

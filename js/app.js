@@ -199,19 +199,8 @@ window.dismissSplash = dismissSplash;
 window.finishSplashImmediately = dismissSplash;
 
 function runSplash() {
-  var splash = document.getElementById('splashScreen') || document.getElementById('splash-screen');
-  if (!splash) { launchApp(); return; }
-
-  // Kosmik matematik zarrachalari animatsiyasini ishga tushirish
-  _stopSplashCanvas = startSplashCanvas();
-
-  // Ma'lumotlarni fonda oldindan yuklash
+  dismissSplash();
   launchApp();
-
-  // 3200ms dan so'ng animatsiya to'liq va tabiiy yakunlangach o'tish (boshqa mini app kabi)
-  splashTimer = setTimeout(function() {
-    dismissSplash();
-  }, 3200);
 }
 
 // ── PIN SYSTEM (Olib tashlangan / Bypassed) ──────────────────

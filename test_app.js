@@ -237,18 +237,7 @@ const TestApp = {
   },
 
   runIntroAnimation() {
-    const splash = document.getElementById('intro-splash') || document.getElementById('splashScreen');
-    if (!splash) return;
-
-    this._stopSplashCanvas = this.startSplashCanvas();
-
-    window.dismissSplash = () => this.finishSplashImmediately();
-    window.finishSplashImmediately = () => this.finishSplashImmediately();
-
-    // 3200ms dan so'ng avtomatik ravishda mayin o'tish (xuddi asosiy app kabi)
-    setTimeout(() => {
-      this.finishSplashImmediately();
-    }, 3200);
+    this.finishSplashImmediately();
   },
 
   toggleTheme() {

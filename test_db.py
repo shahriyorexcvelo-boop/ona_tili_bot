@@ -535,12 +535,6 @@ def init_db():
                 pass
             conn.commit()
 
-        # Kutilmoqda (pending) bo'lgan mavjud barcha foydalanuvchilarni to'g'ridan-to'g'ri faol (approved) holatiga o'tkazish
-        try:
-            cur.execute("UPDATE users SET status = 'approved' WHERE status = 'pending'")
-        except Exception:
-            pass
-
         conn.commit()
     finally:
         _close_conn(conn)

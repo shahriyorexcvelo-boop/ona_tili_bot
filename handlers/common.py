@@ -55,10 +55,10 @@ def validate_fullname(fullname: str) -> tuple[bool, str]:
     if clean_chars:
         return False, "⚠️ Ism-familiyada raqamlar yoki maxsus belgilar bo'lmasligi kerak. Faqat harflar bilan yozing."
 
-    # 3. So'zlar soni (kamida Ism va Familiya bo'lishi shart)
+    # 3. So'zlar soni (kamida 1 ta ism bo'lishi shart)
     words = [w for w in name.split() if w]
-    if len(words) < 2:
-        return False, "⚠️ Iltimos, Ism va Familiyangizni to'liq kiriting (kamida 2 ta so'z, masalan: <i>Ali Valiyev</i>)."
+    if len(words) < 1:
+        return False, "⚠️ Iltimos, Ism va Familiyangizni kiriting."
     if len(words) > 4:
         return False, "⚠️ Iltimos, faqat o'zingizning haqiqiy Ism va Familiyangizni kiriting (ortiqcha so'zlarsiz)."
 
@@ -126,10 +126,17 @@ async def check_access(message: Message) -> bool:
     if not u:
         await message.answer("⚠️ Iltimos, avval /start buyrug'i orqali ro'yxatdan o'ting.")
         return False
-    st = u.get("status", "approved")
+    st = u.get("status", "pending")
+    if st == "pending":
+        await message.answer(
+            "⏳ <b>Arizangiz ko'rib chiqilmoqda!</b>\n\n"
+            "Administrator sizga ruxsat bergach, testlarni yechishingiz mumkin bo'ladi.\n"
+            "Iltimos, tasdiqlanishini kuting..."
+        )
+        return False
     if st in ["blocked", "rejected"]:
         await message.answer(
-            "⛔️ <b>Sizning botdan foydalanish huquqingiz to'xtatilgan yoki chiqarib yuborilgansiz!</b>\n\n"
+            "⛔️ <b>Sizning botdan foydalanish huquqingiz to'xtatilgan yoki rad etilgan!</b>\n\n"
             "Murojaat uchun: @eshmbetov"
         )
         return False

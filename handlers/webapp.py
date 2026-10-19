@@ -65,8 +65,26 @@ async def handle_submit_test_api(request):
         if not user_tg_id or int(user_tg_id) <= 0:
             return web.json_response({
                 "success": False,
-                "message": "⚠️ Web orqali ishlash mumkin emas! Testni faqat rasmiy Telegram botimiz (@bm_rashtest_bot) va Mini ilova orqali topshirish mumkin."
+                "message": f"⚠️ Web orqali ishlash mumkin emas! Testni faqat rasmiy Telegram botimiz (@{CACHED_BOT_USERNAME}) va Mini ilova orqali topshirish mumkin."
             }, status=403)
+
+        user_obj = await asyncio.to_thread(test_db.get_user, user_tg_id)
+        if not test_db.is_admin(user_tg_id or 0, ADMIN_ID):
+            if not user_obj:
+                return web.json_response({
+                    "success": False,
+                    "message": "⚠️ Iltimos, avval Telegram botimizda ro'yxatdan o'ting!"
+                }, status=403)
+            if user_obj.get("status") == "pending":
+                return web.json_response({
+                    "success": False,
+                    "message": "⏳ Arizangiz hali administrator tomonidan tasdiqlanmagan. Ruxsat berilgach test topshirishingiz mumkin."
+                }, status=403)
+            if user_obj.get("status") in ["blocked", "rejected"]:
+                return web.json_response({
+                    "success": False,
+                    "message": "⛔️ Sizning profilingizga ruxsat berilmagan yoki to'xtatilgan."
+                }, status=403)
 
         # ── RATE LIMITING (1-3 soniya cheklovi) ─────────────────
         rate_key = f"submit_{user_tg_id or request.remote or 'unknown'}"
