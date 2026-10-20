@@ -85,6 +85,33 @@ _CACHE_SETTINGS: Dict[str, Any] = {}
 _ADMIN_DELETED_CACHE: Dict[int, Any] = {}
 _ALL_ADMINS_CACHE: Tuple[float, List[Dict[str, Any]]] = (0.0, [])
 
+# 5 soniyalik tezkor xotira keshlari (CPU/Event loop optimallashtirish)
+_MAINTENANCE_CACHE: Tuple[float, bool] = (0.0, False)
+_ACTIVE_TEST_CACHE: Tuple[float, bool] = (0.0, False)
+CACHE_TTL_5S = 5.0
+
+def invalidate_maintenance_cache():
+    """Texnik profilaktika keshini bekor qilish."""
+    global _MAINTENANCE_CACHE
+    with _RAM_CACHE_LOCK:
+        _MAINTENANCE_CACHE = (0.0, False)
+
+def invalidate_active_test_cache():
+    """Faol testlar mavjudligi keshini bekor qilish."""
+    global _ACTIVE_TEST_CACHE
+    with _RAM_CACHE_LOCK:
+        _ACTIVE_TEST_CACHE = (0.0, False)
+
+def _ensure_tests_cache_loaded():
+    """
+    Kesh umuman yuklanmagan bo'lsagina bir marta sinxron yuklaydi.
+    Kesh eskirgan bo'lsa ham eski keshni qaytaradi (test_bot dagi fon vazifasi yangilab turadi).
+    """
+    with _RAM_CACHE_LOCK:
+        loaded = _GLOBAL_TESTS_PRELOADED
+    if not loaded:
+        preload_all_tests_cache()
+
 # Kesh siyosati (M3): DB — yagona haqiqat manbai. 
 # 45 soniyalik Read-Through TTL bir nechta instance larda kesh nomutanosibligining oldini oladi.
 # Local yozish amallari darhol invalidate qiladi.
@@ -139,6 +166,7 @@ def preload_all_tests_cache() -> int:
 def invalidate_test_cache(test_id: Optional[int] = None):
     """Test ma'lumotlari yangilanganda yoki o'chirilganda RAM keshni tozalash va qayta yuklash"""
     global _CACHE_TEST_BOUNDS_TIME, _GLOBAL_ALL_TESTS_LIST, _GLOBAL_ACTIVE_TESTS_LIST, _GLOBAL_TESTS_CACHE_TIME
+    invalidate_active_test_cache()
     with _RAM_CACHE_LOCK:
         _GLOBAL_TESTS_CACHE_TIME = 0.0
         _CACHE_TEST_BOUNDS.clear()
@@ -181,6 +209,7 @@ def invalidate_user_cache(tg_id: Optional[int] = None):
 def invalidate_settings_cache():
     with _RAM_CACHE_LOCK:
         _CACHE_SETTINGS.clear()
+    invalidate_maintenance_cache()
 
 
 _on_schedule_changed_callbacks = []
@@ -987,13 +1016,24 @@ def set_setting(key: str, value: str):
 
 
 def is_maintenance_mode() -> bool:
-    """Texnik profilaktika rejimi yoqilganmi?"""
-    return get_setting("maintenance_mode", "0") == "1"
+    """Texnik profilaktika rejimi yoqilganmi? (5 soniyalik xotira keshi)"""
+    global _MAINTENANCE_CACHE
+    now = time.time()
+    with _RAM_CACHE_LOCK:
+        ts, val = _MAINTENANCE_CACHE
+        if now - ts < CACHE_TTL_5S:
+            return val
+
+    val = (get_setting("maintenance_mode", "0") == "1")
+    with _RAM_CACHE_LOCK:
+        _MAINTENANCE_CACHE = (time.time(), val)
+    return val
 
 
 def set_maintenance_mode(enabled: bool):
     """Texnik profilaktika rejimini yoqish yoki o'chirish."""
     set_setting("maintenance_mode", "1" if enabled else "0")
+    invalidate_maintenance_cache()
 
 
 def is_registration_open() -> bool:
@@ -1835,20 +1875,33 @@ def clear_answer_drafts(user_tg_id: int, test_id: int) -> bool:
 
 
 def has_any_active_test() -> bool:
-    """Ayni paytda birorta ham test faolmi yoki jadval bo'yicha ketayotganmi?"""
+    """Ayni paytda birorta ham test faolmi yoki jadval bo'yicha ketayotganmi? (5 soniyalik xotira keshi)"""
+    global _ACTIVE_TEST_CACHE
+    now = time.time()
+    with _RAM_CACHE_LOCK:
+        ts, val = _ACTIVE_TEST_CACHE
+        if now - ts < CACHE_TTL_5S:
+            return val
+
+    res = False
     tests = get_active_tests()
     if tests:
-        return True
-    try:
-        from core.config import get_test_schedule_status
-        all_t = get_all_tests()
-        for t in all_t:
-            st = get_test_schedule_status(t)
-            if st.get("is_active"):
-                return True
-    except Exception:
-        pass
-    return False
+        res = True
+    else:
+        try:
+            from core.config import get_test_schedule_status
+            all_t = get_all_tests()
+            for t in all_t:
+                st = get_test_schedule_status(t)
+                if st.get("is_active"):
+                    res = True
+                    break
+        except Exception:
+            pass
+
+    with _RAM_CACHE_LOCK:
+        _ACTIVE_TEST_CACHE = (time.time(), res)
+    return res
 
 
 def get_users_count() -> Dict[str, int]:
@@ -1961,8 +2014,7 @@ def update_test_pdf(test_id: int, pdf_file_id: str, pdf_file_name: str) -> bool:
 
 def get_active_tests() -> List[Dict[str, Any]]:
     """Zero-DB-Read: Faol testlarni to'g'ridan-to'g'ri server RAM xotirasidan sub-millisekundda qaytarish."""
-    if not is_tests_cache_valid():
-        preload_all_tests_cache()
+    _ensure_tests_cache_loaded()
     with _RAM_CACHE_LOCK:
         return [dict(t) for t in _GLOBAL_ACTIVE_TESTS_LIST]
 
@@ -1973,8 +2025,7 @@ def get_test_by_code(test_code: str) -> Optional[Dict[str, Any]]:
         return None
     clean_code = str(test_code).upper().strip().replace("#", "")
 
-    if not is_tests_cache_valid():
-        preload_all_tests_cache()
+    _ensure_tests_cache_loaded()
 
     with _RAM_CACHE_LOCK:
         if clean_code in _GLOBAL_TESTS_BY_CODE:
@@ -1990,8 +2041,7 @@ def get_test_by_id(test_id: int) -> Optional[Dict[str, Any]]:
         return None
     tid = int(test_id)
 
-    if not is_tests_cache_valid():
-        preload_all_tests_cache()
+    _ensure_tests_cache_loaded()
 
     with _RAM_CACHE_LOCK:
         if tid in _GLOBAL_TESTS_CACHE:
@@ -2004,8 +2054,7 @@ get_test = get_test_by_id
 
 def get_all_tests() -> List[Dict[str, Any]]:
     """Zero-DB-Read: Barcha testlar ro'yxatini to'g'ridan-to'g'ri server RAM xotirasidan qaytarish."""
-    if not is_tests_cache_valid():
-        preload_all_tests_cache()
+    _ensure_tests_cache_loaded()
     with _RAM_CACHE_LOCK:
         return [dict(t) for t in _GLOBAL_ALL_TESTS_LIST]
 

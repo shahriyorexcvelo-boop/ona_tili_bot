@@ -360,12 +360,12 @@ async def handle_admin_test_pdf_report(request):
         is_auth = (tg_id and (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID))) or (secret_key == "rash_admin_secret_2026") or (tg_id == ADMIN_ID)
         
         # Test mavjudligini tekshirish
-        test = await asyncio.to_thread(test_db.get_test_by_id, test_id)
+        test = await test_db.db(test_db.get_test_by_id, test_id)
         if not test:
             return web.json_response({"success": False, "message": "Test topilmadi"}, status=404)
 
         # PDF hisobotini asinxron generatsiya qilish
-        pdf_path = await asyncio.to_thread(test_db.generate_test_results_pdf, test_id)
+        pdf_path = await test_db.db(test_db.generate_test_results_pdf, test_id)
         if not pdf_path or not os.path.exists(pdf_path):
             return web.json_response({"success": False, "message": "PDF hisobotni shakllantirib bo'lmadi yoki testda ishtirokchilar mavjud emas"}, status=500)
 
@@ -1224,9 +1224,9 @@ async def handle_app_profile(request):
         # Agar foydalanuvchi admin bo'lsa va hali bazada yo'q bo'lsa, avtomatik yaratamiz
         is_admin_user = await test_db.db(test_db.is_admin, tg_id or 0, ADMIN_ID)
         if is_admin_user and tg_id and tg_id > 0:
-            existing_user = await asyncio.to_thread(test_db.get_user, tg_id)
+            existing_user = await test_db.db(test_db.get_user, tg_id)
             if not existing_user:
-                await asyncio.to_thread(
+                await test_db.db(
                     test_db.add_or_update_user,
                     tg_id, "Administrator", "", "", "approved"
                 )
@@ -1251,7 +1251,7 @@ async def handle_app_profile(request):
                 "bot_username": bot_user
             })
 
-        user, is_admin, submissions, pending_users = await asyncio.to_thread(_fetch_profile_data_sync, tg_id)
+        user, is_admin, submissions, pending_users = await test_db.db(_fetch_profile_data_sync, tg_id)
 
         # Foydalanuvchi statistikasi
         avg_score = 0.0
@@ -1315,7 +1315,7 @@ async def handle_app_set_pin(request):
         pin = str(data.get('pin', '')).strip()
         if not tg_id or len(pin) != 4:
             return web.json_response({"success": False, "message": "4 xonali PIN kerak"}, status=400)
-        await asyncio.to_thread(test_db.set_user_pin, tg_id, pin)
+        await test_db.db(test_db.set_user_pin, tg_id, pin)
         return web.json_response({"success": True})
     except Exception as e:
         return web.json_response({"success": False, "message": str(e)}, status=400)
@@ -1338,7 +1338,7 @@ async def handle_app_verify_pin(request):
         data = await request.json()
         tg_id = int(data.get('tg_id', 0))
         pin = str(data.get('pin', '')).strip()
-        stored = await asyncio.to_thread(test_db.get_user_pin, tg_id)
+        stored = await test_db.db(test_db.get_user_pin, tg_id)
         if stored and stored == pin:
             return web.json_response({"success": True, "valid": True})
         return web.json_response({"success": True, "valid": False})
@@ -1367,11 +1367,11 @@ async def handle_app_compare_keys(request):
             }, status=429)
 
         async with COMPARE_CONCURRENCY_SEMAPHORE:
-            test = await asyncio.to_thread(test_db.get_test_by_id, test_id)
+            test = await test_db.db(test_db.get_test_by_id, test_id)
             if not test:
                 return web.json_response({"success": False, "message": "Test topilmadi"}, status=404)
 
-            is_published = await asyncio.to_thread(test_db.is_test_results_published, test_id)
+            is_published = await test_db.db(test_db.is_test_results_published, test_id)
             if not is_published:
                 return web.json_response({
                     "success": False, 
@@ -1382,7 +1382,7 @@ async def handle_app_compare_keys(request):
             if expected_code and expected_code != code:
                 return web.json_response({"success": False, "message": "Parol noto'g'ri!"}, status=403)
 
-            sub = await asyncio.to_thread(test_db.get_user_submission_for_test, test_id, tg_id)
+            sub = await test_db.db(test_db.get_user_submission_for_test, test_id, tg_id)
             if not sub:
                 return web.json_response({"success": False, "message": "Siz ushbu testni topshirmagansiz"}, status=400)
 
@@ -1541,7 +1541,7 @@ async def handle_app_active_tests(request):
                     "status": u_check.get("status")
                 }, status=403)
 
-        result, is_user_admin, now_uzb = await asyncio.to_thread(_fetch_active_tests_payload_sync, tg_id)
+        result, is_user_admin, now_uzb = await test_db.db(_fetch_active_tests_payload_sync, tg_id)
         return web.json_response({
             "success": True, 
             "tests": result,
@@ -1559,7 +1559,7 @@ async def handle_app_my_results(request):
         tg_id = int(request.rel_url.query.get('tg_id', 0))
         if not tg_id:
             return web.json_response({"success": True, "results": []})
-        submissions = await asyncio.to_thread(test_db.get_user_submissions, tg_id)
+        submissions = await test_db.db(test_db.get_user_submissions, tg_id)
         return web.json_response({"success": True, "results": submissions})
     except Exception as e:
         log.error(f"App My Results API Error: {e}", exc_info=True)
@@ -1815,7 +1815,7 @@ async def handle_app_autosave_answer(request):
         # Butun javoblar to'plami yuborilgan bo'lsa
         bulk_answers = data.get("answers")
         if isinstance(bulk_answers, dict) and bulk_answers:
-            ok = await asyncio.to_thread(test_db.save_bulk_draft, user_tg_id, test_id, bulk_answers)
+            ok = await test_db.db(test_db.save_bulk_draft, user_tg_id, test_id, bulk_answers)
             return web.json_response({"success": ok, "saved_at": int(time.time()), "count": len(bulk_answers)})
 
         # Bitta savol javobi bo'lsa
@@ -1824,7 +1824,7 @@ async def handle_app_autosave_answer(request):
         if not q_key:
             return web.json_response({"success": False, "message": "question_key ko'rsatilmadi"}, status=400)
 
-        ok = await asyncio.to_thread(test_db.save_answer_draft, user_tg_id, test_id, q_key, ans_val)
+        ok = await test_db.db(test_db.save_answer_draft, user_tg_id, test_id, q_key, ans_val)
         return web.json_response({"success": ok, "saved_at": int(time.time()), "key": q_key})
     except Exception as e:
         log.warning(f"Autosave answer error: {e}")
@@ -1850,7 +1850,7 @@ async def handle_app_get_draft(request):
             return web.json_response({"success": False, "answers": {}}, status=400)
 
         user_tg_id = int(user_tg_id)
-        drafts = await asyncio.to_thread(test_db.get_answer_drafts, user_tg_id, test_id)
+        drafts = await test_db.db(test_db.get_answer_drafts, user_tg_id, test_id)
         return web.json_response({"success": True, "test_id": test_id, "answers": drafts})
     except Exception as e:
         log.warning(f"Get draft error: {e}")
@@ -2065,11 +2065,11 @@ async def handle_dashboard_overview(request):
 
     try:
         summary, recent_subs, logs, tests, recent_users = await asyncio.gather(
-            asyncio.to_thread(test_db.get_dashboard_summary),
-            asyncio.to_thread(test_db.get_all_submissions_for_admin, 15),
-            asyncio.to_thread(test_db.get_activity_logs, 80),
-            asyncio.to_thread(test_db.get_tests_with_stats),
-            asyncio.to_thread(test_db.get_recent_users, 15)
+            test_db.db(test_db.get_dashboard_summary),
+            test_db.db(test_db.get_all_submissions_for_admin, 15),
+            test_db.db(test_db.get_activity_logs, 80),
+            test_db.db(test_db.get_tests_with_stats),
+            test_db.db(test_db.get_recent_users, 15)
         )
         for s in recent_subs:
             s['submitted_at_fmt'] = format_uzb_time(s.get('submitted_at'), fmt="%d.%m.%Y %H:%M:%S")
@@ -2102,7 +2102,7 @@ async def handle_dashboard_overview(request):
 async def handle_dashboard_submissions(request):
     try:
         limit = int(request.rel_url.query.get('limit', 1000))
-        subs = await asyncio.to_thread(test_db.get_all_submissions_for_admin, limit)
+        subs = await test_db.db(test_db.get_all_submissions_for_admin, limit)
         for s in subs:
             s['submitted_at_fmt'] = format_uzb_time(s.get('submitted_at'), fmt="%d.%m.%Y %H:%M:%S")
         return web.json_response({
@@ -2117,7 +2117,7 @@ async def handle_dashboard_submissions(request):
 async def handle_dashboard_submission_detail(request):
     try:
         sub_id = int(request.match_info.get('id', 0))
-        detail = await asyncio.to_thread(test_db.get_submission_details_for_admin, sub_id)
+        detail = await test_db.db(test_db.get_submission_details_for_admin, sub_id)
         if not detail:
             return web.json_response({"success": False, "error": "Natija topilmadi"}, status=404)
         
@@ -2149,7 +2149,7 @@ async def handle_dashboard_submission_detail(request):
 async def handle_dashboard_user_submissions(request):
     try:
         user_tg_id = int(request.match_info.get('tg_id', 0))
-        subs = await asyncio.to_thread(test_db.get_user_results, user_tg_id)
+        subs = await test_db.db(test_db.get_user_results, user_tg_id)
         for s in subs:
             s['submitted_at_fmt'] = format_uzb_time(s.get('submitted_at'), fmt="%d.%m.%Y %H:%M:%S")
         return web.json_response({
@@ -2167,8 +2167,8 @@ async def handle_dashboard_users(request):
         return web.json_response(_dashboard_users_cache["data"])
     try:
         users, counts = await asyncio.gather(
-            asyncio.to_thread(test_db.get_all_users),
-            asyncio.to_thread(test_db.get_users_count)
+            test_db.db(test_db.get_all_users),
+            test_db.db(test_db.get_users_count)
         )
         for u in users:
             u['registered_at_fmt'] = format_uzb_time(u.get('registered_at'), fmt="%d.%m.%Y %H:%M") if u.get('registered_at') else "—"
@@ -2193,7 +2193,7 @@ async def handle_dashboard_tests(request):
     if _dashboard_tests_cache["data"] and (now - _dashboard_tests_cache["ts"] < 15.0):
         return web.json_response(_dashboard_tests_cache["data"])
     try:
-        tests = await asyncio.to_thread(test_db.get_tests_with_stats)
+        tests = await test_db.db(test_db.get_tests_with_stats)
         for t in tests:
             if t.get('created_at'):
                 t['created_at_fmt'] = format_uzb_time(t.get('created_at'), fmt="%d.%m.%Y %H:%M")
@@ -2213,7 +2213,7 @@ async def handle_dashboard_tests(request):
 async def handle_dashboard_logs(request):
     try:
         limit = int(request.rel_url.query.get('limit', 100))
-        logs = await asyncio.to_thread(test_db.get_activity_logs, limit)
+        logs = await test_db.db(test_db.get_activity_logs, limit)
         for l in logs:
             l['time_fmt'] = format_uzb_time(l.get('time'), fmt="%d.%m.%Y %H:%M:%S")
         return web.json_response({
@@ -2418,7 +2418,7 @@ async def handle_dashboard_warn_user(request):
         if not tg_id:
             return web.json_response({"success": False, "error": "tg_id ko'rsatilmadi"}, status=400)
 
-        user = await asyncio.to_thread(test_db.get_user, tg_id)
+        user = await test_db.db(test_db.get_user, tg_id)
         fname = user.get("fullname") if user else "Foydalanuvchi"
 
         if tests_count == 0:
@@ -2450,7 +2450,7 @@ async def handle_dashboard_warn_user(request):
             })
         except Exception as e:
             if is_user_gone_error(e):
-                await asyncio.to_thread(test_db.delete_user, tg_id, is_self_delete=True)
+                await test_db.db(test_db.delete_user, tg_id, is_self_delete=True)
                 return web.json_response({
                     "success": False,
                     "blocked": True,
@@ -2511,7 +2511,7 @@ async def handle_dashboard_warn_users_batch(request):
                 await asyncio.sleep(0.04)
             except Exception as e:
                 if is_user_gone_error(e):
-                    await asyncio.to_thread(test_db.delete_user, tg_id, is_self_delete=True)
+                    await test_db.db(test_db.delete_user, tg_id, is_self_delete=True)
                     deleted_count += 1
                 else:
                     failed_count += 1
@@ -2544,7 +2544,7 @@ async def handle_dashboard_broadcast(request):
             return web.json_response({"success": False, "message": "Xabar matni yoki rasm havolasi kiritilishi shart!"}, status=400)
 
         # 1. Auditoriyani aniqlash
-        all_users = await asyncio.to_thread(test_db.get_all_users)
+        all_users = await test_db.db(test_db.get_all_users)
         target_users = []
         if target == 'all':
             target_users = all_users
@@ -2553,7 +2553,7 @@ async def handle_dashboard_broadcast(request):
         elif target == 'inactive':
             target_users = [u for u in all_users if int(u.get('tests_count', 0) or 0) == 0]
         elif target == 'test' and test_id > 0:
-            subs = await asyncio.to_thread(test_db.get_test_submissions_with_users, test_id)
+            subs = await test_db.db(test_db.get_test_submissions_with_users, test_id)
             test_tg_ids = {s.get('user_tg_id') for s in subs if s.get('user_tg_id')}
             target_users = [u for u in all_users if u.get('tg_id') in test_tg_ids]
         else:
@@ -2565,7 +2565,7 @@ async def handle_dashboard_broadcast(request):
         # 2. Batch yaratish
         batch_id = f"BC-{datetime.now(UZB_TZ).strftime('%y%m%d%H%M%S')}-{uuid.uuid4().hex[:4].upper()}"
         summary_text = (f"[{target.upper()}] " + (message_text or "Rasm xabari"))[:400]
-        await asyncio.to_thread(
+        await test_db.db(
             test_db.create_broadcast_batch,
             batch_id=batch_id,
             sender_tg_id=ADMIN_ID,
@@ -2612,17 +2612,17 @@ async def handle_dashboard_broadcast(request):
                     )
 
                 if sent_msg and hasattr(sent_msg, 'message_id'):
-                    await asyncio.to_thread(test_db.record_broadcast_message, batch_id, uid, sent_msg.message_id)
+                    await test_db.db(test_db.record_broadcast_message, batch_id, uid, sent_msg.message_id)
                 sent_count += 1
                 await asyncio.sleep(0.04)
             except Exception as e:
                 if is_user_gone_error(e):
-                    await asyncio.to_thread(test_db.delete_user, uid, is_self_delete=True)
+                    await test_db.db(test_db.delete_user, uid, is_self_delete=True)
                     deleted_count += 1
                 else:
                     fail_count += 1
 
-        await asyncio.to_thread(test_db.update_broadcast_sent_count, batch_id, sent_count)
+        await test_db.db(test_db.update_broadcast_sent_count, batch_id, sent_count)
 
         del_note = f" ({deleted_count} ta botni bloklagan akkaunt tozalandi)" if deleted_count else ""
         return web.json_response({
@@ -2643,7 +2643,7 @@ async def handle_dashboard_broadcast_history(request):
     """Dashboard uchun so'nggi xabarnomalar tarixi."""
     try:
         limit = int(request.rel_url.query.get('limit', 25))
-        history = await asyncio.to_thread(test_db.get_recent_broadcasts, limit)
+        history = await test_db.db(test_db.get_recent_broadcasts, limit)
         for h in history:
             h['created_at_fmt'] = format_uzb_time(h.get('created_at'), fmt="%d.%m.%Y %H:%M")
         return web.json_response({"success": True, "history": history})
@@ -2661,7 +2661,7 @@ async def handle_dashboard_broadcast_delete(request):
             return web.json_response({"success": False, "error": "batch_id ko'rsatilmadi"}, status=400)
 
         deleted, fail = await delete_broadcast_batch_from_users(batch_id)
-        await asyncio.to_thread(test_db.mark_broadcast_deleted, batch_id)
+        await test_db.db(test_db.mark_broadcast_deleted, batch_id)
         return web.json_response({
             "success": True,
             "deleted": deleted,

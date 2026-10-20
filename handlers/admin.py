@@ -163,7 +163,7 @@ async def adm_warn_time_cb(call: CallbackQuery):
         "all": "Barcha vaqt bo'yicha (cheklovsiz)"
     }
 
-    target_users = get_inactive_target_users(target_count=cnt, time_filter=time_f)
+    target_users = await test_db.db(get_inactive_target_users, target_count=cnt, time_filter=time_f)
     user_count = len(target_users)
 
     if user_count == 0:

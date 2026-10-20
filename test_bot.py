@@ -25,6 +25,18 @@ dp.include_router(admin_router)
 dp.include_router(user_router)
 
 
+async def tests_cache_refresher():
+    """Har 30 soniyada global testlar keshini fonda yangilab turuvchi vazifa (event loop ni bloklamaydi)."""
+    while True:
+        try:
+            await asyncio.sleep(30)
+            await test_db.db(test_db.preload_all_tests_cache)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.warning(f"⚠️ Testlar keshini fonda yangilashda ogohlantirish: {e}")
+
+
 # ── ASOSIY ISHGA TUSHIRISH (MAIN) ─────────────────────
 async def main():
     global WEBAPP_URL
@@ -85,7 +97,10 @@ async def main():
     # 5. Avtomatik jadval tekshiruvchisini ishga tushirish
     _sched_task = asyncio.create_task(schedule_checker())
 
-    # 6. Telegram Botni ishga tushirish (Webhook yoki Polling)
+    # 6. Global testlar keshini fonda har 30 soniyada yangilab turish (Zero-Block)
+    _cache_refresher_task = asyncio.create_task(tests_cache_refresher())
+
+    # 7. Telegram Botni ishga tushirish (Webhook yoki Polling)
     try:
         # Telegram rasmiy menyu buyruqlarini ro'yxatdan o'tkazish
         try:
@@ -140,6 +155,9 @@ async def main():
             await bot.delete_webhook(drop_pending_updates=True)
             await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
+        for t in (_cache_refresher_task, _sched_task, _tunnel_task):
+            if t and not t.done():
+                t.cancel()
         if use_webhook_mode:
             try:
                 await bot.delete_webhook()

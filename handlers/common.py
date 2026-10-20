@@ -116,7 +116,7 @@ def get_all_admin_ids() -> list:
 
 async def notify_all_admins(bot: Bot, text: str, reply_markup=None):
     """Barcha adminlarga (Bosh admin va barcha tayinlangan yordamchi adminlarga) parallel xabar yuborish"""
-    admin_ids = get_all_admin_ids()
+    admin_ids = await test_db.db(get_all_admin_ids)
     if not admin_ids:
         return
 
@@ -360,7 +360,7 @@ async def send_inactive_warning_messages(
     """
     Tanlangan parametrlar bo'yicha foydalanuvchilarga formal ogohlantirish xabari yuborish.
     """
-    target_users = get_inactive_target_users(target_count=target_count, time_filter=time_filter)
+    target_users = await test_db.db(get_inactive_target_users, target_count=target_count, time_filter=time_filter)
 
     sent_users = []
     failed_users = []
@@ -534,7 +534,7 @@ async def notify_admins_test_results_published(test_id: int, publisher_tg_id: in
     - Barcha adminlarga xabar va natijalar PDF fayli yuboriladi.
     """
     try:
-        test = await asyncio.to_thread(test_db.get_test_by_id, test_id)
+        test = await test_db.db(test_db.get_test_by_id, test_id)
         if not test:
             return
 
@@ -542,10 +542,10 @@ async def notify_admins_test_results_published(test_id: int, publisher_tg_id: in
         if publisher_tg_id == ADMIN_ID:
             publisher_name = "Shaxriyor (Bosh Admin)"
         else:
-            u = await asyncio.to_thread(test_db.get_user, publisher_tg_id)
+            u = await test_db.db(test_db.get_user, publisher_tg_id)
             publisher_name = u.get("fullname", "Admin") if u else f"Admin (ID: {publisher_tg_id})"
 
-        subs = await asyncio.to_thread(test_db.get_test_results_leaderboard, test_id)
+        subs = await test_db.db(test_db.get_test_results_leaderboard, test_id)
         subs_count = len(subs)
 
         eval_title = "Rasch modeli (JMLE)" if eval_type == "rasch" else "Standart ballar"
@@ -558,9 +558,9 @@ async def notify_admins_test_results_published(test_id: int, publisher_tg_id: in
             f"📑 <i>To'liq natijalar reyting jadvali (PDF) quyida ilova qilindi:</i>"
         )
 
-        pdf_path = await asyncio.to_thread(test_db.generate_test_results_pdf, test_id)
+        pdf_path = await test_db.db(test_db.generate_test_results_pdf, test_id)
 
-        all_admins = await asyncio.to_thread(test_db.get_all_admins)
+        all_admins = await test_db.db(test_db.get_all_admins)
         admin_ids = set()
         admin_ids.add(ADMIN_ID)
         for a in (all_admins or []):

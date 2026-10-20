@@ -238,11 +238,96 @@ def test_scenario_8_cache_ttl_and_invalidation(monkeypatch):
     conn.commit()
     test_db._close_conn(conn)
     
-    # Kesh muddati hali tugamagan (TTL 45s) paytda keshdan o'qiydi
+    # Kesh muddati hali tugamagan paytda keshdan o'qiydi
     still_cached = test_db.get_test_by_id(108)
     assert still_cached["title"] == "Boshlang'ich Nom"
     
-    # Kesh vaqti o'tganda (yoki invalidate chaqirilganda) DB dan yangi qiymat olinadi
+    # Non-blocking kesh: TTL o'tgan bo'lsa ham get_test_by_id sinxron bloklamaydi, eski keshni qaytaradi
     test_db._GLOBAL_TESTS_CACHE_TIME = time.time() - 60.0 # 60 soniya oldinga surish (TTL tugadi)
+    stale = test_db.get_test_by_id(108)
+    assert stale["title"] == "Boshlang'ich Nom"
+
+    # Fon vazifasi (preload_all_tests_cache) chaqirilganda kesh yangilanadi
+    test_db.preload_all_tests_cache()
     refreshed = test_db.get_test_by_id(108)
     assert refreshed["title"] == "Yangi Yangilangan Nom"
+
+
+# -----------------------------------------------------------------------------
+# 9. Stsenariy: is_maintenance_mode 5 soniyalik RAM keshi va invalidatsiyasi
+# -----------------------------------------------------------------------------
+def test_scenario_9_maintenance_mode_5s_cache():
+    test_db.set_maintenance_mode(False)
+    assert test_db.is_maintenance_mode() is False
+
+    # DB da to'g'ridan-to'g'ri o'zgartiramiz (keshni chetlab o'tib)
+    conn = test_db.get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE system_settings SET value = '1' WHERE key = 'maintenance_mode'")
+    conn.commit()
+    test_db._close_conn(conn)
+
+    # 5 soniya davomida keshdagi False qiymat qaytishi kerak (0 DB so'rovi)
+    assert test_db.is_maintenance_mode() is False
+
+    # set_maintenance_mode yoki invalidate_maintenance_cache chaqirilganda darhol yangilanadi
+    test_db.invalidate_maintenance_cache()
+    test_db.invalidate_settings_cache()
+    assert test_db.is_maintenance_mode() is True
+
+    # Qayta tiklash
+    test_db.set_maintenance_mode(False)
+    assert test_db.is_maintenance_mode() is False
+
+
+# -----------------------------------------------------------------------------
+# 10. Stsenariy: has_any_active_test 5 soniyalik RAM keshi va invalidatsiyasi
+# -----------------------------------------------------------------------------
+def test_scenario_10_has_any_active_test_5s_cache():
+    test_db.invalidate_test_cache()
+    test_db.invalidate_active_test_cache()
+
+    # Birorta ham faol test yo'q holat
+    initial_has_active = test_db.has_any_active_test()
+    assert isinstance(initial_has_active, bool)
+
+    # Yangi faol test qo'shamiz
+    _create_sample_test(test_id=999, test_code="T999", is_active=1, title="Active Test")
+    
+    # invalidate_test_cache chaqirilganda faol test darhol ko'rinadi
+    assert test_db.has_any_active_test() is True
+
+    # Testni nofaol qilamiz
+    conn = test_db.get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE tests SET is_active = 0 WHERE id = 999")
+    conn.commit()
+    test_db._close_conn(conn)
+
+    # 5 soniya kesh tufayli hali True turadi
+    assert test_db.has_any_active_test() is True
+
+    # invalidate_test_cache chaqirilganda kesh tozalanadi
+    test_db.invalidate_test_cache(999)
+    assert test_db.has_any_active_test() is False
+
+
+# -----------------------------------------------------------------------------
+# 11. Stsenariy: keyboards va should_apply_night_mode tez ishlashi
+# -----------------------------------------------------------------------------
+def test_scenario_11_keyboards_and_night_mode_fast():
+    from core.keyboards import main_menu_kb, admin_menu_kb
+    from core.config import should_apply_night_mode
+
+    # main_menu_kb va admin_menu_kb sub-millisekundda bajarilishi kerak (0 bloklanish)
+    t0 = time.perf_counter()
+    kb_user = main_menu_kb(12345678)
+    kb_admin = admin_menu_kb()
+    night_check = should_apply_night_mode(12345678)
+    duration = time.perf_counter() - t0
+
+    assert kb_user is not None
+    assert kb_admin is not None
+    assert isinstance(night_check, bool)
+    # 3 ta chaqiruv jami 50ms dan ancha tez bo'lishi kerak (kesh tufayli < 10ms)
+    assert duration < 0.05
