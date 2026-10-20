@@ -41,7 +41,7 @@ async def main():
 
 
     # 2. Webhook va Polling rejimini aniqlash (M7: Bir nechta instance to'qnashuvini oldini olish)
-    USE_WEBHOOK = os.getenv("USE_WEBHOOK", "1").strip().lower() in ("1", "true", "yes")
+    USE_WEBHOOK = os.getenv("USE_WEBHOOK", "0").strip().lower() in ("1", "true", "yes")
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "onatili_sec_token_2026").strip()
     WEBHOOK_PATH = "/tg-webhook"
 
