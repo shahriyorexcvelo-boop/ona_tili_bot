@@ -596,6 +596,7 @@ def init_db():
                 cur.execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS is_late INTEGER DEFAULT 0")
                 cur.execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'accepted'")
                 cur.execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS reject_reason TEXT DEFAULT ''")
+                cur.execute("UPDATE users SET status = 'approved' WHERE status = 'pending'")
                 conn.commit()
             except Exception:
                 conn.rollback()

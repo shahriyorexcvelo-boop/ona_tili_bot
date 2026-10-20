@@ -126,14 +126,7 @@ async def check_access(message: Message) -> bool:
     if not u:
         await message.answer("⚠️ Iltimos, avval /start buyrug'i orqali ro'yxatdan o'ting.")
         return False
-    st = u.get("status", "pending")
-    if st == "pending":
-        await message.answer(
-            "⏳ <b>Arizangiz ko'rib chiqilmoqda!</b>\n\n"
-            "Administrator sizga ruxsat bergach, testlarni yechishingiz mumkin bo'ladi.\n"
-            "Iltimos, tasdiqlanishini kuting..."
-        )
-        return False
+    st = u.get("status", "approved")
     if st in ["blocked", "rejected"]:
         await message.answer(
             "⛔️ <b>Sizning botdan foydalanish huquqingiz to'xtatilgan yoki rad etilgan!</b>\n\n"

@@ -77,11 +77,6 @@ async def handle_submit_test_api(request):
                     "success": False,
                     "message": "⚠️ Iltimos, avval Telegram botimizda ro'yxatdan o'ting!"
                 }, status=403)
-            if user_obj.get("status") == "pending":
-                return web.json_response({
-                    "success": False,
-                    "message": "⏳ Arizangiz hali administrator tomonidan tasdiqlanmagan. Ruxsat berilgach test topshirishingiz mumkin."
-                }, status=403)
             if user_obj.get("status") in ["blocked", "rejected"]:
                 return web.json_response({
                     "success": False,
