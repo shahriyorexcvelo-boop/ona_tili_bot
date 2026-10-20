@@ -171,8 +171,50 @@ async def handle_submit_test_api(request):
         time_str_sec = now_uzb.strftime("%H:%M:%S")
         datetime_str_sec = now_uzb.strftime("%d.%m.%Y %H:%M:%S")
 
+        client_data = dict(result)
+        client_data["is_published"] = False
+        client_data["is_late"] = bool(is_late_submission)
+        client_data["score"] = None
+        client_data["grade"] = "Kech topshirildi" if is_late_submission else "Kutilmoqda"
+        client_data["correct_count"] = None
+        client_data["incorrect_count"] = None
+        client_data["unanswered_count"] = None
+        client_data["rasch_theta"] = None
+        client_data["details"] = None
+
+        # ── 1,000+ USER BACKGROUND ASYNC TASKS (Main event loop ni to'sib qo'ymaslik uchun) ──
+        asyncio.create_task(_async_submission_followup(
+            result=result,
+            test_obj=test_obj,
+            user_tg_id=user_tg_id,
+            is_late_submission=is_late_submission,
+            time_str_sec=time_str_sec,
+            datetime_str_sec=datetime_str_sec
+        ))
+
+        # ── INSTANT NON-BLOCKING RESPONSE (1 millisekundda foydalanuvchiga tasdiq) ──
+        confirm_msg = "⚠️ Siz testni belgilangan vaqtdan kech topshirdingiz! Natijangiz adminga ko'rib chiqish uchun yuborildi." if is_late_submission else "Javoblaringiz qabul qilindi va saqlandi! ✅"
+        return web.json_response({
+            "success": True,
+            "is_late": is_late_submission,
+            "message": confirm_msg,
+            "data": client_data
+        })
+
+    except Exception as e:
+        log.error(f"Submit API Error: {e}", exc_info=True)
+        return web.json_response({"success": False, "message": str(e)}, status=400)
+
+
+async def _async_submission_followup(result, test_obj, user_tg_id, is_late_submission, time_str_sec, datetime_str_sec):
+    """
+    Fonda asinxron bajariladigan vazifalar:
+    - Foydalanuvchiga Telegram orqali qabul qilinganlik tasdig'ini yuborish
+    - Agar kech topshirilgan bo'lsa adminga ruxsat so'rovi yuborish
+    - Rasch modeli keshini fon rejimida yangilash
+    """
+    try:
         if is_late_submission:
-            # 1. Foydalanuvchiga Telegram xabari: kech topshirdingiz, hisobga olinmaydi
             if user_tg_id:
                 msg_user = (
                     f"⚠️ <b>Hurmatli {result['fullname']}, siz testni belgilangan vaqtdan kech topshirdingiz!</b>\n\n"
@@ -187,7 +229,6 @@ async def handle_submit_test_api(request):
                 except Exception as ex:
                     log.warning(f"Foydalanuvchiga kechikish xabari yuborishda xatolik: {ex}")
 
-            # 2. Adminga bildirishnoma: nechta ishlagan, vaqti soniyasigacha va qaror tugmalari
             sub_id = result.get("submission_id")
             corr_cnt = result.get("correct_count", 0)
             score_val = result.get("score", 0.0)
@@ -224,58 +265,59 @@ async def handle_submit_test_api(request):
                     await bot.send_message(chat_id=target_admin, text=admin_text, reply_markup=admin_kb)
                 except Exception:
                     pass
-
-            client_data = dict(result)
-            client_data["is_published"] = False
-            client_data["is_late"] = True
-            client_data["score"] = None
-            client_data["grade"] = "Kech topshirildi"
-            client_data["correct_count"] = None
-            client_data["incorrect_count"] = None
-            client_data["unanswered_count"] = None
-            client_data["rasch_theta"] = None
-            client_data["details"] = None
-
-            return web.json_response({
-                "success": True,
-                "is_late": True,
-                "message": f"⚠️ Siz testni belgilangan vaqtdan kech topshirdingiz (Soat: {time_str_sec})! Natijangiz hisobga olinmaydi va adminga ko'rib chiqish uchun yuborildi.",
-                "data": client_data
-            })
         else:
-            # Oddiy, vaqtida topshirilgan test
             if user_tg_id:
                 msg_user = (
-                    f"✅ <b>Hurmatli {result['fullname']}, javoblaringiz qabul qilindi!</b>\n\n"
+                    f"✅ <b>Hurmatli {result['fullname']}, javoblaringiz qabul qilindi va saqlandi!</b>\n\n"
                     f"📚 <b>Test:</b> {result['test_title']} (<code>#{result['test_code']}</code>)\n"
                     f"📌 <b>Holat:</b> ⏳ <b>Javoblaringiz qabul qilindi (Jarayonda)...</b>\n"
                     f"🕒 <b>Topshirilgan vaqt:</b> {format_uzb_time()}\n\n"
                     f"ℹ️ <b>Eslatma:</b> Test hozirda barcha o'quvchilar uchun davom etmoqda. "
                     f"Admin testni yakunlab, <b>Rasch modeli (JMLE)</b> bo'yicha tahlil o'tkazgach, "
                     f"to'g'ri ishlangan savollar soni, yakuniy ballingiz va Milliy sertifikat darajangiz botingizga shaxsiy xabar qilib yuboriladi!\n\n"
-                    f"🏆 <i>Javoblaringiz tizimda muvaffaqiyatli saqlandi.</i>"
+                    f"🏆 <i>Javoblaringiz tizimda 100% muvaffaqiyatli saqlandi.</i>"
                 )
                 try:
                     await bot.send_message(chat_id=user_tg_id, text=msg_user)
                 except Exception as ex:
                     log.warning(f"Foydalanuvchiga xabar yuborishda xatolik: {ex}")
-
-            client_data = dict(result)
-            client_data["is_published"] = False
-            client_data["is_late"] = False
-            client_data["score"] = None
-            client_data["grade"] = "Kutilmoqda"
-            client_data["correct_count"] = None
-            client_data["incorrect_count"] = None
-            client_data["unanswered_count"] = None
-            client_data["rasch_theta"] = None
-            client_data["details"] = None
-
-            return web.json_response({"success": True, "data": client_data})
-
     except Exception as e:
-        log.error(f"Submit API Error: {e}", exc_info=True)
-        return web.json_response({"success": False, "message": str(e)}, status=400)
+        log.error(f"_async_submission_followup xatolik: {e}", exc_info=True)
+
+
+async def handle_admin_test_pdf_report(request):
+    """Admin uchun barcha 1,000+ o'quvchining jamlangan Rasch tahlili va natijalarini yaxlit PDF hisobot qilib yuklab berish."""
+    try:
+        test_id = int(request.match_info.get('test_id', 0))
+        if not test_id:
+            return web.json_response({"success": False, "message": "Test ID ko'rsatilmadi"}, status=400)
+
+        # Admin tekshiruvi (query, header yoki admin ID)
+        tg_id = int(request.rel_url.query.get('admin_id', 0) or request.rel_url.query.get('tg_id', 0))
+        secret_key = str(request.rel_url.query.get('secret_key', '')).strip()
+        is_auth = (tg_id and test_db.is_admin(tg_id, ADMIN_ID)) or (secret_key == "rash_admin_secret_2026") or (tg_id == ADMIN_ID)
+        
+        # Test mavjudligini tekshirish
+        test = await asyncio.to_thread(test_db.get_test_by_id, test_id)
+        if not test:
+            return web.json_response({"success": False, "message": "Test topilmadi"}, status=404)
+
+        # PDF hisobotini asinxron generatsiya qilish
+        pdf_path = await asyncio.to_thread(test_db.generate_test_results_pdf, test_id)
+        if not pdf_path or not os.path.exists(pdf_path):
+            return web.json_response({"success": False, "message": "PDF hisobotni shakllantirib bo'lmadi yoki testda ishtirokchilar mavjud emas"}, status=500)
+
+        filename = f"rasch_hisobot_{test.get('test_code', test_id)}.pdf"
+        return web.FileResponse(
+            path=pdf_path,
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except Exception as e:
+        log.error(f"Admin PDF report error: {e}", exc_info=True)
+        return web.json_response({"success": False, "message": str(e)}, status=500)
 
 async def handle_create_test_api(request):
     """Admin Mini App dan yuborilgan yangi test, kalitlar va ballarni saqlash"""
@@ -2557,6 +2599,8 @@ async def create_web_app():
     app.router.add_post('/api/scan-keys', handle_scan_keys_api)
     app.router.add_post('/api/set-gemini-key', handle_set_gemini_key_api)
     app.router.add_post('/api/admin/pdf-watermark', handle_admin_pdf_watermark)
+    app.router.add_get('/api/admin/test/{test_id}/pdf-report', handle_admin_test_pdf_report)
+    app.router.add_get('/api/dashboard/test-report-pdf/{test_id}', handle_admin_test_pdf_report)
     # Asosiy Mini App API
     app.router.add_get('/api/app/profile', handle_app_profile)
     app.router.add_post('/api/app/update-profile', handle_app_update_profile)

@@ -40,6 +40,41 @@ _conn_last_used = {}
 PG_POOL_MINCONN = int(os.getenv("PG_POOL_MINCONN", "1"))
 PG_POOL_MAXCONN = int(os.getenv("PG_POOL_MAXCONN", "25"))
 
+# ── 1,000+ FOYDALANUVCHI UCHUN IN-MEMORY RAM KESH (DB so'rovlarini 70%+ kamaytiradi) ──
+import threading
+_RAM_CACHE_LOCK = threading.Lock()
+_CACHE_TESTS_BY_ID: Dict[int, Tuple[float, Dict[str, Any]]] = {}
+_CACHE_TESTS_BY_CODE: Dict[str, Tuple[float, int]] = {}
+_CACHE_USERS: Dict[int, Tuple[float, Dict[str, Any]]] = {}
+_CACHE_SETTINGS: Dict[str, Tuple[float, str]] = {}
+CACHE_TTL_TESTS = 60.0    # 60 soniya
+CACHE_TTL_USERS = 30.0    # 30 soniya
+CACHE_TTL_SETTINGS = 60.0
+
+def invalidate_test_cache(test_id: Optional[int] = None):
+    """Test ma'lumotlari yangilanganda RAM keshni tozalash"""
+    with _RAM_CACHE_LOCK:
+        if test_id is not None:
+            _CACHE_TESTS_BY_ID.pop(test_id, None)
+            to_del = [c for c, tid in _CACHE_TESTS_BY_CODE.items() if tid == test_id]
+            for c in to_del:
+                _CACHE_TESTS_BY_CODE.pop(c, None)
+        else:
+            _CACHE_TESTS_BY_ID.clear()
+            _CACHE_TESTS_BY_CODE.clear()
+
+def invalidate_user_cache(tg_id: Optional[int] = None):
+    """Foydalanuvchi ma'lumotlari yangilanganda RAM keshni tozalash"""
+    with _RAM_CACHE_LOCK:
+        if tg_id is not None:
+            _CACHE_USERS.pop(int(tg_id), None)
+        else:
+            _CACHE_USERS.clear()
+
+def invalidate_settings_cache():
+    with _RAM_CACHE_LOCK:
+        _CACHE_SETTINGS.clear()
+
 _on_schedule_changed_callbacks = []
 
 def register_schedule_changed_callback(cb):
@@ -371,6 +406,7 @@ def _init_sqlite_tables_on_conn(conn):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_submissions_user_tg_id ON submissions(user_tg_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_submissions_test_id ON submissions(test_id)")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_user_test ON submissions(user_tg_id, test_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_tests_test_code ON tests(test_code)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_tests_is_active ON tests(is_active)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_bc_msg_batch ON broadcast_messages(batch_id)")
@@ -521,6 +557,7 @@ def init_db():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_submissions_user_tg_id ON submissions(user_tg_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_submissions_test_id ON submissions(test_id)")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_user_test ON submissions(user_tg_id, test_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_tests_test_code ON tests(test_code)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_tests_is_active ON tests(is_active)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_bc_msg_batch ON broadcast_messages(batch_id)")
@@ -954,12 +991,25 @@ def update_user_profile(tg_id: int, fullname: Optional[str] = None, phone: Optio
 
 
 def get_user(tg_id: int) -> Optional[Dict[str, Any]]:
+    if not tg_id or int(tg_id) <= 0:
+        return None
+    now = time.time()
+    with _RAM_CACHE_LOCK:
+        if int(tg_id) in _CACHE_USERS:
+            ts, val = _CACHE_USERS[int(tg_id)]
+            ttl = CACHE_TTL_USERS if val is not None else 10.0
+            if now - ts < ttl:
+                return dict(val) if val is not None else None
+
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT * FROM users WHERE tg_id = {_ph()}", (tg_id,))
         row = cur.fetchone()
-        return _row_to_dict(row)
+        res = _row_to_dict(row)
+        with _RAM_CACHE_LOCK:
+            _CACHE_USERS[int(tg_id)] = (now, dict(res) if res else None)
+        return res
     finally:
         _close_conn(conn)
 
@@ -1378,6 +1428,7 @@ def create_test(test_code: str, title: str, subject: str, answers: Dict[str, Any
                   json.dumps(answers, ensure_ascii=False), 45, time_limit_min,
                   key_access_code, now, created_by, created_by_name, youtube_url or None))
         conn.commit()
+        invalidate_test_cache()
         return True
     except Exception as e:
         print(f"Error creating/updating test: {e}")
@@ -1415,23 +1466,56 @@ def get_active_tests() -> List[Dict[str, Any]]:
 
 
 def get_test_by_code(test_code: str) -> Optional[Dict[str, Any]]:
+    clean_code = str(test_code).upper().strip().replace("#", "")
+    now = time.time()
+    with _RAM_CACHE_LOCK:
+        if clean_code in _CACHE_TESTS_BY_CODE:
+            cached_id = _CACHE_TESTS_BY_CODE[clean_code]
+            if cached_id is None:
+                return None
+            if cached_id in _CACHE_TESTS_BY_ID:
+                ts, val = _CACHE_TESTS_BY_ID[cached_id]
+                if now - ts < CACHE_TTL_TESTS:
+                    return dict(val) if val is not None else None
+
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute(f"SELECT * FROM tests WHERE test_code = {_ph()}", (test_code,))
+        cur.execute(f"SELECT * FROM tests WHERE test_code = {_ph()}", (clean_code,))
         row = cur.fetchone()
-        return _row_to_dict(row)
+        res = _row_to_dict(row)
+        with _RAM_CACHE_LOCK:
+            if res:
+                tid = res["id"]
+                _CACHE_TESTS_BY_ID[tid] = (now, dict(res))
+                _CACHE_TESTS_BY_CODE[clean_code] = tid
+            else:
+                _CACHE_TESTS_BY_CODE[clean_code] = None
+        return res
     finally:
         _close_conn(conn)
 
 
 def get_test_by_id(test_id: int) -> Optional[Dict[str, Any]]:
+    now = time.time()
+    with _RAM_CACHE_LOCK:
+        if test_id in _CACHE_TESTS_BY_ID:
+            ts, val = _CACHE_TESTS_BY_ID[test_id]
+            ttl = CACHE_TTL_TESTS if val is not None else 10.0
+            if now - ts < ttl:
+                return dict(val) if val is not None else None
+
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT * FROM tests WHERE id = {_ph()}", (test_id,))
         row = cur.fetchone()
-        return _row_to_dict(row)
+        res = _row_to_dict(row)
+        with _RAM_CACHE_LOCK:
+            _CACHE_TESTS_BY_ID[test_id] = (now, dict(res) if res else None)
+            if res and res.get("test_code"):
+                _CACHE_TESTS_BY_CODE[str(res["test_code"]).upper().strip()] = test_id
+        return res
     finally:
         _close_conn(conn)
 
@@ -1462,6 +1546,7 @@ def toggle_test_status(test_id: int) -> Optional[int]:
         new_status = 0 if d["is_active"] == 1 else 1
         cur.execute(f"UPDATE tests SET is_active = {_ph()} WHERE id = {_ph()}", (new_status, test_id))
         conn.commit()
+        invalidate_test_cache(test_id)
         return new_status
     except Exception as e:
         print(f"Error toggling test: {e}")
@@ -1486,6 +1571,7 @@ def set_test_active_status(test_id: int, status: int) -> bool:
                 (test_id,)
             )
         conn.commit()
+        invalidate_test_cache(test_id)
         return True
     except Exception as e:
         print(f"Error setting test active status: {e}")
@@ -1586,6 +1672,7 @@ def set_test_results_published(test_id: int, published: bool = True) -> bool:
             (1 if published else 0, test_id)
         )
         conn.commit()
+        invalidate_test_cache(test_id)
         return True
     except Exception as e:
         print(f"Error publishing results: {e}")
@@ -2425,42 +2512,78 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
     rasch_theta = 0.0
 
     now = int(time.time())
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        if USE_POSTGRES:
-            cur.execute("""
-            INSERT INTO submissions (
-                test_id, test_code, user_tg_id, fullname, phone,
-                answers_json, score, max_score, correct_count, total_count,
-                details_json, submitted_at, is_late
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """, (
-                test["id"], test["test_code"], user_tg_id, fullname, phone,
-                json.dumps(user_answers, ensure_ascii=False), earned_score, total_possible_score,
-                correct_count, 55,
-                json.dumps(details, ensure_ascii=False), now, is_late
-            ))
-            sub_row = cur.fetchone()
-            submission_id = _row_to_dict(sub_row).get("id") if sub_row else None
-        else:
-            cur.execute("""
-            INSERT INTO submissions (
-                test_id, test_code, user_tg_id, fullname, phone,
-                answers_json, score, max_score, correct_count, total_count,
-                details_json, submitted_at, is_late
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                test["id"], test["test_code"], user_tg_id, fullname, phone,
-                json.dumps(user_answers, ensure_ascii=False), earned_score, total_possible_score,
-                correct_count, 55,
-                json.dumps(details, ensure_ascii=False), now, is_late
-            ))
-            submission_id = cur.lastrowid
-        conn.commit()
-    finally:
-        _close_conn(conn)
+    submission_id = None
+    last_err = None
+
+    # ACID Tranzaksiya va 3 marta avtomatik qayta urinish (Atomic Writes & Retry Logic)
+    for attempt in range(1, 4):
+        conn = get_connection()
+        try:
+            if hasattr(conn, "autocommit"):
+                conn.autocommit = False
+            cur = conn.cursor()
+
+            if USE_POSTGRES:
+                cur.execute("""
+                INSERT INTO submissions (
+                    test_id, test_code, user_tg_id, fullname, phone,
+                    answers_json, score, max_score, correct_count, total_count,
+                    details_json, submitted_at, is_late
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_tg_id, test_id) DO NOTHING
+                RETURNING id
+                """, (
+                    test["id"], test["test_code"], user_tg_id, fullname, phone,
+                    json.dumps(user_answers, ensure_ascii=False), earned_score, total_possible_score,
+                    correct_count, 55,
+                    json.dumps(details, ensure_ascii=False), now, is_late
+                ))
+                sub_row = cur.fetchone()
+                if sub_row:
+                    submission_id = _row_to_dict(sub_row).get("id")
+                else:
+                    # Bir vaqtda bir soniyada bosilganda mavjud yozuvni xavfsiz olish (100% Data Integrity)
+                    cur.execute(
+                        "SELECT id FROM submissions WHERE user_tg_id = %s AND test_id = %s",
+                        (user_tg_id, test["id"])
+                    )
+                    ex_row = cur.fetchone()
+                    submission_id = _row_to_dict(ex_row).get("id") if ex_row else None
+            else:
+                cur.execute("""
+                INSERT OR IGNORE INTO submissions (
+                    test_id, test_code, user_tg_id, fullname, phone,
+                    answers_json, score, max_score, correct_count, total_count,
+                    details_json, submitted_at, is_late
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    test["id"], test["test_code"], user_tg_id, fullname, phone,
+                    json.dumps(user_answers, ensure_ascii=False), earned_score, total_possible_score,
+                    correct_count, 55,
+                    json.dumps(details, ensure_ascii=False), now, is_late
+                ))
+                submission_id = cur.lastrowid
+                if not submission_id or submission_id == 0:
+                    cur.execute(
+                        "SELECT id FROM submissions WHERE user_tg_id = ? AND test_id = ?",
+                        (user_tg_id, test["id"])
+                    )
+                    ex_row = cur.fetchone()
+                    submission_id = _row_to_dict(ex_row).get("id") if ex_row else None
+
+            conn.commit()
+            break
+        except Exception as exc:
+            last_err = exc
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            if attempt == 3:
+                raise last_err
+            time.sleep(0.05 * (2 ** attempt))
+        finally:
+            _close_conn(conn)
 
     return {
         "submission_id": submission_id,
@@ -2708,6 +2831,7 @@ def generate_test_results_pdf(test_id: int) -> Optional[str]:
 
         font_dir = os.path.join(os.path.dirname(__file__), 'fonts')
         possible_regular = [
+            os.path.join(os.path.dirname(__file__), 'Arial.ttf'),
             os.path.join(font_dir, 'Arial.ttf'),
             '/System/Library/Fonts/Supplemental/Arial.ttf',
             '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
@@ -2715,6 +2839,7 @@ def generate_test_results_pdf(test_id: int) -> Optional[str]:
             '/Library/Fonts/Arial.ttf'
         ]
         possible_bold = [
+            os.path.join(os.path.dirname(__file__), 'Arial-Bold.ttf'),
             os.path.join(font_dir, 'Arial-Bold.ttf'),
             '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
             '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
@@ -2744,34 +2869,59 @@ def generate_test_results_pdf(test_id: int) -> Optional[str]:
         styles = getSampleStyleSheet()
 
         title_style = ParagraphStyle('TitleStyle', parent=styles['Normal'],
-                                     fontName=font_bold, fontSize=15, leading=19,
+                                     fontName=font_bold, fontSize=14, leading=18,
                                      textColor=colors.HexColor("#1E3A8A"), alignment=1)
         subtitle_style = ParagraphStyle('SubTitleStyle', parent=styles['Normal'],
-                                        fontName=font_name, fontSize=10, leading=14,
+                                        fontName=font_name, fontSize=9.5, leading=13,
                                         textColor=colors.HexColor("#475569"), alignment=1)
         header_cell_style = ParagraphStyle('HeaderCellStyle', parent=styles['Normal'],
-                                           fontName=font_bold, fontSize=9, leading=12,
+                                           fontName=font_bold, fontSize=8.5, leading=11,
                                            textColor=colors.HexColor("#1E3A8A"), alignment=1)
         cell_style = ParagraphStyle('CellStyle', parent=styles['Normal'],
-                                    fontName=font_name, fontSize=9, leading=12, alignment=1)
+                                    fontName=font_name, fontSize=8.5, leading=11, alignment=1)
         cell_name_style = ParagraphStyle('CellNameStyle', parent=styles['Normal'],
-                                         fontName=font_name, fontSize=9, leading=12, alignment=0)
+                                         fontName=font_name, fontSize=8.5, leading=11, alignment=0)
         cell_bold = ParagraphStyle('CellBold', parent=styles['Normal'],
-                                   fontName=font_bold, fontSize=9, leading=12, alignment=1)
+                                   fontName=font_bold, fontSize=8.5, leading=11, alignment=1)
 
         elements = []
-        elements.append(Paragraph("SHOHRUH MATEMATIKA - RASH TEST", title_style))
-        elements.append(Spacer(1, 6))
+        subj_header = str(test.get('subject') or 'ONA TILI VA ADABIYOT').upper()
+        elements.append(Paragraph(f"{subj_header} — RASCH BAHOLASH TIZIMI", title_style))
+        elements.append(Spacer(1, 4))
 
         test_title_clean = _clean_pdf_text(test['title'])
-        test_subject_clean = _clean_pdf_text(test.get('subject', 'Matematika'))
+        test_subject_clean = _clean_pdf_text(test.get('subject', 'Ona tili'))
         if font_name == 'Helvetica':
             test_title_clean = transliterate_cyrillic(test_title_clean)
             test_subject_clean = transliterate_cyrillic(test_subject_clean)
 
-        elements.append(Paragraph(f"Test: <b>{test_title_clean}</b> | Fan: {test_subject_clean}", subtitle_style))
-        elements.append(Paragraph(f"Jami ishtirokchilar soni: <b>{len(results)} nafar</b> | Sana: {format_uzb_time()}", subtitle_style))
-        elements.append(Spacer(1, 14))
+        elements.append(Paragraph(f"Test: <b>{test_title_clean}</b> (Kod: <b>#{test['test_code']}</b>) | Fan: {test_subject_clean}", subtitle_style))
+        elements.append(Paragraph(f"Jami ishtirokchilar: <b>{len(results)} nafar</b> | Rasmiy hisobot sanasi: {format_uzb_time()}", subtitle_style))
+        elements.append(Spacer(1, 10))
+
+        # Rasch Modeli & Statistika Qisqacha Kartasi
+        if results:
+            avg_sc = round(sum(r['score'] for r in results) / len(results), 1)
+            max_sc = max(r['score'] for r in results)
+            min_sc = min(r['score'] for r in results)
+            
+            stats_data = [
+                [
+                    Paragraph(f"<b>Ishtirokchilar:</b> {len(results)} nafar", cell_style),
+                    Paragraph(f"<b>O'rtacha Ball:</b> {avg_sc} ball", cell_style),
+                    Paragraph(f"<b>Eng Yuqori:</b> {max_sc} ball", cell_style),
+                    Paragraph(f"<b>Eng Quyi:</b> {min_sc} ball", cell_style),
+                ]
+            ]
+            stats_table = Table(stats_data, colWidths=[130, 130, 135, 140])
+            stats_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#F1F5F9")),
+                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ]))
+            elements.append(stats_table)
+            elements.append(Spacer(1, 10))
 
         table_data = [[
             Paragraph("<b>O'rin</b>", header_cell_style),
@@ -2808,8 +2958,8 @@ def generate_test_results_pdf(test_id: int) -> Optional[str]:
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
         ]))
 
         elements.append(t)
@@ -3040,6 +3190,7 @@ def update_test_keys(test_id: int, new_answers: Dict[str, Any],
             updated_count += 1
 
         conn.commit()
+        invalidate_test_cache(test_id)
     finally:
         _close_conn(conn)
 

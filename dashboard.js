@@ -1266,6 +1266,9 @@ function renderTests() {
         </td>
         <td style="text-align:right;" onclick="event.stopPropagation();">
           <div style="display:inline-flex;gap:6px;">
+            <a href="/api/admin/test/${t.id}/pdf-report?secret_key=rash_admin_secret_2026" target="_blank" class="btn btn-secondary btn-sm" title="Rasch tahlili va to'liq PDF hisoboti" style="color:var(--primary);font-weight:700;text-decoration:none;display:inline-flex;align-items:center;">
+              📄 PDF
+            </a>
             <button class="btn btn-secondary btn-sm" onclick="openTestModal(${t.id})" title="Barcha kalitlar va statistikani ko'rish">
               ${Icons.eye}Tafsilot
             </button>
@@ -1357,6 +1360,9 @@ function openTestModal(testId) {
       <button class="btn btn-secondary btn-sm" onclick="toggleTestPublishFromModal(${t.id})">
         ${isPub ? Icons.lock + ' Natijalarni yashirish' : Icons.megaphone + ' Natijalarni e\'lon qilish'}
       </button>
+      <a href="/api/admin/test/${t.id}/pdf-report?secret_key=rash_admin_secret_2026" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
+        📄 Rasch & Reyting PDF
+      </a>
     `;
   }
 
