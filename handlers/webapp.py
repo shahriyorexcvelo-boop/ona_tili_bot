@@ -863,6 +863,9 @@ async def find_web_file(filename: str) -> str:
     # 1. Prioritet: to'g'ri papkada to'liq yo'l bilan qidirish
     for base in [BASE_DIR, os.getcwd()]:
         candidates.append(os.path.join(base, filename_clean))
+        if filename_clean.startswith('css/') or filename_clean.startswith('js/') or filename_clean.startswith('img/'):
+            pure_name = filename_clean.split('/', 1)[1]
+            candidates.append(os.path.join(base, pure_name))
 
     # 2. Prioritet subdirlar (js/, css/, img/) faqat agar yo'l prefixsiz berilgan bo'lsa
     if priority_subdirs:
@@ -964,7 +967,7 @@ async def handle_static_file(request):
             # Eski app.js va app.html fallbackdan qaytarilmasin —
             # ular endi js/app.js va real app.html dan to'g'ri yuklanadi
             _basename = os.path.basename(path_name)
-            _STALE_SKIP = {'app.js', 'app.html'}
+            _STALE_SKIP = {'app.js', 'app.html', 'app_style.css', 'test_style.css', 'index.html', 'admin.html', 'admin_app.js', 'test_app.js'}
             if _basename not in _STALE_SKIP:
                 data, mime = web_assets_fallback.get_asset_bytes(path_name)
                 if data:

@@ -19,14 +19,9 @@ const MiniApp = {
         this.tg.ready();
         this.tg.expand();
 
-        // Trackpad orqali mini ilovadan chiqib ketishning oldini olish (vertikal swipe cheklovi)
+        // Vertikal swipe cheklovi
         if (this.tg?.disableVerticalSwipes) {
           this.tg.disableVerticalSwipes();
-        }
-
-        // Telegram 8.0+ Fullscreen rejimini yoqish
-        if (typeof this.tg?.requestFullscreen === 'function') {
-          try { this.tg.requestFullscreen(); } catch (err) {}
         }
 
         // Tasodifan yopilib ketishining oldini olish (agar kerak bo'lsa)
@@ -68,26 +63,22 @@ const MiniApp = {
       let topInset = 0;
       let bottomInset = 0;
       if (tg) {
-        if (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.top === 'number') {
-          topInset = Math.max(topInset, tg.contentSafeAreaInset.top);
+        const isFs = !!tg.isFullscreen;
+        if (isFs) {
+          const contentTop = (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.top === 'number') ? tg.contentSafeAreaInset.top : 0;
+          const safeTop = (tg.safeAreaInset && typeof tg.safeAreaInset.top === 'number') ? tg.safeAreaInset.top : 0;
+          topInset = Math.max(contentTop, safeTop + 48, 96);
+        } else {
+          topInset = (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.top === 'number') ? tg.contentSafeAreaInset.top : 0;
         }
-        if (tg.safeAreaInset && typeof tg.safeAreaInset.top === 'number') {
-          topInset = Math.max(topInset, tg.safeAreaInset.top + 50);
-        }
-        if (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.bottom === 'number') {
-          bottomInset = Math.max(bottomInset, tg.contentSafeAreaInset.bottom);
-        } else if (tg.safeAreaInset && typeof tg.safeAreaInset.bottom === 'number') {
-          bottomInset = Math.max(bottomInset, tg.safeAreaInset.bottom);
-        }
+
+        const botContent = (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.bottom === 'number') ? tg.contentSafeAreaInset.bottom : 0;
+        const botSafe = (tg.safeAreaInset && typeof tg.safeAreaInset.bottom === 'number') ? tg.safeAreaInset.bottom : 0;
+        bottomInset = Math.max(botContent, botSafe, 0);
       }
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || tg?.platform === 'ios' || tg?.platform === 'android';
-      if (isMobile && topInset < 88) {
-        topInset = 92;
-      }
-      if (topInset > 0) {
-        document.documentElement.style.setProperty('--tg-content-safe-area-inset-top', `${topInset}px`);
-        document.documentElement.style.setProperty('--tg-safe-top', `${topInset}px`);
-      }
+
+      document.documentElement.style.setProperty('--tg-content-safe-area-inset-top', `${topInset}px`);
+      document.documentElement.style.setProperty('--tg-safe-top', `${topInset}px`);
       if (bottomInset > 0) {
         document.documentElement.style.setProperty('--tg-content-safe-area-inset-bottom', `${bottomInset}px`);
         document.documentElement.style.setProperty('--tg-safe-bottom', `${bottomInset}px`);

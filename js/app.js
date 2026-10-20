@@ -42,25 +42,8 @@ function initApp() {
         tg.ready();
         tg.expand();
         if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
-        if (typeof tg.requestFullscreen === 'function') {
-          try { tg.requestFullscreen(); } catch (e) {}
-        }
       } catch (e) {}
     }
-    // Telegram 8.0+ Fullscreen & Swipes on user gesture
-    function ensureTelegramFullscreen() {
-      if (window.Telegram && window.Telegram.WebApp) {
-        var t = window.Telegram.WebApp;
-        try {
-          if (typeof t.expand === 'function') t.expand();
-          if (typeof t.disableVerticalSwipes === 'function') t.disableVerticalSwipes();
-          if (typeof t.requestFullscreen === 'function') t.requestFullscreen();
-        } catch (e) {}
-      }
-    }
-    ['click', 'touchstart', 'pointerdown'].forEach(function (evt) {
-      window.addEventListener(evt, ensureTelegramFullscreen, { passive: true });
-    });
     var urlParams = new URLSearchParams(window.location.search);
     var queryTgId = urlParams.get('tg_id');
     var tgU = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
@@ -2488,9 +2471,6 @@ function syncTelegramTheme(theme) {
       if (tg.setBottomBarColor) tg.setBottomBarColor(bg);
       if (typeof tg.expand === 'function') tg.expand();
       if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
-      if (typeof tg.requestFullscreen === 'function') {
-        try { tg.requestFullscreen(); } catch (e) {}
-      }
     } catch(e) {}
   }
 }

@@ -10,28 +10,61 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script>
     (function() {
-      function activateTelegramFullscreen() {
+      var saved = localStorage.getItem('app_theme') || 'light';
+      if (saved === 'dark') {
+        document.documentElement.classList.add('dark-mode');
+        document.addEventListener('DOMContentLoaded', function() {
+          document.body.classList.add('dark-mode');
+        });
+      }
+
+      function syncTelegramLayout() {
         if (window.Telegram && window.Telegram.WebApp) {
           var tg = window.Telegram.WebApp;
           try {
             if (typeof tg.ready === 'function') tg.ready();
             if (typeof tg.expand === 'function') tg.expand();
             if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
-            if (typeof tg.requestFullscreen === 'function') tg.requestFullscreen();
           } catch (e) {}
+
+          var isFs = !!tg.isFullscreen;
+          var topInset = 0;
+          if (isFs) {
+            var contentTop = (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.top === 'number') ? tg.contentSafeAreaInset.top : 0;
+            var safeTop = (tg.safeAreaInset && typeof tg.safeAreaInset.top === 'number') ? tg.safeAreaInset.top : 0;
+            topInset = Math.max(contentTop, safeTop + 48, 96);
+          } else {
+            var contentTop = (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.top === 'number') ? tg.contentSafeAreaInset.top : 0;
+            topInset = contentTop;
+          }
+
+          var botContent = (tg.contentSafeAreaInset && typeof tg.contentSafeAreaInset.bottom === 'number') ? tg.contentSafeAreaInset.bottom : 0;
+          var botSafe = (tg.safeAreaInset && typeof tg.safeAreaInset.bottom === 'number') ? tg.safeAreaInset.bottom : 0;
+          var botInset = Math.max(botContent, botSafe, 0);
+
+          document.documentElement.style.setProperty('--tg-content-safe-area-inset-top', topInset + 'px');
+          document.documentElement.style.setProperty('--tg-safe-top', topInset + 'px');
+          if (botInset > 0) {
+            document.documentElement.style.setProperty('--tg-content-safe-area-inset-bottom', botInset + 'px');
+            document.documentElement.style.setProperty('--tg-safe-bottom', botInset + 'px');
+          }
         }
       }
-      activateTelegramFullscreen();
+
+      syncTelegramLayout();
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', activateTelegramFullscreen);
+        document.addEventListener('DOMContentLoaded', syncTelegramLayout);
       }
-      ['click', 'touchstart', 'pointerdown'].forEach(function(evt) {
-        window.addEventListener(evt, activateTelegramFullscreen, { passive: true });
-      });
+      window.addEventListener('resize', syncTelegramLayout);
+      if (window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.onEvent === 'function') {
+        window.Telegram.WebApp.onEvent('contentSafeAreaChanged', syncTelegramLayout);
+        window.Telegram.WebApp.onEvent('safeAreaChanged', syncTelegramLayout);
+        window.Telegram.WebApp.onEvent('fullscreenChanged', syncTelegramLayout);
+      }
     })();
   </script>
   <script src="/logo_data.js?v=20261020_v1"></script>
-  <link rel="stylesheet" href="/test_style.css?v=20261020_v1">
+  <link rel="stylesheet" href="/test_style.css?v=20261020_v3">
   <style>
     .admin-card {
       background: var(--bg-card);
@@ -219,9 +252,22 @@
 
   <div class="test-container" style="padding-bottom: 110px;">
     
-    <!-- Tepadagi bo'lim butunlay olib tashlandi (ekranni to'sib qo'ymasligi uchun) -->
-    <span class="test-title" style="display:none;"></span>
-    <span class="test-subtitle" style="display:none;"></span>
+    <!-- YUQORI HEADER (ADMIN) -->
+    <header class="test-header">
+      <div class="header-top-row">
+        <div class="header-brand-wrap">
+          <img src="/img/bm_logo.png?v=20261020_v1" class="header-bm-logo" alt="Logo">
+          <h1 class="header-test-title">Admin Panel</h1>
+        </div>
+        <div class="header-actions">
+          <button type="button" class="theme-toggle-btn" onclick="AdminApp.toggleTheme()" title="Mavzu" aria-label="Mavzu" style="display: inline-flex; align-items: center; justify-content: center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
 
     <main style="padding: 14px;">
       

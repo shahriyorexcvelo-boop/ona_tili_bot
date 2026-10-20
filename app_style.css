@@ -50,22 +50,19 @@
   --nav-h: 72px;
   --header-h: 60px;
 
-  /* Telegram 8.0 Fullscreen Safe Areas (Yopish tugmalari va status bar bilan ustma-ust tushmasligi uchun) */
+  /* Telegram Safe Areas (Dinamik & Moslashuvchan) */
   --tg-safe-top: max(
     var(--tg-content-safe-area-inset-top, 0px),
-    calc(env(safe-area-inset-top, 0px) + 54px),
-    calc(var(--tg-safe-area-inset-top, 0px) + 52px),
-    92px
+    env(safe-area-inset-top, 0px)
   );
-  --tg-safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px), 16px);
-  --tg-safe-left: max(env(safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px), var(--tg-content-safe-area-inset-left, 0px));
-  --tg-safe-right: max(env(safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px), var(--tg-content-safe-area-inset-right, 0px));
-}
-
-@media (min-width: 769px) {
-  :root {
-    --tg-safe-top: max(var(--tg-content-safe-area-inset-top, 0px), env(safe-area-inset-top, 0px), 0px);
-  }
+  --tg-safe-bottom: max(
+    env(safe-area-inset-bottom, 0px),
+    var(--tg-safe-area-inset-bottom, 0px),
+    var(--tg-content-safe-area-inset-bottom, 0px),
+    12px
+  );
+  --tg-safe-left: max(env(safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px), 0px);
+  --tg-safe-right: max(env(safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px), 0px);
 }
 
 /* ── LIGHT MODE (MACOS 27 ICY LIQUID GLASS) ───────────────── */
@@ -619,12 +616,13 @@ body {
 
 /* ── MACOS 27 LIQUID GLASS HEADER ─────────────────── */
 .app-header {
-  height: calc(var(--header-h) + var(--tg-safe-top));
-  min-height: calc(var(--header-h) + var(--tg-safe-top));
-  padding-top: var(--tg-safe-top);
-  padding-left: max(18px, var(--tg-safe-left));
-  padding-right: max(18px, var(--tg-safe-right));
+  height: auto;
+  min-height: calc(var(--header-h, 56px) + var(--tg-safe-top, 0px));
+  padding-top: var(--tg-safe-top, 0px);
+  padding-left: max(16px, var(--tg-safe-left, 0px));
+  padding-right: max(16px, var(--tg-safe-right, 0px));
   padding-bottom: 0;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -635,7 +633,7 @@ body {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 -1px 0 rgba(255, 255, 255, 0.06);
   position: relative;
   z-index: 10;
-  transition: all 0.3s ease;
+  transition: min-height 0.2s ease, padding 0.2s ease;
 }
 
 [data-theme="light"] .app-header {
@@ -3763,34 +3761,54 @@ body {
 @media (max-width: 480px) {
   /* 1. Header */
   .app-header {
-    height: 52px;
-    min-height: 52px;
-    padding: 0 12px;
+    height: auto;
+    min-height: calc(52px + var(--tg-safe-top, 0px));
+    padding-top: var(--tg-safe-top, 0px);
+    padding-bottom: 0;
+    padding-left: max(12px, var(--tg-safe-left, 0px));
+    padding-right: max(12px, var(--tg-safe-right, 0px));
+    box-sizing: border-box;
+  }
+  .header-logo {
+    min-width: 0;
+    flex-shrink: 1;
+    gap: 8px;
   }
   .header-logo-icon {
     width: 28px;
     height: 28px;
     border-radius: 8px;
+    flex-shrink: 0;
   }
   .header-logo-text {
     font-size: 13.5px;
     letter-spacing: -0.2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .header-right {
+    flex-shrink: 0;
+    gap: 6px;
   }
   .header-btn {
     width: 32px;
     height: 32px;
     font-size: 11px;
     border-radius: 9px;
+    flex-shrink: 0;
   }
   .server-status-pill {
     padding: 3px 7px;
     font-size: 10.5px;
     gap: 4px;
+    flex-shrink: 0;
   }
   .header-user-avatar {
     width: 30px;
     height: 30px;
     font-size: 12px;
+    flex-shrink: 0;
   }
 
   /* 2. Subtabs (Asosiy & Admin bo'limlari) */
