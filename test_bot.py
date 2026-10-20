@@ -122,12 +122,16 @@ async def main():
         if use_webhook_mode:
             webhook_url = f"{WEBAPP_URL.rstrip('/')}{WEBHOOK_PATH}"
             log.info(f"🚀 Telegram Bot Webhook rejimida ishlamoqda: {webhook_url}")
-            await bot.set_webhook(
-                url=webhook_url,
-                secret_token=WEBHOOK_SECRET,
-                allowed_updates=dp.resolve_used_update_types(),
-                drop_pending_updates=True
-            )
+            try:
+                await bot.set_webhook(
+                    url=webhook_url,
+                    secret_token=WEBHOOK_SECRET,
+                    allowed_updates=dp.resolve_used_update_types(),
+                    drop_pending_updates=True
+                )
+                log.info("✅ Telegram Webhook muvaffaqiyatli o'rnatildi!")
+            except Exception as we:
+                log.error(f"❌ Telegram Webhook o'rnatishda xatolik: {we}")
             # Webhook rejimida aiohttp serverini to'xtovsiz ushlab turamiz
             stop_event = asyncio.Event()
             await stop_event.wait()
