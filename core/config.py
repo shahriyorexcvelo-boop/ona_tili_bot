@@ -342,7 +342,7 @@ if _raw_url:
         _raw_url = f"https://{_raw_url}"
     WEBAPP_URL = _raw_url.rstrip("/")
 else:
-    WEBAPP_URL = "https://ona-tili-bot.onrender.com"
+    WEBAPP_URL = "https://rash-vmrm.onrender.com"
 
 CACHED_BOT_USERNAME = os.getenv("BOT_USERNAME", "demo_rashonatili_bot")
 
