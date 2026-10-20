@@ -108,7 +108,7 @@ async def main():
                     except Exception:
                         pass
                 if not app_url:
-                    app_url = os.getenv("WEBAPP_URL") or "https://rash-vmrm.onrender.com"
+                    app_url = os.getenv("WEBAPP_URL") or "https://ona-tili-bot.onrender.com"
                 if "/dashboard" in app_url:
                     app_url = app_url.split("/dashboard")[0]
                 menu_btn = MenuButtonWebApp(text="Profil 👤", web_app=WebAppInfo(url=f"{app_url.rstrip('/')}/app.html"))

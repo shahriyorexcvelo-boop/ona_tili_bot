@@ -380,6 +380,10 @@ const TestApp = {
       if (input45 && input45.value !== undefined) {
         this.answers['45'] = input45.value.trim();
       }
+      const input45Text = document.getElementById('input-45-text');
+      if (input45Text && input45Text.value !== undefined) {
+        this.answers['45_text'] = input45Text.value.trim();
+      }
       const key = this.getStorageKey();
       localStorage.setItem(key, JSON.stringify(this.answers));
       this.syncDraftToBackend();
@@ -456,6 +460,11 @@ const TestApp = {
         const isFilled = (val45 || '').trim().length > 0;
         if (box45) box45.classList.toggle('filled', isFilled);
         this.updateMapItem('45', isFilled);
+      }
+      const val45Text = this.answers['45_text'];
+      const input45Text = document.getElementById('input-45-text');
+      if (input45Text && val45Text !== undefined) {
+        input45Text.value = val45Text;
       }
 
       this.updateProgress();

@@ -337,12 +337,19 @@ ADMIN_ID = _config_admins[0] if _config_admins else 8039427064
 PORT = int(os.getenv("PORT", "8080"))
 
 _raw_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("WEBAPP_URL", "")
+if not _raw_url and os.path.exists("tunnel_url.txt"):
+    try:
+        with open("tunnel_url.txt", "r") as _tf:
+            _raw_url = _tf.read().strip()
+    except Exception:
+        pass
+
 if _raw_url:
     if not _raw_url.startswith("http"):
         _raw_url = f"https://{_raw_url}"
     WEBAPP_URL = _raw_url.rstrip("/")
 else:
-    WEBAPP_URL = "https://rash-vmrm.onrender.com"
+    WEBAPP_URL = "https://ona-tili-bot.onrender.com"
 
 CACHED_BOT_USERNAME = os.getenv("BOT_USERNAME", "demo_rashonatili_bot")
 

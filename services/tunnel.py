@@ -15,7 +15,7 @@ async def maintain_tunnel(local_port: int):
     is_render = os.getenv("RENDER") == "true" or bool(os.getenv("RENDER_SERVICE_ID")) or bool(os.getenv("RENDER_INSTANCE_ID"))
     if render_domain or is_render:
         if not render_domain:
-            render_domain = os.getenv("WEBAPP_URL") or "https://rash-vmrm.onrender.com"
+            render_domain = os.getenv("WEBAPP_URL") or "https://ona-tili-bot.onrender.com"
         WEBAPP_URL = (render_domain if render_domain.startswith("http") else f"https://{render_domain}").rstrip("/")
         log.info(f"🚀 Render.com Production muhiti aniqlandi: {WEBAPP_URL}")
         try:
