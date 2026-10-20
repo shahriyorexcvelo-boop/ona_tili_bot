@@ -615,17 +615,50 @@ body.dark-mode .ambient-orb-3,
   transition: padding 0.2s ease;
 }
 
-/* Ochiq savollarni yozayotganda barcha tepadagi elementlar va pastki dock to'liq yashirilishi */
+/* Ochiq savollarni yozayotganda pastki dock va tepadagi elementlar klaviatura ustiga chiqib qolmasligi uchun to'liq yashirilishi */
 body.keyboard-open .test-header {
   display: none !important;
 }
 
-body.keyboard-open .bottom-submit-dock {
+body.keyboard-open .bottom-submit-dock,
+body:has(input:focus) .bottom-submit-dock,
+body:has(textarea:focus) .bottom-submit-dock {
   display: none !important;
 }
 
-body.keyboard-open .test-container {
+body.keyboard-open .test-container,
+body:has(input:focus) .test-container,
+body:has(textarea:focus) .test-container {
   padding-bottom: 380px !important;
+}
+
+/* 45-savol: Esse / Yozma ish maxsus stillari */
+.section-badge.esse-badge,
+.savol-badge.esse-badge {
+  background: linear-gradient(135deg, #7c3aed, #4f46e5);
+  color: #fff;
+  border: 1px solid rgba(124, 58, 237, 0.4);
+}
+
+.esse-question-row {
+  background: rgba(124, 58, 237, 0.05);
+  border: 1.5px solid rgba(124, 58, 237, 0.25);
+  border-radius: 12px;
+  padding: 14px;
+  margin-top: 8px;
+}
+
+.esse-input {
+  border-color: rgba(124, 58, 237, 0.4) !important;
+  font-weight: 700;
+  color: #7c3aed;
+}
+
+.esse-hint-text {
+  font-size: 11.5px;
+  color: #64748b;
+  margin-top: 8px;
+  line-height: 1.4;
 }
 
 .header-top-row {

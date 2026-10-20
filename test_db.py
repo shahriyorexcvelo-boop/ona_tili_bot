@@ -11,6 +11,7 @@ import time
 import math
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any, Tuple
+import sqlite3
 
 try:
     from dotenv import load_dotenv
@@ -51,27 +52,33 @@ _GLOBAL_TESTS_BY_CODE: Dict[str, int] = {}
 _GLOBAL_ALL_TESTS_LIST: List[Dict[str, Any]] = []
 _GLOBAL_ACTIVE_TESTS_LIST: List[Dict[str, Any]] = []
 _GLOBAL_TESTS_PRELOADED: bool = False
-
-_CACHE_TEST_BOUNDS: Dict[int, Dict[str, Any]] = {}
+_GLOBAL_TESTS_CACHE_TIME: float = 0.0
+_CACHE_TEST_BOUNDS: Dict[str, Any] = {}
 _CACHE_TEST_BOUNDS_TIME: float = 0.0
+_USER_SUBMISSIONS_MAP_CACHE: Dict[int, Any] = {}
+_USER_SUBMITTED_IDS_CACHE: Dict[Any, Any] = {}
+_CACHE_USERS: Dict[int, Any] = {}
+_CACHE_SETTINGS: Dict[str, Any] = {}
 
-_USER_SUBMISSIONS_MAP_CACHE: Dict[int, Tuple[float, Dict[int, Dict[str, Any]]]] = {}
-_USER_SUBMITTED_IDS_CACHE: Dict[Tuple[int, int], Tuple[float, bool]] = {}
-
-_CACHE_USERS: Dict[int, Tuple[float, Dict[str, Any]]] = {}
-_CACHE_SETTINGS: Dict[str, Tuple[float, str]] = {}
-
-CACHE_TTL_TESTS = 86400.0   # Doimiy RAM kesh (faqat admin o'zgartirganda yangilanadi)
+# Kesh siyosati (M3): DB — yagona haqiqat manbai. 
+# 45 soniyalik Read-Through TTL bir nechta instance larda kesh nomutanosibligining oldini oladi.
+# Local yozish amallari darhol invalidate qiladi.
+CACHE_TTL_TESTS = 45.0       # Read-through RAM kesh TTL: 45 soniya
 CACHE_TTL_USERS = 300.0     # 5 daqiqa
 CACHE_TTL_SETTINGS = 300.0  # 5 daqiqa
 
+def is_tests_cache_valid() -> bool:
+    """RAM kesh yuklangan va TTL (45 soniya) muddati o'tmaganligini tekshirish."""
+    with _RAM_CACHE_LOCK:
+        return _GLOBAL_TESTS_PRELOADED and (time.time() - _GLOBAL_TESTS_CACHE_TIME) < CACHE_TTL_TESTS
+
 def preload_all_tests_cache() -> int:
     """
-    Zero-DB-Read: Server ishga tushganda barcha testlar (1-35 yopiq, 36-44 ochiq savollar, kalitlar)
-    bazadan faqat bir marta o'qilib, serverning RAM xotirasiga (Global Memory Cache) joylanadi.
-    1,000+ o'quvchi bir vaqtda kirganda Supabase bazasiga 0 ta SELECT so'rovi yuboriladi!
+    Zero-DB-Read: Server ishga tushganda va TTL muddati tugaganda barcha testlar
+    bazadan o'qilib, serverning RAM xotirasiga joylanadi.
+    DB yagona haqiqat manbai (Source of Truth) hisoblanadi.
     """
-    global _GLOBAL_TESTS_PRELOADED, _GLOBAL_ALL_TESTS_LIST, _GLOBAL_ACTIVE_TESTS_LIST
+    global _GLOBAL_TESTS_PRELOADED, _GLOBAL_ALL_TESTS_LIST, _GLOBAL_ACTIVE_TESTS_LIST, _GLOBAL_TESTS_CACHE_TIME
     conn = get_connection()
     try:
         cur = conn.cursor()
@@ -92,8 +99,9 @@ def preload_all_tests_cache() -> int:
                     _GLOBAL_TESTS_BY_CODE[str(t["test_code"]).upper().strip().replace("#", "")] = tid
 
             _GLOBAL_TESTS_PRELOADED = True
+            _GLOBAL_TESTS_CACHE_TIME = time.time()
 
-        print(f"🚀 [Zero-DB-Read] Global RAM kesh muvaffaqiyatli yuklandi: {len(all_tests)} ta test xotirada tayyor (0 DB SELECT)")
+        print(f"🚀 [Read-Through Kesh] Global RAM kesh yangilandi: {len(all_tests)} ta test xotirada tayyor (TTL: {CACHE_TTL_TESTS}s)")
         return len(all_tests)
     except Exception as e:
         print(f"❌ preload_all_tests_cache xatolik: {e}")
@@ -103,8 +111,9 @@ def preload_all_tests_cache() -> int:
 
 def invalidate_test_cache(test_id: Optional[int] = None):
     """Test ma'lumotlari yangilanganda yoki o'chirilganda RAM keshni tozalash va qayta yuklash"""
-    global _CACHE_TEST_BOUNDS_TIME, _GLOBAL_ALL_TESTS_LIST, _GLOBAL_ACTIVE_TESTS_LIST
+    global _CACHE_TEST_BOUNDS_TIME, _GLOBAL_ALL_TESTS_LIST, _GLOBAL_ACTIVE_TESTS_LIST, _GLOBAL_TESTS_CACHE_TIME
     with _RAM_CACHE_LOCK:
+        _GLOBAL_TESTS_CACHE_TIME = 0.0
         _CACHE_TEST_BOUNDS.clear()
         _CACHE_TEST_BOUNDS_TIME = 0.0
         _USER_SUBMISSIONS_MAP_CACHE.clear()
@@ -217,21 +226,19 @@ def _close_conn(conn):
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-if not USE_POSTGRES:
-    import sqlite3
-    data_dir = os.getenv("DATA_DIR")
-    if data_dir:
-        try:
-            os.makedirs(data_dir, exist_ok=True)
-        except Exception:
-            pass
-        DB_FILE = os.path.join(data_dir, "test_system.db")
+data_dir = os.getenv("DATA_DIR")
+if data_dir:
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+    except Exception:
+        pass
+    DB_FILE = os.path.join(data_dir, "test_system.db")
+else:
+    db_path_env = os.getenv("DB_PATH", "").strip()
+    if db_path_env:
+        DB_FILE = db_path_env if os.path.isabs(db_path_env) else os.path.join(BASE_DIR, db_path_env)
     else:
-        db_path_env = os.getenv("DB_PATH", "").strip()
-        if db_path_env:
-            DB_FILE = db_path_env if os.path.isabs(db_path_env) else os.path.join(BASE_DIR, db_path_env)
-        else:
-            DB_FILE = os.path.join(BASE_DIR, "test_system.db")
+        DB_FILE = os.path.join(BASE_DIR, "test_system.db")
 
 _db_initialized = False
 
@@ -384,7 +391,11 @@ def _init_sqlite_tables_on_conn(conn):
         username TEXT,
         status TEXT DEFAULT 'approved',
         pin_code TEXT,
-        registered_at INTEGER NOT NULL
+        registered_at INTEGER NOT NULL,
+        deleted_at INTEGER DEFAULT NULL,
+        deleted_by INTEGER DEFAULT NULL,
+        previous_status TEXT DEFAULT NULL,
+        is_anonymized INTEGER DEFAULT 0
     )
     """)
 
@@ -393,7 +404,7 @@ def _init_sqlite_tables_on_conn(conn):
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         test_code TEXT UNIQUE NOT NULL,
         title TEXT NOT NULL,
-        subject TEXT DEFAULT 'Matematika',
+        subject TEXT DEFAULT 'Ona tili',
         pdf_file_id TEXT,
         pdf_file_name TEXT,
         answers_json TEXT NOT NULL,
@@ -404,7 +415,13 @@ def _init_sqlite_tables_on_conn(conn):
         results_published INTEGER DEFAULT 0,
         created_at INTEGER NOT NULL,
         created_by INTEGER DEFAULT 0,
-        created_by_name TEXT DEFAULT ''
+        created_by_name TEXT DEFAULT '',
+        scheduled_date TEXT,
+        scheduled_start TEXT,
+        scheduled_end TEXT,
+        auto_notified TEXT,
+        youtube_url TEXT,
+        stopped_at INTEGER
     )
     """)
 
@@ -424,7 +441,32 @@ def _init_sqlite_tables_on_conn(conn):
         details_json TEXT NOT NULL,
         submitted_at INTEGER NOT NULL,
         is_late INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'accepted',
+        reject_reason TEXT DEFAULT '',
+        is_archived INTEGER DEFAULT 0,
         FOREIGN KEY(test_id) REFERENCES tests(id)
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS submission_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_tg_id INTEGER NOT NULL,
+        test_id INTEGER NOT NULL,
+        question_key TEXT NOT NULL,
+        answer_val TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE (user_tg_id, test_id, question_key)
+    )
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS user_test_drafts (
+        user_tg_id INTEGER NOT NULL,
+        test_id INTEGER NOT NULL,
+        answers_json TEXT NOT NULL DEFAULT '{}',
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (user_tg_id, test_id)
     )
     """)
 
@@ -468,6 +510,16 @@ def _init_sqlite_tables_on_conn(conn):
         created_at INTEGER NOT NULL
     )
     """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS admin_deleted_users (
+        tg_id INTEGER PRIMARY KEY,
+        deleted_at INTEGER NOT NULL,
+        deleted_by INTEGER,
+        last_request_at INTEGER
+    )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_del_users_req ON admin_deleted_users(last_request_at)")
 
     cur.execute("""
     INSERT OR IGNORE INTO admins (tg_id, fullname, username, added_by, created_at)
@@ -520,10 +572,17 @@ def init_db():
     _db_initialized = True
     conn = get_connection()
     try:
+        # 1. Versiyalangan xavfsiz va idempotent migratsiyalarni ishga tushirish
+        try:
+            from migrations.runner import run_migrations
+            run_migrations(conn, use_postgres=USE_POSTGRES)
+        except Exception as mig_err:
+            print(f"Migratsiya xatoligi: {mig_err}")
+
         cur = conn.cursor()
 
         if USE_POSTGRES:
-            # PostgreSQL jadvallar
+            # PostgreSQL jadvallar (asosiy sxema)
             cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -533,7 +592,11 @@ def init_db():
                 username TEXT,
                 status TEXT DEFAULT 'approved',
                 pin_code TEXT,
-                registered_at BIGINT NOT NULL
+                registered_at BIGINT NOT NULL,
+                deleted_at BIGINT DEFAULT NULL,
+                deleted_by BIGINT DEFAULT NULL,
+                previous_status TEXT DEFAULT NULL,
+                is_anonymized INTEGER DEFAULT 0
             )
             """)
 
@@ -542,7 +605,7 @@ def init_db():
                 id SERIAL PRIMARY KEY,
                 test_code TEXT UNIQUE NOT NULL,
                 title TEXT NOT NULL,
-                subject TEXT DEFAULT 'Matematika',
+                subject TEXT DEFAULT 'Ona tili',
                 pdf_file_id TEXT,
                 pdf_file_name TEXT,
                 answers_json TEXT NOT NULL,
@@ -553,7 +616,13 @@ def init_db():
                 results_published INTEGER DEFAULT 0,
                 created_at BIGINT NOT NULL,
                 created_by BIGINT DEFAULT 0,
-                created_by_name TEXT DEFAULT ''
+                created_by_name TEXT DEFAULT '',
+                scheduled_date TEXT,
+                scheduled_start TEXT,
+                scheduled_end TEXT,
+                auto_notified TEXT,
+                youtube_url TEXT,
+                stopped_at BIGINT
             )
             """)
 
@@ -572,7 +641,10 @@ def init_db():
                 total_count INTEGER DEFAULT 45,
                 details_json TEXT NOT NULL,
                 submitted_at BIGINT NOT NULL,
-                is_late INTEGER DEFAULT 0
+                is_late INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'accepted',
+                reject_reason TEXT DEFAULT '',
+                is_archived INTEGER DEFAULT 0
             )
             """)
 
@@ -617,6 +689,38 @@ def init_db():
             )
             """)
 
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS submission_drafts (
+                id SERIAL PRIMARY KEY,
+                user_tg_id BIGINT NOT NULL,
+                test_id INTEGER NOT NULL,
+                question_key TEXT NOT NULL,
+                answer_val TEXT NOT NULL,
+                updated_at BIGINT NOT NULL,
+                UNIQUE (user_tg_id, test_id, question_key)
+            )
+            """)
+
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_test_drafts (
+                user_tg_id BIGINT NOT NULL,
+                test_id INTEGER NOT NULL,
+                answers_json TEXT NOT NULL DEFAULT '{}',
+                updated_at BIGINT NOT NULL,
+                PRIMARY KEY (user_tg_id, test_id)
+            )
+            """)
+
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS admin_deleted_users (
+                tg_id BIGINT PRIMARY KEY,
+                deleted_at BIGINT NOT NULL,
+                deleted_by BIGINT,
+                last_request_at BIGINT
+            )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_del_users_req ON admin_deleted_users(last_request_at)")
+
             # Bosh adminni qo'shish (ON CONFLICT — PostgreSQL)
             cur.execute("""
             INSERT INTO admins (tg_id, fullname, username, added_by, created_at)
@@ -627,51 +731,16 @@ def init_db():
             # PostgreSQL indekslar (Tezkor qidiruv va yuklamaga chidamlilik)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_users_tg_id ON users(tg_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users(deleted_at)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_submissions_user_tg_id ON submissions(user_tg_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_submissions_test_id ON submissions(test_id)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_submissions_user_test ON submissions(user_tg_id, test_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_tests_test_code ON tests(test_code)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_tests_is_active ON tests(is_active)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sub_drafts_user_test ON submission_drafts(user_tg_id, test_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_bc_msg_batch ON broadcast_messages(batch_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_bc_msg_chat ON broadcast_messages(chat_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_bc_hist_created ON broadcast_history(created_at)")
-
-            try:
-                # Suhrob Olloyorovning (ID 106) brauzerdan topshirgan 25 ta to'g'ri javobini uning akkauntiga biriktirish
-                cur.execute("""
-                UPDATE submissions 
-                SET user_tg_id = 7829748474, fullname = 'Suhrob Olloyorov', phone = '+998332072205'
-                WHERE id = 106 AND (user_tg_id = 0 OR user_tg_id IS NULL)
-                """)
-                # Orphaned anonim test yozuvi 102 ni tozalash
-                cur.execute("DELETE FROM submissions WHERE id = 102 AND (user_tg_id = 0 OR user_tg_id IS NULL)")
-            except Exception:
-                pass
-
-            for col, coltype in [
-                ("scheduled_date", "TEXT"),
-                ("scheduled_start", "TEXT"),
-                ("scheduled_end", "TEXT"),
-                ("created_by", "BIGINT"),
-                ("created_by_name", "TEXT"),
-                ("auto_notified", "TEXT"),
-                ("youtube_url", "TEXT"),
-                ("stopped_at", "BIGINT"),
-            ]:
-                try:
-                    cur.execute(f"ALTER TABLE tests ADD COLUMN IF NOT EXISTS {col} {coltype} DEFAULT NULL")
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-
-            try:
-                cur.execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS is_late INTEGER DEFAULT 0")
-                cur.execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'accepted'")
-                cur.execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS reject_reason TEXT DEFAULT ''")
-                cur.execute("UPDATE users SET status = 'approved' WHERE status = 'pending'")
-                conn.commit()
-            except Exception:
-                conn.rollback()
 
             conn.commit()
         else:
@@ -913,11 +982,11 @@ def set_registration_open(enabled: bool):
 
 
 def get_broadcast_users() -> List[Dict[str, Any]]:
-    """Xabar tarqatish uchun faol foydalanuvchilar ro'yxati (bloklanmaganlar)."""
+    """Xabar tarqatish uchun faol foydalanuvchilar ro'yxati (faqat tasdiqlanganlar)."""
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT tg_id, fullname, status FROM users WHERE status NOT IN ('blocked', 'rejected')")
+        cur.execute("SELECT tg_id, fullname, status FROM users WHERE status = 'approved'")
         rows = cur.fetchall()
         return [_row_to_dict(r) for r in rows if r]
     finally:
@@ -1053,7 +1122,10 @@ def add_or_update_user(tg_id: int, fullname: str, phone: str,
                 fullname = EXCLUDED.fullname,
                 phone = EXCLUDED.phone,
                 username = EXCLUDED.username,
-                status = CASE WHEN users.status = 'blocked' THEN 'blocked' ELSE EXCLUDED.status END
+                status = CASE WHEN users.status IN ('pending', 'rejected') THEN users.status ELSE EXCLUDED.status END,
+                deleted_at = NULL,
+                deleted_by = NULL,
+                is_anonymized = 0
             """, (tg_id, fullname, phone, username, status, now))
         else:
             cur.execute("""
@@ -1063,9 +1135,13 @@ def add_or_update_user(tg_id: int, fullname: str, phone: str,
                 fullname=excluded.fullname,
                 phone=excluded.phone,
                 username=excluded.username,
-                status=CASE WHEN users.status = 'blocked' THEN 'blocked' ELSE excluded.status END
+                status=CASE WHEN users.status IN ('pending', 'rejected') THEN users.status ELSE excluded.status END,
+                deleted_at = NULL,
+                deleted_by = NULL,
+                is_anonymized = 0
             """, (tg_id, fullname, phone, username, status, now))
         conn.commit()
+        invalidate_user_cache(tg_id)
         return True
     except Exception as e:
         print(f"Error saving user: {e}")
@@ -1100,7 +1176,7 @@ def update_user_profile(tg_id: int, fullname: Optional[str] = None, phone: Optio
         _close_conn(conn)
 
 
-def get_user(tg_id: int) -> Optional[Dict[str, Any]]:
+def get_user(tg_id: int, include_deleted: bool = False) -> Optional[Dict[str, Any]]:
     if not tg_id or int(tg_id) <= 0:
         return None
     now = time.time()
@@ -1109,7 +1185,11 @@ def get_user(tg_id: int) -> Optional[Dict[str, Any]]:
             ts, val = _CACHE_USERS[int(tg_id)]
             ttl = CACHE_TTL_USERS if val is not None else 10.0
             if now - ts < ttl:
-                return dict(val) if val is not None else None
+                if val is not None:
+                    if not include_deleted and val.get("deleted_at"):
+                        return None
+                    return dict(val)
+                return None
 
     conn = get_connection()
     try:
@@ -1119,6 +1199,8 @@ def get_user(tg_id: int) -> Optional[Dict[str, Any]]:
         res = _row_to_dict(row)
         with _RAM_CACHE_LOCK:
             _CACHE_USERS[int(tg_id)] = (now, dict(res) if res else None)
+        if res and not include_deleted and res.get("deleted_at"):
+            return None
         return res
     finally:
         _close_conn(conn)
@@ -1234,10 +1316,12 @@ def find_user(query: Any) -> Optional[Dict[str, Any]]:
 
 
 def is_user_approved(tg_id: int, admin_id: int = 8039427064) -> bool:
+    if is_admin(tg_id, admin_id):
+        return True
     user = get_user(tg_id)
     if not user:
-        return True
-    return user.get("status") != "blocked"
+        return False
+    return user.get("status") == "approved"
 
 
 def approve_user(tg_id: int) -> bool:
@@ -1245,7 +1329,14 @@ def approve_user(tg_id: int) -> bool:
     try:
         cur = conn.cursor()
         cur.execute(f"UPDATE users SET status = 'approved' WHERE tg_id = {_ph()}", (tg_id,))
+        cur.execute(f"DELETE FROM admin_deleted_users WHERE tg_id = {_ph()}", (tg_id,))
         conn.commit()
+        invalidate_user_cache(tg_id)
+        try:
+            from core import invalidate_dashboard_cache
+            invalidate_dashboard_cache()
+        except Exception:
+            pass
         return True
     except Exception as e:
         print(f"Error approving user: {e}")
@@ -1260,6 +1351,12 @@ def reject_user(tg_id: int) -> bool:
         cur = conn.cursor()
         cur.execute(f"UPDATE users SET status = 'rejected' WHERE tg_id = {_ph()}", (tg_id,))
         conn.commit()
+        invalidate_user_cache(tg_id)
+        try:
+            from core import invalidate_dashboard_cache
+            invalidate_dashboard_cache()
+        except Exception:
+            pass
         return True
     except Exception as e:
         print(f"Error rejecting user: {e}")
@@ -1268,49 +1365,124 @@ def reject_user(tg_id: int) -> bool:
         _close_conn(conn)
 
 
-def set_user_pin(tg_id: int, pin: str) -> bool:
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(f"UPDATE users SET pin_code = {_ph()} WHERE tg_id = {_ph()}", (pin, tg_id))
-        conn.commit()
-        return True
-    except Exception as e:
-        print(f"Error setting PIN: {e}")
-        return False
-    finally:
-        _close_conn(conn)
-
-
-def get_user_pin(tg_id: int) -> Optional[str]:
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(f"SELECT pin_code FROM users WHERE tg_id = {_ph()}", (tg_id,))
-        row = cur.fetchone()
-        if row:
-            d = _row_to_dict(row)
-            return d.get("pin_code") if d else None
-        return None
-    except Exception as e:
-        print(f"Error getting PIN: {e}")
-        return None
-    finally:
-        _close_conn(conn)
-
-
 def block_user(tg_id: int) -> bool:
+    """Eski tizim bilan moslik: yangi modelda bloklash o'rniga rad etish (reject) bajariladi."""
+    return reject_user(tg_id)
+
+
+def mark_admin_deleted(tg_id: int, admin_id: Optional[int] = None) -> bool:
+    """Admin tomonidan o'chirilgan foydalanuvchini admin_deleted_users jadvaliga kiritish."""
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute(f"UPDATE users SET status = 'blocked' WHERE tg_id = {_ph()}", (tg_id,))
+        now_ts = int(time.time())
+        if USE_POSTGRES:
+            cur.execute("""
+            INSERT INTO admin_deleted_users (tg_id, deleted_at, deleted_by, last_request_at)
+            VALUES (%s, %s, %s, NULL)
+            ON CONFLICT (tg_id) DO UPDATE SET
+                deleted_at = EXCLUDED.deleted_at,
+                deleted_by = EXCLUDED.deleted_by
+            """, (tg_id, now_ts, admin_id))
+        else:
+            cur.execute("""
+            INSERT INTO admin_deleted_users (tg_id, deleted_at, deleted_by, last_request_at)
+            VALUES (?, ?, ?, NULL)
+            ON CONFLICT(tg_id) DO UPDATE SET
+                deleted_at = excluded.deleted_at,
+                deleted_by = excluded.deleted_by
+            """, (tg_id, now_ts, admin_id))
         conn.commit()
         return True
     except Exception as e:
-        print(f"Error blocking user: {e}")
+        print(f"Error mark_admin_deleted: {e}")
         return False
     finally:
         _close_conn(conn)
+
+
+def is_admin_deleted(tg_id: int) -> bool:
+    """Foydalanuvchi admin tomonidan o'chirilganlar ro'yxatida bormi?"""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT 1 FROM admin_deleted_users WHERE tg_id = {_ph()}", (tg_id,))
+        return cur.fetchone() is not None
+    except Exception as e:
+        print(f"Error is_admin_deleted: {e}")
+        return False
+    finally:
+        _close_conn(conn)
+
+
+def clear_admin_deleted(tg_id: int) -> bool:
+    """Admin ruxsat berganda ushbu foydalanuvchini admin_deleted_users ro'yxatidan tozalash."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"DELETE FROM admin_deleted_users WHERE tg_id = {_ph()}", (tg_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error clear_admin_deleted: {e}")
+        return False
+    finally:
+        _close_conn(conn)
+
+
+def touch_admin_deleted_request(tg_id: int) -> bool:
+    """Foydalanuvchi /start yoki ruxsat so'raganda oxirgi so'rov vaqtini yangilash."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        now_ts = int(time.time())
+        cur.execute(f"UPDATE admin_deleted_users SET last_request_at = {_ph()} WHERE tg_id = {_ph()}", (now_ts, tg_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error touch_admin_deleted_request: {e}")
+        return False
+    finally:
+        _close_conn(conn)
+
+
+def get_admin_deleted_info(tg_id: int) -> Optional[Dict[str, Any]]:
+    """Admin tomonidan o'chirilgan foydalanuvchi ma'lumotlarini olish."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM admin_deleted_users WHERE tg_id = {_ph()}", (tg_id,))
+        row = cur.fetchone()
+        return _row_to_dict(row) if row else None
+    except Exception as e:
+        print(f"Error get_admin_deleted_info: {e}")
+        return None
+    finally:
+        _close_conn(conn)
+
+
+def get_admin_deleted_request_time(tg_id: int) -> Optional[int]:
+    """Admin tomonidan o'chirilgan foydalanuvchining oxirgi so'rov yuborgan vaqtini olish."""
+    info = get_admin_deleted_info(tg_id)
+    if info and info.get("last_request_at"):
+        try:
+            return int(info["last_request_at"])
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def can_request_access(tg_id: int, cooldown_hours: int = 6) -> Tuple[bool, float]:
+    """
+    Foydalanuvchi adminga yangi ruxsat so'rovi yuborishi mumkinligini tekshirish (kamida cooldown_hours soat).
+    Qaytaradi: (mumkin_mi: bool, o'tgan_soat: float)
+    """
+    req_time = get_admin_deleted_request_time(tg_id)
+    if not req_time:
+        return True, 0.0
+    diff_sec = time.time() - req_time
+    diff_hours = diff_sec / 3600.0
+    return (diff_hours >= cooldown_hours), diff_hours
 
 
 def set_user_pending(tg_id: int) -> bool:
@@ -1320,6 +1492,7 @@ def set_user_pending(tg_id: int) -> bool:
         cur = conn.cursor()
         cur.execute(f"UPDATE users SET status = 'pending' WHERE tg_id = {_ph()}", (tg_id,))
         conn.commit()
+        invalidate_user_cache(tg_id)
         return True
     except Exception as e:
         print(f"Error setting user pending: {e}")
@@ -1350,18 +1523,19 @@ def restrict_all_users(super_admin_id: int = 8039427064) -> int:
         if USE_POSTGRES:
             cur.execute("""
                 UPDATE users 
-                SET status = 'pending' 
-                WHERE NOT (tg_id = ANY(%s)) AND status != 'pending'
+                SET previous_status = status, status = 'pending' 
+                WHERE NOT (tg_id = ANY(%s)) AND status != 'pending' AND deleted_at IS NULL
             """, (admin_list,))
         else:
             placeholders = ",".join("?" for _ in admin_list)
             cur.execute(f"""
                 UPDATE users 
-                SET status = 'pending' 
-                WHERE tg_id NOT IN ({placeholders}) AND status != 'pending'
+                SET previous_status = status, status = 'pending' 
+                WHERE tg_id NOT IN ({placeholders}) AND status != 'pending' AND deleted_at IS NULL
             """, admin_list)
         count = cur.rowcount
         conn.commit()
+        invalidate_user_cache()
         return count
     except Exception as e:
         print(f"Error restricting all users: {e}")
@@ -1370,46 +1544,80 @@ def restrict_all_users(super_admin_id: int = 8039427064) -> int:
         _close_conn(conn)
 
 
-def delete_user(tg_id: int) -> Optional[Dict[str, Any]]:
+def unrestrict_all_users(super_admin_id: int = 8039427064) -> int:
+    """Barcha cheklangan foydalanuvchilarni avvalgi statusiga qaytarish."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE users
+            SET status = COALESCE(previous_status, 'approved'), previous_status = NULL
+            WHERE status = 'pending' AND deleted_at IS NULL
+        """)
+        count = cur.rowcount
+        conn.commit()
+        invalidate_user_cache()
+        return count
+    except Exception as e:
+        print(f"Error unrestricting all users: {e}")
+        return 0
+    finally:
+        _close_conn(conn)
+
+
+def delete_user(tg_id: int, deleted_by: Optional[int] = None, is_self_delete: bool = False, by_admin: bool = False) -> Optional[Dict[str, Any]]:
+    """
+    Foydalanuvchi ma'lumotlarini to'liq tozalash (Atomic Purge):
+    1. users, submissions, submission_drafts, user_test_drafts, broadcast_messages jadvallaridan o'chiriladi.
+    2. Agar ADMIN o'chirsa (by_admin=True yoki deleted_by kiritilgan va is_self_delete=False):
+       Faqat tg_id admin_deleted_users jadvaliga yoziladi (bot keyin tanib olishi uchun).
+    3. Agar o'zi ketsa (botni bloklasa yoki akkauntini o'chirsa):
+       admin_deleted_users ga TUSHMAYDI!
+    """
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT * FROM users WHERE tg_id = {_ph()} OR id = {_ph()}", (tg_id, tg_id))
         user_row = _row_to_dict(cur.fetchone())
-        actual_tg_id = user_row.get("tg_id") if user_row else tg_id
+        actual_tg_id = (user_row.get("tg_id") if user_row else None) or tg_id
 
-        # 1. broadcast_messages (chat_id ustuni)
+        # 1. Barcha jadvallardan to'liq tozalash
+        cur.execute(f"DELETE FROM users WHERE tg_id = {_ph()} OR id = {_ph()}", (actual_tg_id, tg_id))
+        cur.execute(f"DELETE FROM submissions WHERE user_tg_id = {_ph()}", (actual_tg_id,))
+        cur.execute(f"DELETE FROM submission_drafts WHERE user_tg_id = {_ph()}", (actual_tg_id,))
+        cur.execute(f"DELETE FROM user_test_drafts WHERE user_tg_id = {_ph()}", (actual_tg_id,))
+        cur.execute(f"DELETE FROM broadcast_messages WHERE chat_id = {_ph()}", (actual_tg_id,))
+
+        # 2. Admin o'chirgan holatni qayd etish
+        is_admin_action = by_admin or (deleted_by is not None and int(deleted_by) != int(actual_tg_id) and not is_self_delete)
+        if is_admin_action:
+            now_ts = int(time.time())
+            adm_id = deleted_by if (deleted_by and int(deleted_by) != int(actual_tg_id)) else ADMIN_ID
+            if USE_POSTGRES:
+                cur.execute("""
+                INSERT INTO admin_deleted_users (tg_id, deleted_at, deleted_by, last_request_at)
+                VALUES (%s, %s, %s, NULL)
+                ON CONFLICT (tg_id) DO UPDATE SET
+                    deleted_at = EXCLUDED.deleted_at,
+                    deleted_by = EXCLUDED.deleted_by
+                """, (actual_tg_id, now_ts, adm_id))
+            else:
+                cur.execute("""
+                INSERT INTO admin_deleted_users (tg_id, deleted_at, deleted_by, last_request_at)
+                VALUES (?, ?, ?, NULL)
+                ON CONFLICT(tg_id) DO UPDATE SET
+                    deleted_at = excluded.deleted_at,
+                    deleted_by = excluded.deleted_by
+                """, (actual_tg_id, now_ts, adm_id))
+
+        conn.commit()
+        invalidate_user_cache(actual_tg_id)
         try:
-            cur.execute(f"DELETE FROM broadcast_messages WHERE chat_id = {_ph()}", (actual_tg_id,))
-            conn.commit()
+            from core import invalidate_dashboard_cache
+            invalidate_dashboard_cache()
         except Exception:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-
-        # 2. submissions (user_tg_id ustuni)
-        try:
-            cur.execute(f"DELETE FROM submissions WHERE user_tg_id = {_ph()}", (actual_tg_id,))
-            conn.commit()
-        except Exception:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-
-        # 3. users (tg_id va id bo'yicha to'liq o'chirish)
-        try:
-            cur.execute(f"DELETE FROM users WHERE tg_id = {_ph()} OR id = {_ph()}", (actual_tg_id, tg_id))
-            conn.commit()
-        except Exception as e3:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            raise e3
-
-        return user_row or {"tg_id": tg_id, "fullname": "Noma'lum", "phone": "—", "username": ""}
+            pass
+        return user_row or {"tg_id": actual_tg_id}
     except Exception as e:
         print(f"Error deleting user {tg_id}: {e}")
         if conn:
@@ -1422,40 +1630,186 @@ def delete_user(tg_id: int) -> Optional[Dict[str, Any]]:
         _close_conn(conn)
 
 
+def restore_user(tg_id: int) -> Optional[Dict[str, Any]]:
+    """Admin tomonidan o'chirilgan foydalanuvchini qayta tiklash (admin_deleted_users dan tozalash va approved qilish)."""
+    clear_admin_deleted(tg_id)
+    u = get_user(tg_id)
+    if not u:
+        add_or_update_user(tg_id, "Foydalanuvchi", "", None, status="approved")
+    else:
+        approve_user(tg_id)
+    return get_user(tg_id)
+
+
 def delete_all_blocked_users() -> List[Dict[str, Any]]:
-    """Bazada status = 'blocked' bo'lgan barcha foydalanuvchilarni butunlay o'chirib tashlash."""
+    """Eski tizim bilan moslik uchun; yangi modelda 'blocked' statusi yo'q."""
+    return []
+
+
+# ──────────────────────────────────────────────────────────
+# JAVOBLARNI AVTOMATIK SAQLASH (AUTOSAVE DRAFTS)
+# ──────────────────────────────────────────────────────────
+
+def save_answer_draft(user_tg_id: int, test_id: int, question_key: str, answer_val: str) -> bool:
+    """
+    O'quvchi test ishlayotgan paytda har bir savolga bergan javobini zudlik bilan bazaga autosave qilish.
+    Server restart yoki mini ilova tasodifan yopilib qolsa ham javoblar yo'qolmaydi!
+    """
+    if not user_tg_id or not test_id or not question_key:
+        return False
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM users WHERE status = 'blocked'")
-        rows = cur.fetchall()
-        blocked_users = [_row_to_dict(r) for r in rows if r]
+        now_ts = int(time.time())
+        qkey = str(question_key).strip().lower()
+        ans = str(answer_val).strip()
 
-        for u in blocked_users:
-            uid = u.get("tg_id")
-            if uid:
-                try:
-                    cur.execute(f"DELETE FROM broadcast_messages WHERE chat_id = {_ph()}", (uid,))
-                except Exception:
-                    pass
-                try:
-                    cur.execute(f"DELETE FROM submissions WHERE user_tg_id = {_ph()}", (uid,))
-                except Exception:
-                    pass
+        if USE_POSTGRES:
+            cur.execute("""
+                INSERT INTO submission_drafts (user_tg_id, test_id, question_key, answer_val, updated_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (user_tg_id, test_id, question_key) DO UPDATE SET
+                    answer_val = EXCLUDED.answer_val,
+                    updated_at = EXCLUDED.updated_at
+            """, (user_tg_id, test_id, qkey, ans, now_ts))
+        else:
+            cur.execute("""
+                INSERT INTO submission_drafts (user_tg_id, test_id, question_key, answer_val, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (user_tg_id, test_id, question_key) DO UPDATE SET
+                    answer_val = excluded.answer_val,
+                    updated_at = excluded.updated_at
+            """, (user_tg_id, test_id, qkey, ans, now_ts))
 
-        cur.execute("DELETE FROM users WHERE status = 'blocked'")
         conn.commit()
-        return blocked_users
+        return True
     except Exception as e:
-        print(f"Error deleting blocked users: {e}")
-        if conn:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-        return []
+        print(f"Error autosaving answer draft: {e}")
+        return False
     finally:
         _close_conn(conn)
+
+
+def save_bulk_draft(user_tg_id: int, test_id: int, answers: Dict[str, str]) -> bool:
+    """Ko'p javoblarni birdaniga autosave qilish."""
+    if not user_tg_id or not test_id or not answers:
+        return False
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        now_ts = int(time.time())
+        ans_json = json.dumps(answers, ensure_ascii=False)
+
+        if USE_POSTGRES:
+            cur.execute("""
+                INSERT INTO user_test_drafts (user_tg_id, test_id, answers_json, updated_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (user_tg_id, test_id) DO UPDATE SET
+                    answers_json = EXCLUDED.answers_json,
+                    updated_at = EXCLUDED.updated_at
+            """, (user_tg_id, test_id, ans_json, now_ts))
+        else:
+            cur.execute("""
+                INSERT INTO user_test_drafts (user_tg_id, test_id, answers_json, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (user_tg_id, test_id) DO UPDATE SET
+                    answers_json = excluded.answers_json,
+                    updated_at = excluded.updated_at
+            """, (user_tg_id, test_id, ans_json, now_ts))
+
+        for qkey, val in answers.items():
+            qkey_clean = str(qkey).strip().lower()
+            val_clean = str(val).strip()
+            if USE_POSTGRES:
+                cur.execute("""
+                    INSERT INTO submission_drafts (user_tg_id, test_id, question_key, answer_val, updated_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (user_tg_id, test_id, question_key) DO UPDATE SET
+                        answer_val = EXCLUDED.answer_val,
+                        updated_at = EXCLUDED.updated_at
+                """, (user_tg_id, test_id, qkey_clean, val_clean, now_ts))
+            else:
+                cur.execute("""
+                    INSERT INTO submission_drafts (user_tg_id, test_id, question_key, answer_val, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (user_tg_id, test_id, question_key) DO UPDATE SET
+                        answer_val = excluded.answer_val,
+                        updated_at = excluded.updated_at
+                """, (user_tg_id, test_id, qkey_clean, val_clean, now_ts))
+
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error saving bulk draft: {e}")
+        return False
+    finally:
+        _close_conn(conn)
+
+
+def get_answer_drafts(user_tg_id: int, test_id: int) -> Dict[str, str]:
+    """Foydalanuvchining ushbu test uchun saqlangan barcha qoralama javoblarini olish."""
+    if not user_tg_id or not test_id:
+        return {}
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT answers_json FROM user_test_drafts WHERE user_tg_id = {_ph()} AND test_id = {_ph()}", (user_tg_id, test_id))
+        row = cur.fetchone()
+        if row and row[0]:
+            try:
+                res = json.loads(row[0])
+                if isinstance(res, dict) and res:
+                    return res
+            except Exception:
+                pass
+
+        cur.execute(f"SELECT question_key, answer_val FROM submission_drafts WHERE user_tg_id = {_ph()} AND test_id = {_ph()}", (user_tg_id, test_id))
+        rows = cur.fetchall()
+        out = {}
+        for r in rows:
+            if r and r[0]:
+                out[str(r[0])] = str(r[1] or "")
+        return out
+    except Exception as e:
+        print(f"Error fetching answer drafts: {e}")
+        return {}
+    finally:
+        _close_conn(conn)
+
+
+def clear_answer_drafts(user_tg_id: int, test_id: int) -> bool:
+    """Test topshirilgandan so'ng qoralamalarni tozalash."""
+    if not user_tg_id or not test_id:
+        return False
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"DELETE FROM submission_drafts WHERE user_tg_id = {_ph()} AND test_id = {_ph()}", (user_tg_id, test_id))
+        cur.execute(f"DELETE FROM user_test_drafts WHERE user_tg_id = {_ph()} AND test_id = {_ph()}", (user_tg_id, test_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error clearing answer drafts: {e}")
+        return False
+    finally:
+        _close_conn(conn)
+
+
+def has_any_active_test() -> bool:
+    """Ayni paytda birorta ham test faolmi yoki jadval bo'yicha ketayotganmi?"""
+    tests = get_active_tests()
+    if tests:
+        return True
+    try:
+        from core.config import get_test_schedule_status
+        all_t = get_all_tests()
+        for t in all_t:
+            st = get_test_schedule_status(t)
+            if st.get("is_active"):
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def get_users_count() -> Dict[str, int]:
@@ -1468,13 +1822,14 @@ def get_users_count() -> Dict[str, int]:
         approved = (_row_to_dict(cur.fetchone()) or {}).get("approved", 0)
         cur.execute("SELECT COUNT(*) as pending FROM users WHERE status = 'pending'")
         pending = (_row_to_dict(cur.fetchone()) or {}).get("pending", 0)
-        cur.execute("SELECT COUNT(*) as blocked FROM users WHERE status = 'blocked'")
-        blocked = (_row_to_dict(cur.fetchone()) or {}).get("blocked", 0)
+        cur.execute("SELECT COUNT(*) as rejected FROM users WHERE status = 'rejected'")
+        rejected = (_row_to_dict(cur.fetchone()) or {}).get("rejected", 0)
         return {
             "total": total,
             "approved": approved,
             "pending": pending,
-            "blocked": blocked
+            "rejected": rejected,
+            "blocked": 0
         }
     finally:
         _close_conn(conn)
@@ -1567,11 +1922,8 @@ def update_test_pdf(test_id: int, pdf_file_id: str, pdf_file_name: str) -> bool:
 
 def get_active_tests() -> List[Dict[str, Any]]:
     """Zero-DB-Read: Faol testlarni to'g'ridan-to'g'ri server RAM xotirasidan sub-millisekundda qaytarish."""
-    with _RAM_CACHE_LOCK:
-        if _GLOBAL_TESTS_PRELOADED:
-            return [dict(t) for t in _GLOBAL_ACTIVE_TESTS_LIST]
-
-    preload_all_tests_cache()
+    if not is_tests_cache_valid():
+        preload_all_tests_cache()
     with _RAM_CACHE_LOCK:
         return [dict(t) for t in _GLOBAL_ACTIVE_TESTS_LIST]
 
@@ -1582,29 +1934,15 @@ def get_test_by_code(test_code: str) -> Optional[Dict[str, Any]]:
         return None
     clean_code = str(test_code).upper().strip().replace("#", "")
 
-    with _RAM_CACHE_LOCK:
-        if _GLOBAL_TESTS_PRELOADED:
-            if clean_code in _GLOBAL_TESTS_BY_CODE:
-                cached_id = _GLOBAL_TESTS_BY_CODE[clean_code]
-                if cached_id in _GLOBAL_TESTS_CACHE:
-                    return dict(_GLOBAL_TESTS_CACHE[cached_id])
-            return None
+    if not is_tests_cache_valid():
+        preload_all_tests_cache()
 
-    # Agar hali preload bo'lmagan bo'lsa, DB dan yuklab RAM ni yangilaymiz
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(f"SELECT * FROM tests WHERE test_code = {_ph()}", (clean_code,))
-        row = cur.fetchone()
-        res = _row_to_dict(row)
-        if res:
-            with _RAM_CACHE_LOCK:
-                tid = res["id"]
-                _GLOBAL_TESTS_CACHE[tid] = res
-                _GLOBAL_TESTS_BY_CODE[clean_code] = tid
-        return res
-    finally:
-        _close_conn(conn)
+    with _RAM_CACHE_LOCK:
+        if clean_code in _GLOBAL_TESTS_BY_CODE:
+            cached_id = _GLOBAL_TESTS_BY_CODE[clean_code]
+            if cached_id in _GLOBAL_TESTS_CACHE:
+                return dict(_GLOBAL_TESTS_CACHE[cached_id])
+        return None
 
 
 def get_test_by_id(test_id: int) -> Optional[Dict[str, Any]]:
@@ -1613,27 +1951,13 @@ def get_test_by_id(test_id: int) -> Optional[Dict[str, Any]]:
         return None
     tid = int(test_id)
 
-    with _RAM_CACHE_LOCK:
-        if _GLOBAL_TESTS_PRELOADED:
-            if tid in _GLOBAL_TESTS_CACHE:
-                return dict(_GLOBAL_TESTS_CACHE[tid])
-            return None
+    if not is_tests_cache_valid():
+        preload_all_tests_cache()
 
-    # Keshda mavjud bo'lmasa, DB dan olib keshlaymiz
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(f"SELECT * FROM tests WHERE id = {_ph()}", (tid,))
-        row = cur.fetchone()
-        res = _row_to_dict(row)
-        if res:
-            with _RAM_CACHE_LOCK:
-                _GLOBAL_TESTS_CACHE[tid] = res
-                if res.get("test_code"):
-                    _GLOBAL_TESTS_BY_CODE[str(res["test_code"]).upper().strip().replace("#", "")] = tid
-        return res
-    finally:
-        _close_conn(conn)
+    with _RAM_CACHE_LOCK:
+        if tid in _GLOBAL_TESTS_CACHE:
+            return dict(_GLOBAL_TESTS_CACHE[tid])
+        return None
 
 
 get_test = get_test_by_id
@@ -1641,11 +1965,8 @@ get_test = get_test_by_id
 
 def get_all_tests() -> List[Dict[str, Any]]:
     """Zero-DB-Read: Barcha testlar ro'yxatini to'g'ridan-to'g'ri server RAM xotirasidan qaytarish."""
-    with _RAM_CACHE_LOCK:
-        if _GLOBAL_TESTS_PRELOADED:
-            return [dict(t) for t in _GLOBAL_ALL_TESTS_LIST]
-
-    preload_all_tests_cache()
+    if not is_tests_cache_valid():
+        preload_all_tests_cache()
     with _RAM_CACHE_LOCK:
         return [dict(t) for t in _GLOBAL_ALL_TESTS_LIST]
 
@@ -1961,15 +2282,17 @@ def get_all_admins() -> List[Dict[str, Any]]:
         _close_conn(conn)
 
 
-def get_all_users() -> List[Dict[str, Any]]:
+def get_all_users(include_deleted: bool = False) -> List[Dict[str, Any]]:
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute("""
+        del_cond = "" if include_deleted else "WHERE u.deleted_at IS NULL"
+        cur.execute(f"""
         SELECT u.*, COUNT(s.id) as tests_count, MAX(s.submitted_at) as last_test_at
         FROM users u
         LEFT JOIN submissions s ON u.tg_id = s.user_tg_id
-        GROUP BY u.id, u.tg_id, u.fullname, u.phone, u.username, u.status, u.pin_code, u.registered_at
+        {del_cond}
+        GROUP BY u.id, u.tg_id, u.fullname, u.phone, u.username, u.status, u.pin_code, u.registered_at, u.deleted_at, u.deleted_by, u.previous_status, u.is_anonymized
         ORDER BY u.registered_at DESC
         """)
         rows = cur.fetchall()
@@ -2596,7 +2919,7 @@ def get_key_and_score(q_data: Any, default_score: float) -> tuple:
 
 
 def calculate_grade(score: float, correct_count: Optional[int] = None) -> str:
-    if correct_count is not None and correct_count == 0:
+    if correct_count is not None and correct_count == 0 and score <= 0.0:
         return "—"
     if score <= 0.0:
         return "—"
@@ -2715,8 +3038,8 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
             "ratio": ratio
         }
 
-    # 40 dan boshlab 2 qismli (a va b) yopiq savollar
-    end_q = 45 if any(f"45{s}" in correct_answers_raw or "45" in correct_answers_raw for s in ["a", "b"]) else 44
+    # 40 dan 44 gacha 2 qismli (a va b) yopiq savollar (45-savol esse bo'lgani uchun 45a, 45b yo'q!)
+    end_q = 44
     for q in range(40, end_q + 1):
         for sub in ["a", "b"]:
             key = f"{q}{sub}"
@@ -2748,18 +3071,41 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
                 "ratio": ratio
             }
 
-    total_questions = len(details)
-    earned_score = round(earned_score, 1)
-    if correct_count == 0:
-        earned_score = 0.0
-        grade = "—"
-    elif correct_count == total_questions:
-        earned_score = 100.0
-        grade = "A+"
+    # Test qismi (1-44) bali — maksimal 75 ball shkalasiga o'tkaziladi
+    if correct_count == 0 or total_possible_score <= 0.0:
+        test_score = 0.0
     else:
-        grade = calculate_grade(earned_score, correct_count=correct_count)
-    total_possible_score = 100.0
-    percentage = round((earned_score / total_possible_score) * 100.0, 1)
+        test_score = round((earned_score / total_possible_score) * 75.0, 1)
+
+    # 45-savol: O'quvchi kiritgan halol tahminiy ESSE bali (0 dan 75 gacha)
+    raw_essay = user_answers.get("45", user_answers.get("essay_score", ""))
+    essay_score = 0.0
+    try:
+        if raw_essay is not None and str(raw_essay).strip() != "":
+            clean_essay = str(raw_essay).replace(",", ".").strip()
+            essay_score = round(min(75.0, max(0.0, float(clean_essay))), 1)
+    except Exception:
+        essay_score = 0.0
+
+    details["45"] = {
+        "num": "45-savol (Esse)", "type": "essay",
+        "user": str(essay_score), "correct": "Halol baholash (0 - 75)",
+        "status": "correct" if essay_score > 0 else "unanswered",
+        "score": essay_score,
+        "max_score": 75.0
+    }
+
+    # Ona tili yakuniy bali: Test (max 75) va Esse (max 75) ning o'rta arifmetigi!
+    final_score = round((test_score + essay_score) / 2.0, 1)
+    max_total_score = 75.0
+    total_questions = len(details)
+
+    if correct_count == 0 and essay_score <= 0.0:
+        grade = "—"
+    else:
+        grade = calculate_grade(final_score, correct_count=correct_count)
+
+    percentage = round((final_score / max_total_score) * 100.0, 1)
     rasch_theta = 0.0
 
     now = int(time.time())
@@ -2785,15 +3131,14 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
                 RETURNING id
                 """, (
                     test["id"], test["test_code"], user_tg_id, fullname, phone,
-                    json.dumps(user_answers, ensure_ascii=False), earned_score, total_possible_score,
-                    correct_count, 55,
+                    json.dumps(user_answers, ensure_ascii=False), final_score, max_total_score,
+                    correct_count, total_questions,
                     json.dumps(details, ensure_ascii=False), now, is_late
                 ))
                 sub_row = cur.fetchone()
                 if sub_row:
                     submission_id = _row_to_dict(sub_row).get("id")
                 else:
-                    # Bir vaqtda bir soniyada bosilganda mavjud yozuvni xavfsiz olish (100% Data Integrity)
                     cur.execute(
                         "SELECT id FROM submissions WHERE user_tg_id = %s AND test_id = %s",
                         (user_tg_id, test["id"])
@@ -2809,8 +3154,8 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     test["id"], test["test_code"], user_tg_id, fullname, phone,
-                    json.dumps(user_answers, ensure_ascii=False), earned_score, total_possible_score,
-                    correct_count, 55,
+                    json.dumps(user_answers, ensure_ascii=False), final_score, max_total_score,
+                    correct_count, total_questions,
                     json.dumps(details, ensure_ascii=False), now, is_late
                 ))
                 submission_id = cur.lastrowid
@@ -2821,6 +3166,19 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
                     )
                     ex_row = cur.fetchone()
                     submission_id = _row_to_dict(ex_row).get("id") if ex_row else None
+
+            # Qoralamalarni bitta atomar tranzaksiya ichida tozalash (Autosave drafts purge)
+            try:
+                cur.execute(
+                    f"DELETE FROM submission_drafts WHERE user_tg_id = {_ph()} AND test_id = {_ph()}",
+                    (user_tg_id, test["id"])
+                )
+                cur.execute(
+                    f"DELETE FROM user_test_drafts WHERE user_tg_id = {_ph()} AND test_id = {_ph()}",
+                    (user_tg_id, test["id"])
+                )
+            except Exception:
+                pass
 
             conn.commit()
             break
@@ -2843,8 +3201,10 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
         "test_title": test["title"],
         "test_code": test["test_code"],
         "fullname": fullname,
-        "score": earned_score,
-        "max_score": total_possible_score,
+        "score": final_score,
+        "test_score": test_score,
+        "essay_score": essay_score,
+        "max_score": max_total_score,
         "percentage": percentage,
         "grade": grade,
         "rasch_theta": rasch_theta,
@@ -3455,7 +3815,7 @@ def get_dashboard_summary() -> Dict[str, Any]:
             (SELECT COUNT(*) FROM users) as total_users,
             (SELECT COUNT(*) FROM users WHERE status = 'approved') as approved_users,
             (SELECT COUNT(*) FROM users WHERE status = 'pending') as pending_users,
-            (SELECT COUNT(*) FROM users WHERE status = 'blocked') as blocked_users,
+            0 as blocked_users,
             (SELECT COUNT(*) FROM tests) as total_tests,
             (SELECT COUNT(*) FROM tests WHERE is_active = 1) as active_tests,
             (SELECT COUNT(*) FROM submissions) as total_submissions,

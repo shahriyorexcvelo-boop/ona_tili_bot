@@ -98,6 +98,7 @@ const TestApp = {
 
     // 3.1. Agar telefon o'chib yongan yoki sahifa yangilangan bo'lsa, javoblarni xotiradan tiklash
     this.restoreAnswersFromStorage();
+    this.fetchDraftFromBackend();
 
     // 4. Mavzuga mos kirish animatsiyasini ishga tushirish
     this.runIntroAnimation();
@@ -333,16 +334,11 @@ const TestApp = {
   },
 
   getEndQ() {
-    if (this.testAnswers) {
-      if ('45a' in this.testAnswers || '45' in this.testAnswers) return 45;
-      if ('44a' in this.testAnswers || '44' in this.testAnswers) return 44;
-    }
     return 44;
   },
 
   getTotalQuestionsCount() {
-    const endQ = this.getEndQ();
-    return 35 + 4 + ((endQ - 40 + 1) * 2);
+    return 35 + 4 + 10 + 1; // 35 variantli + 4 ochiq (36-39) + 10 juft ochiq (40a-44b) + 1 esse (45) = 50
   },
 
   // ----------------------------------------------------
@@ -376,28 +372,22 @@ const TestApp = {
           }
         }
       }
+      // 45-savol: Esse
+      const input45 = document.getElementById('input-45');
+      if (input45 && input45.value !== undefined) {
+        this.answers['45'] = input45.value.trim();
+      }
       const key = this.getStorageKey();
       localStorage.setItem(key, JSON.stringify(this.answers));
-      this.showAutoSaveIndicator();
+      this.syncDraftToBackend();
     } catch (e) {
       console.warn('Storage save error:', e);
     }
   },
 
   showAutoSaveIndicator() {
-    let ind = document.getElementById('autosave-indicator');
-    if (!ind) {
-      ind = document.createElement('div');
-      ind.id = 'autosave-indicator';
-      ind.style.cssText = 'position:fixed;bottom:75px;left:50%;transform:translateX(-50%);background:rgba(16,185,129,0.92);color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;box-shadow:0 4px 12px rgba(16,185,129,0.3);z-index:999;pointer-events:none;transition:opacity 0.3s;opacity:0;display:flex;align-items:center;gap:4px;';
-      ind.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg><span>Xotiraga saqlandi</span>';
-      document.body.appendChild(ind);
-    }
-    ind.style.opacity = '1';
-    clearTimeout(this._saveTimer);
-    this._saveTimer = setTimeout(function() {
-      if (ind) ind.style.opacity = '0';
-    }, 1200);
+    // Foydalanuvchi talabiga ko'ra "Xotiraga saqlandi" yashil xabarnomasi olib tashlandi
+    return;
   },
 
 
@@ -454,6 +444,17 @@ const TestApp = {
         }
       }
 
+      // 45-savol: Esse (yozma ish)
+      const val45 = this.answers['45'];
+      const input45 = document.getElementById('input-45');
+      const box45 = document.getElementById('box-45');
+      if (input45 && val45 !== undefined) {
+        input45.value = val45;
+        const isFilled = (val45 || '').trim().length > 0;
+        if (box45) box45.classList.toggle('filled', isFilled);
+        this.updateMapItem('45', isFilled);
+      }
+
       this.updateProgress();
     } catch (e) {
       console.warn('Storage restore error:', e);
@@ -465,6 +466,57 @@ const TestApp = {
       const key = this.getStorageKey();
       localStorage.removeItem(key);
     } catch (e) {}
+  },
+
+  _autosaveSyncTimer: null,
+  syncDraftToBackend() {
+    if (!this.testId || !this.userTgId) return;
+    clearTimeout(this._autosaveSyncTimer);
+    this._autosaveSyncTimer = setTimeout(() => {
+      try {
+        const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
+        fetch('/api/app/autosave-answer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Telegram-Init-Data': initData
+          },
+          body: JSON.stringify({
+            test_id: this.testId,
+            user_tg_id: this.userTgId,
+            answers: this.answers,
+            init_data: initData
+          })
+        }).catch(err => console.warn('Backend draft autosave warning:', err));
+      } catch (e) {}
+    }, 600);
+  },
+
+  fetchDraftFromBackend() {
+    if (!this.testId || !this.userTgId) return;
+    const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
+    fetch(`/api/app/get-draft?test_id=${this.testId}&user_tg_id=${this.userTgId}`, {
+      headers: { 'X-Telegram-Init-Data': initData }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.success && data.answers && typeof data.answers === 'object') {
+          const keys = Object.keys(data.answers);
+          if (keys.length > 0) {
+            let changed = false;
+            keys.forEach(k => {
+              if (data.answers[k] && !this.answers[k]) {
+                this.answers[k] = data.answers[k];
+                changed = true;
+              }
+            });
+            if (changed) {
+              this.restoreAnswersFromStorage();
+            }
+          }
+        }
+      })
+      .catch(err => console.warn('Backend draft fetch warning:', err));
   },
 
   // ----------------------------------------------------
@@ -635,6 +687,12 @@ const TestApp = {
         `;
       }
     }
+    // 45 Esse
+    html += `
+      <button class="map-num-btn open-map-btn" id="map-btn-45" onclick="TestApp.scrollToQuestion('45')" style="font-size: 11px; font-weight: 800; min-width: 40px; padding: 4px 2px; border-color: #8b5cf6;">
+        45 (E)
+      </button>
+    `;
     grid.innerHTML = html;
   },
 
@@ -692,6 +750,12 @@ const TestApp = {
           answeredQuestions++;
         }
       }
+    }
+
+    // 45 Esse
+    const val45 = this.answers['45'] !== undefined ? this.answers['45'] : ((document.getElementById('input-45') || {}).value || '');
+    if ((val45 || '').trim().length > 0) {
+      answeredQuestions++;
     }
 
     const total = this.getTotalQuestionsCount();
@@ -752,6 +816,7 @@ const TestApp = {
         if ((this.answers[key] || '').trim().length > 0) answered++;
       }
     }
+    if ((this.answers['45'] || '').trim().length > 0) answered++;
 
     const total = this.getTotalQuestionsCount();
     const empty = total - answered;
@@ -1236,6 +1301,36 @@ const TestApp = {
 window.TestApp = TestApp;
 window.dismissSplash = () => TestApp.finishSplashImmediately();
 window.finishSplashImmediately = () => TestApp.finishSplashImmediately();
+
+// Mobil klaviatura ochilganda pastki yakunlash tugmasi klaviatura ustiga chiqib qolmasligi uchun
+document.addEventListener('focusin', (e) => {
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+    document.body.classList.add('keyboard-open');
+  }
+});
+document.addEventListener('focusout', (e) => {
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+    setTimeout(() => {
+      const active = document.activeElement;
+      if (!active || (active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA')) {
+        document.body.classList.remove('keyboard-open');
+      }
+    }, 120);
+  }
+});
+if (window.visualViewport) {
+  const initH = window.visualViewport.height;
+  window.visualViewport.addEventListener('resize', () => {
+    if (window.visualViewport.height < initH * 0.75) {
+      document.body.classList.add('keyboard-open');
+    } else {
+      const active = document.activeElement;
+      if (!active || (active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA')) {
+        document.body.classList.remove('keyboard-open');
+      }
+    }
+  });
+}
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {

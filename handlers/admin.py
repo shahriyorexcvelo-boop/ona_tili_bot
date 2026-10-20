@@ -917,11 +917,10 @@ async def user_quick_approve_cb(call: CallbackQuery):
     u = test_db.get_user(uid)
 
     # Agar allaqachon hal qilingan bo'lsa — xabar chiqar, qayta ishlamasin
-    if u and u.get("status") in ["approved", "rejected", "blocked"]:
+    if u and u.get("status") in ["approved", "rejected"]:
         status_map = {
             "approved": "✅ Bu foydalanuvchi allaqachon boshqa admin tomonidan RUXSAT BERILGAN!",
-            "rejected": "❌ Bu foydalanuvchi allaqachon RAD ETILGAN!",
-            "blocked": "⛔️ Bu foydalanuvchi BLOKLANGAN!"
+            "rejected": "❌ Bu foydalanuvchi allaqachon RAD ETILGAN!"
         }
         await call.answer(status_map.get(u["status"], "Allaqachon hal qilingan!"), show_alert=True)
         # Ushbu admindagi tugmalarni ham o'chirib qo'y
@@ -984,11 +983,10 @@ async def user_quick_reject_cb(call: CallbackQuery):
     u = test_db.get_user(uid)
 
     # Agar allaqachon hal qilingan bo'lsa
-    if u and u.get("status") in ["approved", "rejected", "blocked"]:
+    if u and u.get("status") in ["approved", "rejected"]:
         status_map = {
             "approved": "✅ Bu foydalanuvchi allaqachon RUXSAT BERILGAN!",
-            "rejected": "❌ Bu foydalanuvchi allaqachon RAD ETILGAN!",
-            "blocked": "⛔️ Bu foydalanuvchi BLOKLANGAN!"
+            "rejected": "❌ Bu foydalanuvchi allaqachon RAD ETILGAN!"
         }
         await call.answer(status_map.get(u["status"], "Allaqachon hal qilingan!"), show_alert=True)
         try:
@@ -1039,25 +1037,47 @@ async def user_quick_reject_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("user_req_access_"))
 async def user_req_access_cb(call: CallbackQuery):
-    """O'quvchi tomonidan ruxsat so'rash tugmasi bosilganda - avtomatik darhol ruxsat berish"""
+    """O'quvchi tomonidan ruxsat so'rash tugmasi bosilganda - adminga so'rov yuborish (avto-tasdiqlash EMAS)"""
     uid = int(call.data.split("_")[3])
-    test_db.approve_user(uid)
+    u = test_db.get_user(uid)
+    can_req, diff_h = test_db.can_request_access(uid, cooldown_hours=6)
+    if not can_req:
+        await call.answer("⏳ So'rovingiz ko'rib chiqilmoqda. Iltimos, admin javobini kuting.", show_alert=True)
+        return
+
+    test_db.touch_admin_deleted_request(uid)
+    uname = u["fullname"] if u else f"ID: {uid}"
+    username = f"@{u['username']}" if (u and u.get('username')) else "Mavjud emas"
+
+    alert_text = (
+        f"🔔 <b>Yangi kirish so'rovi (Ilgari o'chirilgan foydalanuvchi):</b>\n\n"
+        f"👤 <b>Foydalanuvchi:</b> {html.escape(uname)}\n"
+        f"🔗 <b>Username:</b> {username}\n"
+        f"🆔 <b>Telegram ID:</b> <code>{uid}</code>\n"
+        f"🕒 <b>Vaqt:</b> {format_uzb_time()}\n\n"
+        f"Ushbu foydalanuvchiga botdan foydalanishga ruxsat berasizmi?"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Ruxsat berish", callback_data=f"user_quick_approve_{uid}"),
+            InlineKeyboardButton(text="❌ Rad etish", callback_data=f"user_quick_reject_{uid}")
+        ]
+    ])
+    for adm_id in get_all_admin_ids():
+        try:
+            await bot.send_message(chat_id=adm_id, text=alert_text, reply_markup=kb)
+        except Exception:
+            pass
+
     try:
         await call.message.edit_text(
-            "🎉 <b>Xush kelibsiz! Botdan to'liq foydalanishingiz mumkin.</b>\n\n"
-            "Kerakli bo'limni tanlang yoki to'g'ridan-to'g'ri test kodini yuboring 👇",
+            "⏳ <b>So'rovingiz adminga yuborildi, ruxsat berilishini kuting.</b>\n\n"
+            "Admin tasdiqlaganidan so'ng sizga xabar beriladi.",
             reply_markup=None
         )
     except Exception:
         pass
-    try:
-        await call.message.answer(
-            "Asosiy menyu:",
-            reply_markup=main_menu_kb(uid)
-        )
-    except Exception:
-        pass
-    await call.answer("✅ Sizga to'liq ruxsat berildi!", show_alert=True)
+    await call.answer("⏳ So'rovingiz adminga yuborildi!", show_alert=True)
 
 @admin_router.callback_query(F.data.startswith("ask_pdf_"))
 async def ask_pdf_cb(call: CallbackQuery, state: FSMContext):

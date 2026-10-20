@@ -29,7 +29,7 @@ from core import (
     RegistrationState, SolveTestState, EditProfileState, StudentTahlilState,
     main_menu_kb, profile_webapp_kb, results_webapp_kb,
     contact_share_kb, make_webapp_button,
-    is_working_hours, get_night_message,
+    is_working_hours, should_apply_night_mode, get_night_message,
     invalidate_dashboard_cache, get_test_schedule_status,
     set_cached_membership
 )
@@ -80,8 +80,8 @@ async def start_handler(message: Message, state: FSMContext):
     await state.clear()
     user_tg_id = message.from_user.id
 
-    # Admin uchun tun rejimi qo'llanilmaydi
-    if not test_db.is_admin(user_tg_id, ADMIN_ID) and not is_working_hours():
+    # Tun rejimi tekshiruvi: faol test bo'lmaganda va admin bo'lmaganda to'xtatadi
+    if should_apply_night_mode(user_tg_id):
         await message.answer(get_night_message())
         return
 
@@ -107,9 +107,40 @@ async def start_handler(message: Message, state: FSMContext):
         is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
         st = user.get("status", "approved")
         if not is_adm:
-            if st in ["blocked", "rejected"]:
+            if st == "pending":
+                can_req, diff_hours = test_db.can_request_access(user_tg_id, cooldown_hours=6)
+                if can_req:
+                    test_db.touch_admin_deleted_request(user_tg_id)
+                    safe_fn = html.escape(user.get("fullname", "O'quvchi"))
+                    safe_un = html.escape(f"@{user.get('username')}") if user.get("username") else "Mavjud emas"
+                    alert_text = (
+                        f"🔔 <b>Yangi kirish so'rovi (Ilgari o'chirilgan foydalanuvchi):</b>\n\n"
+                        f"👤 <b>Foydalanuvchi:</b> {safe_fn}\n"
+                        f"🔗 <b>Username:</b> {safe_un}\n"
+                        f"🆔 <b>Telegram ID:</b> <code>{user_tg_id}</code>\n"
+                        f"🕒 <b>Vaqt:</b> {format_uzb_time()}\n\n"
+                        f"Ushbu foydalanuvchiga botdan foydalanishga ruxsat berasizmi?"
+                    )
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [
+                            InlineKeyboardButton(text="✅ Ruxsat berish", callback_data=f"user_quick_approve_{user_tg_id}"),
+                            InlineKeyboardButton(text="❌ Rad etish", callback_data=f"user_quick_reject_{user_tg_id}")
+                        ]
+                    ])
+                    await notify_all_admins(message.bot, alert_text, reply_markup=kb)
+                    await message.answer(
+                        "⏳ <b>So'rovingiz adminga yuborildi, ruxsat berilishini kuting.</b>\n\n"
+                        "Admin ruxsat bergandan so'ng botdan to'liq foydalanishingiz mumkin bo'ladi."
+                    )
+                else:
+                    await message.answer(
+                        "⏳ <b>Sizning so'rovingiz ko'rib chiqilmoqda...</b>\n\n"
+                        "Iltimos, admin javobini kuting."
+                    )
+                return
+            elif st == "rejected":
                 await message.answer(
-                    "⛔️ <b>Sizning botdan foydalanish huquqingiz to'xtatilgan yoki rad etilgan!</b>\n\n"
+                    "⛔️ <b>Sizning botdan foydalanish so'rovingiz rad etilgan!</b>\n\n"
                     "Murojaat uchun: @eshmbetov"
                 )
                 return
@@ -153,11 +184,18 @@ async def reg_fullname(message: Message, state: FSMContext):
     phone = ""
 
     is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
-    status = "approved"
+    was_admin_deleted = test_db.is_admin_deleted(user_tg_id)
+
+    if is_adm:
+        status = "approved"
+    elif was_admin_deleted:
+        status = "pending"
+    else:
+        status = "approved"
 
     test_db.add_or_update_user(user_tg_id, fullname, phone, username, status=status)
     try:
-        test_db.log_activity(user_tg_id, "user_register", f"Yangi o'quvchi ro'yxatdan o'tdi: {fullname}", {"tg_id": user_tg_id, "fullname": fullname, "username": username})
+        test_db.log_activity(user_tg_id, "user_register", f"Yangi o'quvchi ro'yxatdan o'tdi: {fullname}", {"tg_id": user_tg_id, "fullname": fullname, "username": username, "status": status})
     except Exception:
         pass
     invalidate_dashboard_cache()
@@ -168,6 +206,30 @@ async def reg_fullname(message: Message, state: FSMContext):
             f"🎉 <b>Tabriklaymiz, {fullname}! Siz admin sifatida tizimga ulandingiz!</b>\n\n"
             f"Kerakli bo'limni tanlang yoki to'g'ridan-to'g'ri test kodini yuboring 👇",
             reply_markup=main_menu_kb(user_tg_id)
+        )
+    elif status == "pending":
+        test_db.touch_admin_deleted_request(user_tg_id)
+        safe_fullname = html.escape(fullname)
+        safe_username = html.escape(f"@{username}") if username else "Mavjud emas"
+        alert_text = (
+            f"🔔 <b>Yangi kirish so'rovi (Ilgari o'chirilgan foydalanuvchi):</b>\n\n"
+            f"👤 <b>Foydalanuvchi:</b> {safe_fullname}\n"
+            f"🔗 <b>Username:</b> {safe_username}\n"
+            f"🆔 <b>Telegram ID:</b> <code>{user_tg_id}</code>\n"
+            f"🕒 <b>Vaqt:</b> {format_uzb_time()}\n\n"
+            f"Ushbu foydalanuvchiga botdan foydalanishga ruxsat berasizmi?"
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Ruxsat berish", callback_data=f"user_quick_approve_{user_tg_id}"),
+                InlineKeyboardButton(text="❌ Rad etish", callback_data=f"user_quick_reject_{user_tg_id}")
+            ]
+        ])
+        await notify_all_admins(message.bot, alert_text, reply_markup=kb)
+
+        await message.answer(
+            "⏳ <b>So'rovingiz adminga yuborildi, ruxsat berilishini kuting.</b>\n\n"
+            "Admin tasdiqlaganidan so'ng sizga xabar beriladi va botdan to'liq foydalanishingiz mumkin bo'ladi."
         )
     else:
         # Foydalanuvchiga to'g'ridan-to'g'ri tasdiqlanganini bildirish
@@ -205,10 +267,18 @@ async def reg_phone(message: Message, state: FSMContext):
     user_tg_id = message.from_user.id
     username = message.from_user.username
 
-    status = "approved"
+    is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
+    was_admin_deleted = test_db.is_admin_deleted(user_tg_id)
+    if is_adm:
+        status = "approved"
+    elif was_admin_deleted:
+        status = "pending"
+    else:
+        status = "approved"
+
     test_db.add_or_update_user(user_tg_id, fullname, phone, username, status=status)
     try:
-        test_db.log_activity(user_tg_id, "user_register", f"Yangi o'quvchi ro'yxatdan o'tdi: {fullname}", {"tg_id": user_tg_id, "fullname": fullname, "username": username})
+        test_db.log_activity(user_tg_id, "user_register", f"Yangi o'quvchi ro'yxatdan o'tdi: {fullname}", {"tg_id": user_tg_id, "fullname": fullname, "username": username, "status": status})
     except Exception:
         pass
     invalidate_dashboard_cache()
@@ -616,7 +686,7 @@ async def profile_delete_account_confirm(call: CallbackQuery):
 async def do_delete_my_account_handler(call: CallbackQuery, state: FSMContext):
     await state.clear()
     uid = call.from_user.id
-    user_info = test_db.delete_user(uid)
+    user_info = test_db.delete_user(uid, is_self_delete=True)
     await call.message.answer(
         "🗑 <b>Akkauntingiz va barcha natijalaringiz butunlay o'chirildi.</b>\n\n"
         "Qaytadan ro'yxatdan o'tish uchun /start buyrug'ini bosing.",
@@ -655,8 +725,8 @@ async def user_blocked_bot_handler(event: ChatMemberUpdated):
         user_id = event.from_user.id
         u = test_db.get_user(user_id)
         
-        # Botni bloklagan foydalanuvchini bazadan to'liq o'chiramiz
-        test_db.delete_user(user_id)
+        # Botni bloklagan foydalanuvchini bazadan to'liq o'chiramiz (o'zi ketgani uchun is_self_delete=True)
+        test_db.delete_user(user_id, is_self_delete=True)
         
         fn = (u and u.get("fullname")) or event.from_user.full_name or "Noma'lum"
         un = f"@{u.get('username')}" if (u and u.get('username')) else (f"@{event.from_user.username}" if event.from_user.username else "Mavjud emas")
@@ -680,18 +750,12 @@ async def user_blocked_bot_handler(event: ChatMemberUpdated):
 @user_router.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=MEMBER))
 async def user_unblocked_bot_handler(event: ChatMemberUpdated):
     """
-    Foydalanuvchi botni blokdan chiqarganda (Unblock/Restart) barcha adminlarga xabar boradi.
+    Foydalanuvchi botni qayta ishga tushirganda (Restart) barcha adminlarga xabar boradi.
     """
     try:
         user_id = event.from_user.id
         u = test_db.get_user(user_id)
-        
-        # Agar avval ro'yxatdan o'tgan bo'lsa va bloklangan bo'lsa, 'approved' qilamiz
-        if u and u.get("status") == "blocked":
-            test_db.approve_user(user_id)
-            note = "<i>Bazada holati qayta «Faol» qilindi.</i>"
-        else:
-            note = "<i>Botdan qayta foydalanishi mumkin.</i>"
+        note = "<i>Botdan qayta foydalanishi mumkin.</i>"
             
         fn = (u and u.get("fullname")) or event.from_user.full_name or "Noma'lum"
         un = f"@{u.get('username')}" if (u and u.get('username')) else (f"@{event.from_user.username}" if event.from_user.username else "Mavjud emas")
@@ -804,6 +868,7 @@ async def open_app_command(message: Message):
 
 @user_router.callback_query(F.data.startswith("user_req_tahlil_"))
 async def user_req_tahlil_cb(call: CallbackQuery, state: FSMContext):
+    await state.clear()
     test_id = int(call.data.split("_")[3])
     test = test_db.get_test_by_id(test_id)
     if not test:
@@ -815,19 +880,20 @@ async def user_req_tahlil_cb(call: CallbackQuery, state: FSMContext):
         await call.answer("Siz ushbu testni topshirmagansiz!", show_alert=True)
         return
 
-    await state.set_state(StudentTahlilState.waiting_for_code)
-    await state.update_data(tahlil_test_id=test_id)
-
-    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_tahlil_code")]
-    ])
-    await call.message.answer(
-        f"🔐 <b>«{test['title']}» (<code>#{test.get('test_code', '')}</code>) testi tahlili</b>\n\n"
-        f"Savollar tahlilini ko'rish uchun test kodini yoki admin tomonidan berilgan maxsus parolni kiriting:\n\n"
-        f"<i>(Masalan: <code>{test.get('test_code', '101')}</code>)</i>",
-        reply_markup=cancel_kb
-    )
     await call.answer()
+    tahlil_text = build_detailed_tahlil_text(sub, test)
+
+    kb_rows = []
+    yt_url = (test.get("youtube_url") or "").strip()
+    if yt_url:
+        kb_rows.append([InlineKeyboardButton(text="🎬 Video tahlilni ko'rish (YouTube)", url=yt_url)])
+    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app.html?tab=tests&tg_id={call.from_user.id}"))])
+
+    await call.message.answer(
+        tahlil_text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows),
+        disable_web_page_preview=False
+    )
 
 @user_router.callback_query(F.data == "cancel_tahlil_code")
 async def cancel_tahlil_code_cb(call: CallbackQuery, state: FSMContext):
@@ -966,12 +1032,18 @@ async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
                 )
                 return
 
-    # Faqat bloklangan yoki rad etilgan bo'lsa to'xtatamiz
+    # Faqat kutilayotgan (pending) yoki rad etilgan bo'lsa to'xtatamiz
     st = user.get("status", "approved")
     if not test_db.is_admin(user_tg_id, ADMIN_ID):
-        if st in ["blocked", "rejected"]:
+        if st == "pending":
             await message.answer(
-                "⛔️ <b>Sizning botdan foydalanish huquqingiz to'xtatilgan yoki rad etilgan!</b>\n\n"
+                "⏳ <b>Sizning so'rovingiz ko'rib chiqilmoqda...</b>\n\n"
+                "Admin ruxsat bergandan so'ng botdan to'liq foydalanishingiz mumkin bo'ladi."
+            )
+            return
+        elif st == "rejected":
+            await message.answer(
+                "⛔️ <b>Sizning botdan foydalanish so'rovingiz rad etilgan!</b>\n\n"
                 "Murojaat uchun: @eshmbetov"
             )
             return

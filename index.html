@@ -235,15 +235,33 @@
         </div>
       </section>
 
-      <!-- BO'LIM 3: 40 dan boshlab (2 qismli yopiq savollar: a va b) -->
+      <!-- BO'LIM 3: 40 — 44 (2 qismli yopiq savollar: a va b) -->
       <section class="section-group">
         <div class="section-group-header">
-          <div class="section-badge special-badge">3-BO'LIM (40 dan boshlab)</div>
-          <h2 class="section-heading">2 qismli yopiq savollar (40 va undan keyingilar)</h2>
+          <div class="section-badge special-badge">3-BO'LIM (40 — 44)</div>
+          <h2 class="section-heading">2 qismli yopiq savollar (40 — 44)</h2>
           <span class="section-subtext">Har bir savolning <b>a</b> va <b>b</b> bandlariga to'g'ri javobni kiriting</span>
         </div>
         <div class="questions-list" id="questions-part-4">
-          <!-- JS orqali 40a, 40b, 41a, 41b... savollar chiqariladi -->
+          <!-- JS orqali 40a, 40b, 41a... 44a, 44b savollar chiqariladi -->
+        </div>
+      </section>
+
+      <!-- BO'LIM 4: 45-savol (Esse / Yozma ish) -->
+      <section class="section-group">
+        <div class="section-group-header">
+          <div class="section-badge esse-badge">4-BO'LIM (45-SAVOL: ESSE)</div>
+          <h2 class="section-heading">45-savol: Ijodiy yozma ish (Esse)</h2>
+          <span class="section-subtext">O'z ijodiy yozma ishingiz (esse) bo'yicha halol tahminiy balingizni kiriting (0 dan 75 gacha)</span>
+        </div>
+        <div class="questions-list" id="questions-part-5">
+          <div class="open-question-row esse-question-row" id="qrow-45">
+            <div class="savol-badge esse-badge">45-savol (Esse)</div>
+            <div class="savol-input-box" id="box-45">
+              <input type="number" min="0" max="75" step="0.5" class="savol-input open-native-input esse-input" id="input-45" placeholder="Halol tahminiy esse balingiz (0 — 75)..." autocomplete="off" oninput="TestApp.handleOpenInput('45', this.value)">
+            </div>
+            <div class="esse-hint-text">ℹ️ <i>Ona tili milliy sertifikatida test uchun maksimal 75 ball, esse uchun maksimal 75 ball bo'ladi. Yakuniy ball ikkalasining o'rtacha arifmetigi asosida hisoblanadi (max 75 ball).</i></div>
+          </div>
         </div>
       </section>
 

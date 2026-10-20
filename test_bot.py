@@ -40,8 +40,26 @@ async def main():
         log.error(f"❌ DB init / preload xatolik: {dbe}")
 
 
-    # 2. aiohttp serverini DARHOL ishga tushirish (Render /healthz tekshiruvidan darhol o'tishi uchun)
+    # 2. Webhook va Polling rejimini aniqlash (M7: Bir nechta instance to'qnashuvini oldini olish)
+    USE_WEBHOOK = os.getenv("USE_WEBHOOK", "1").strip().lower() in ("1", "true", "yes")
+    WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "onatili_sec_token_2026").strip()
+    WEBHOOK_PATH = "/tg-webhook"
+
+    is_valid_https = bool(WEBAPP_URL and WEBAPP_URL.startswith("https://") and "localhost" not in WEBAPP_URL)
+    use_webhook_mode = USE_WEBHOOK and is_valid_https
+
     app = await create_web_app()
+
+    if use_webhook_mode:
+        from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+        SimpleRequestHandler(
+            dispatcher=dp,
+            bot=bot,
+            secret_token=WEBHOOK_SECRET
+        ).register(app, path=WEBHOOK_PATH)
+        setup_application(app, dp, bot=bot)
+        log.info(f"🔗 Webhook endpoint ro'yxatdan o'tkazildi: {WEBHOOK_PATH}")
+
     runner = web.AppRunner(app)
     await runner.setup()
     
@@ -59,16 +77,7 @@ async def main():
             else:
                 raise e
 
-    # 3. Orqa fonda bloklangan foydalanuvchilarni tozalash
-    async def run_startup_db_tasks():
-        try:
-            cleaned = await asyncio.to_thread(test_db.delete_all_blocked_users)
-            if cleaned:
-                log.info(f"🧹 Bot ishga tushganda {len(cleaned)} ta oldindan bloklangan foydalanuvchi bazadan o'chirildi")
-        except Exception as ex:
-            log.warning(f"Startup clean blocked xatolik: {ex}")
-
-    _cleanup_task = asyncio.create_task(run_startup_db_tasks())
+    # 3. M1: Startup'da bloklangan foydalanuvchilarni o'chirish butunlay bekor qilindi (Data Preservation)
 
     # 4. Fon rejimida HTTPS Tunnelni boshlash
     _tunnel_task = asyncio.create_task(maintain_tunnel(current_port))
@@ -76,10 +85,8 @@ async def main():
     # 5. Avtomatik jadval tekshiruvchisini ishga tushirish
     _sched_task = asyncio.create_task(schedule_checker())
 
-    # 5. Telegram Botni ishga tushirish
-    log.info("🤖 Telegram Bot Polling rejimida ishga tushmoqda...")
+    # 6. Telegram Botni ishga tushirish (Webhook yoki Polling)
     try:
-        await bot.delete_webhook(drop_pending_updates=True)
         # Telegram rasmiy menyu buyruqlarini ro'yxatdan o'tkazish
         try:
             await bot.set_my_commands([
@@ -112,8 +119,28 @@ async def main():
         except Exception as ce:
             log.warning(f"Bot buyruqlarini o'rnatishda ogohlantirish: {ce}")
 
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        if use_webhook_mode:
+            webhook_url = f"{WEBAPP_URL.rstrip('/')}{WEBHOOK_PATH}"
+            log.info(f"🚀 Telegram Bot Webhook rejimida ishlamoqda: {webhook_url}")
+            await bot.set_webhook(
+                url=webhook_url,
+                secret_token=WEBHOOK_SECRET,
+                allowed_updates=dp.resolve_used_update_types(),
+                drop_pending_updates=True
+            )
+            # Webhook rejimida aiohttp serverini to'xtovsiz ushlab turamiz
+            stop_event = asyncio.Event()
+            await stop_event.wait()
+        else:
+            log.info("🤖 Telegram Bot Polling rejimida ishga tushmoqda...")
+            await bot.delete_webhook(drop_pending_updates=True)
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
+        if use_webhook_mode:
+            try:
+                await bot.delete_webhook()
+            except Exception:
+                pass
         await bot.session.close()
         if runner:
             await runner.cleanup()

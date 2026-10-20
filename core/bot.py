@@ -1,4 +1,6 @@
+import os
 import time
+import logging
 from typing import Dict
 from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
@@ -28,9 +30,33 @@ class MaintenanceMiddleware(BaseMiddleware):
                     return
         return await handler(event, data)
 
+
+# FSM Storage: RedisStorage agar REDIS_URL berilgan bo'lsa, aks holda MemoryStorage fallback
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+fsm_storage = None
+
+if REDIS_URL:
+    try:
+        from aiogram.fsm.storage.redis import RedisStorage
+        fsm_storage = RedisStorage.from_url(REDIS_URL)
+        safe_redis_repr = REDIS_URL.split("@")[-1] if "@" in REDIS_URL else "configured"
+        logging.getLogger("OnaTiliRasch").info(f"✅ FSM Holatlari uchun RedisStorage muvaffaqiyatli ulandi ({safe_redis_repr})")
+    except Exception as re:
+        logging.getLogger("OnaTiliRasch").warning(
+            f"⚠️ REDIS_URL mavjud, ammo Redis ulanmadi ({re}). MemoryStorage'ga fallback qilinmoqda. "
+            f"Restartlarda FSM holatlari xotiradan o'chadi!"
+        )
+        fsm_storage = MemoryStorage()
+else:
+    logging.getLogger("OnaTiliRasch").info(
+        "ℹ️ REDIS_URL belgilanmagan. FSM holatlari MemoryStorage'da saqlanadi. "
+        "Doimiy holat saqlanishi uchun REDIS_URL o'rnating."
+    )
+    fsm_storage = MemoryStorage()
+
 # Bot va Dispatcher obyektlari
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher(storage=MemoryStorage())
+dp = Dispatcher(storage=fsm_storage)
 
 # 1000+ pik foydalanuvchi oqimida bot va bazani himoya qiluvchi Throttling (Rate Limiter: 2.5s)
 throttling_middleware = ThrottlingMiddleware(limit=2.5, admin_ids=get_config_admin_ids())

@@ -254,6 +254,48 @@ def get_night_message() -> str:
         f"har bir xabar serverni keraksiz uyg'otadi va bot tezroq o'chib qolishi mumkin."
     )
 
+def should_apply_night_mode(user_tg_id: Optional[int] = None, current_test_id: Optional[int] = None) -> bool:
+    """
+    Tun rejimi (23:00 - 07:00) faqat tizimda faol test bo'lmagan paytda qo'llaniladi.
+    Agar ayni paytda faol test yoki jadval bo'yicha ketayotgan test bo'lsa,
+    foydalanuvchilar bemalol topshira olishi kerak.
+    Adminlar uchun tun rejimi umuman qo'llanilmaydi.
+    """
+    if is_working_hours():
+        return False
+
+    # 1. Admin tekshiruvi (Adminlar uchun tun rejimi ishlamaydi)
+    if user_tg_id is not None:
+        try:
+            import test_db
+            if test_db.is_admin(user_tg_id, ADMIN_ID):
+                return False
+        except Exception:
+            pass
+
+    # 2. Muayyan test bo'yicha tekshirish
+    if current_test_id:
+        try:
+            import test_db
+            t = test_db.get_test_by_id(current_test_id)
+            if t:
+                st = get_test_schedule_status(t)
+                if st.get("is_active"):
+                    return False
+        except Exception:
+            pass
+
+    # 3. Umumiy faol test mavjudligini tekshirish
+    try:
+        import test_db
+        if test_db.has_any_active_test():
+            return False
+    except Exception:
+        pass
+
+    return True
+
+
 def get_maintenance_message() -> str:
     """Texnik profilaktika rejimi xabari."""
     now = datetime.now(UZB_TZ)

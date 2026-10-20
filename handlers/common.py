@@ -21,9 +21,9 @@ import test_db
 from core import (
     UZB_TZ, format_uzb_time, TG_ICONS, tg_e,
     get_test_schedule_status,
-    is_working_hours, get_night_message,
+    is_working_hours, should_apply_night_mode, get_night_message,
     ADMIN_ID, get_config_admin_ids, WEBAPP_URL, bot, log,
-    make_webapp_button
+    make_webapp_button, is_user_gone_error
 )
 
 BLACKLIST_NAME_WORDS = {
@@ -129,8 +129,8 @@ async def check_access(message: Message) -> bool:
     uid = message.from_user.id
     if test_db.is_admin(uid, ADMIN_ID):
         return True
-    # Tun rejimi tekshiruvi (23:00 – 07:00)
-    if not is_working_hours():
+    # Tun rejimi tekshiruvi (faol test bo'lmagandagina to'xtatadi)
+    if should_apply_night_mode(uid):
         await message.answer(get_night_message())
         return False
     u = test_db.get_user(uid)
@@ -268,18 +268,7 @@ async def clean_blocked_users_from_db(initiator_id: int = ADMIN_ID) -> dict:
     """
     Bazada mavjud barcha foydalanuvchilarni tekshirib, botni bloklaganlarni bazadan to'liq o'chirib tashlash.
     """
-    already_blocked = test_db.delete_all_blocked_users()
     deleted_users = []
-    for bu in already_blocked:
-        deleted_users.append({
-            "id": bu.get("id"),
-            "tg_id": bu.get("tg_id"),
-            "fullname": bu.get("fullname") or "Noma'lum",
-            "username": f"@{bu.get('username')}" if bu.get("username") else "—",
-            "tests_count": bu.get("tests_count", 0),
-            "reason": "Oldindan bloklangan holatda"
-        })
-
     users = test_db.get_all_users()
     admin_ids = set(get_all_admin_ids())
 
@@ -292,23 +281,20 @@ async def clean_blocked_users_from_db(initiator_id: int = ADMIN_ID) -> dict:
         try:
             await bot.send_chat_action(chat_id=uid, action="typing")
             active_users.append(u)
-        except (TelegramForbiddenError, TelegramBadRequest) as ex:
-            err_text = str(ex).lower()
-            if "blocked" in err_text or "deactivated" in err_text or "chat not found" in err_text:
-                test_db.delete_user(uid)
+        except Exception as ex:
+            if is_user_gone_error(ex):
+                test_db.delete_user(uid, is_self_delete=True)
                 deleted_users.append({
                     "id": u.get("id"),
                     "tg_id": uid,
                     "fullname": u.get("fullname") or "Noma'lum",
                     "username": f"@{u.get('username')}" if u.get("username") else "—",
                     "tests_count": u.get("tests_count", 0),
-                    "reason": err_text[:60]
+                    "reason": str(ex)[:60]
                 })
                 log.info(f"🗑 Bloklagan foydalanuvchi {uid} ({u.get('fullname')}) bazadan o'chirildi")
             else:
                 active_users.append(u)
-        except Exception as e:
-            active_users.append(u)
         await asyncio.sleep(0.04)
 
     return {
@@ -413,9 +399,8 @@ async def send_inactive_warning_messages(
             })
             await asyncio.sleep(0.04)
         except Exception as e:
-            err_text = str(e).lower()
-            if "blocked" in err_text or "forbidden" in err_text or "deactivated" in err_text:
-                test_db.delete_user(uid)
+            if is_user_gone_error(e):
+                test_db.delete_user(uid, is_self_delete=True)
                 deleted_blocked_users.append(u)
             failed_users.append({
                 "id": u.get("id"),

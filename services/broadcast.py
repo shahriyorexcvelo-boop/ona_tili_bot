@@ -8,6 +8,7 @@ from aiogram.exceptions import TelegramRetryAfter
 import test_db
 from core.config import UZB_TZ, ADMIN_ID, log
 from core.bot import bot
+from core.telegram_utils import is_user_gone_error
 
 MAINT_START_TEXT = (
     "⚠️ <b>DIQQAT: REJALI TEXNIK PROFILAKTIKA BOSHLANDI!</b>\n\n"
@@ -89,9 +90,8 @@ async def send_broadcast_to_users(
             await asyncio.sleep(0.04)
         except Exception as e:
             fail_count += 1
-            err_str = str(e).lower()
-            if "blocked" in err_str or "forbidden" in err_str or "deactivated" in err_str:
-                test_db.delete_user(uid)
+            if is_user_gone_error(e):
+                test_db.delete_user(uid, is_self_delete=True)
                 blocked_users.append(u)
             log.warning(f"Broadcast xatosi user {uid}: {e}")
 

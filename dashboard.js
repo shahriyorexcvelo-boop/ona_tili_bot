@@ -491,7 +491,8 @@ function updateHeaderAndBadges(summary) {
     elTotalUsers.textContent = summary.total_users || 0;
     document.getElementById('stat-approved-users').textContent = `${summary.approved_users || 0} faol`;
     document.getElementById('stat-pending-users').textContent = `${summary.pending_users || 0} kutilmoqda`;
-    document.getElementById('stat-blocked-users').textContent = `${summary.blocked_users || 0} blok`;
+    const elBlk = document.getElementById('stat-blocked-users');
+    if (elBlk) elBlk.style.display = 'none';
     
     document.getElementById('stat-total-subs').textContent = summary.total_submissions || 0;
     document.getElementById('stat-today-subs').textContent = `+${summary.today_submissions || 0} bugun`;
@@ -834,7 +835,6 @@ function renderUsers() {
     const st = (u.status || 'pending').toLowerCase();
     if (State.usersFilter === 'approved' && st !== 'approved') return false;
     if (State.usersFilter === 'pending' && st !== 'pending') return false;
-    if (State.usersFilter === 'blocked' && st !== 'blocked') return false;
 
     // 2. User Tests Count Filter (faqat raqam kiritilganda yoki preset tanlanganda)
     if (isTestFilterActive) {
@@ -891,7 +891,7 @@ function renderUsers() {
     const st = (u.status || 'pending').toLowerCase();
     if (st === 'approved') stBadge = `<span class="badge badge-success">${Icons.check}Faol</span>`;
     else if (st === 'pending') stBadge = `<span class="badge badge-warning">${Icons.clock}Kutilmoqda</span>`;
-    else if (st === 'blocked') stBadge = `<span class="badge badge-danger">${Icons.ban}Bloklangan</span>`;
+    else if (st === 'rejected') stBadge = `<span class="badge badge-danger">${Icons.ban}Rad etilgan</span>`;
 
     const regDt = formatUzbSmartDateTime(u.registered_at || u.registered_at_fmt);
 
@@ -931,7 +931,6 @@ function renderUsers() {
               </button>
             ` : ''}
             ${st !== 'approved' ? `<button class="btn btn-secondary btn-sm" onclick="changeUserStatus(${u.tg_id}, 'approve')">${Icons.check}Faol</button>` : ''}
-            ${st !== 'blocked' ? `<button class="btn btn-secondary btn-sm" onclick="changeUserStatus(${u.tg_id}, 'block')">${Icons.ban}Blok</button>` : ''}
             <button class="btn btn-danger btn-sm" onclick="changeUserStatus(${u.tg_id}, 'delete')">${Icons.trash}O'chirish</button>
           </div>
         </td>
@@ -1019,7 +1018,6 @@ async function sendWarningToAllFilteredUsers() {
     const st = (u.status || 'pending').toLowerCase();
     if (State.usersFilter === 'approved' && st !== 'approved') return false;
     if (State.usersFilter === 'pending' && st !== 'pending') return false;
-    if (State.usersFilter === 'blocked' && st !== 'blocked') return false;
     return true;
   });
 
@@ -1732,8 +1730,8 @@ async function handleModalLateAction(action) {
 // ----------------------------------------------------
 async function changeUserStatus(userId, action) {
   const confirmMsg = action === 'delete' 
-    ? 'Haqiqatan ham bu foydalanuvchini bazadan butunlay o\'chirmoqchimisiz?' 
-    : (action === 'block' ? 'Foydalanuvchini bloklamoqchimisiz?' : 'Foydalanuvchini tasdiqlaysizmi?');
+    ? 'Haqiqatan ham bu foydalanuvchini bazadan butunlay o\'chirmoqchimisiz? (Uning barcha ma\'lumotlari tozalab tashlanadi)' 
+    : 'Foydalanuvchini tasdiqlaysizmi?';
 
   if (!confirm(confirmMsg)) return;
 

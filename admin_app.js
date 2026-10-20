@@ -178,7 +178,7 @@ const AdminApp = {
               this.answers[k].ans = ansVal;
             }
           }
-          for (let q = 40; q <= 45; q++) {
+          for (let q = 40; q <= 44; q++) {
             for (let sub of ['a', 'b']) {
               const k = `${q}${sub}`;
               const val = t.answers[k];
@@ -347,8 +347,8 @@ const AdminApp = {
     for (let q = 36; q <= 39; q++) {
       this.answers[String(q)] = { ans: '' };
     }
-    // 40-45 (2 qismli yopiq savollar: a va b)
-    for (let q = 40; q <= 45; q++) {
+    // 40-44 (2 qismli yopiq savollar: a va b)
+    for (let q = 40; q <= 44; q++) {
       this.answers[`${q}a`] = { ans: '' };
       this.answers[`${q}b`] = { ans: '' };
     }
@@ -406,10 +406,10 @@ const AdminApp = {
       part3.innerHTML = html;
     }
 
-    // 4. 40-45 (2 qismli yopiq savollar: a va b)
+    // 4. 40-44 (2 qismli yopiq savollar: a va b)
     if (part4) {
       let html = '';
-      for (let q = 40; q <= 45; q++) {
+      for (let q = 40; q <= 44; q++) {
         const itemA = this.answers[`${q}a`] || { ans: '' };
         const itemB = this.answers[`${q}b`] || { ans: '' };
         const valA = (itemA.ans || '').replace(/"/g, '&quot;');
@@ -515,7 +515,7 @@ const AdminApp = {
     }
 
     let sec4Unfilled = 0;
-    for (let q = 40; q <= 45; q++) {
+    for (let q = 40; q <= 44; q++) {
       for (let sub of ['a', 'b']) {
         const item = this.answers[`${q}${sub}`];
         if (!item || !item.ans || !String(item.ans).trim()) {
@@ -526,7 +526,7 @@ const AdminApp = {
 
     const openUnfilled = sec3Unfilled + sec4Unfilled;
     const totalUnfilled = closedUnfilled + openUnfilled;
-    const totalQuestions = 51; // 35 yopiq + 4 yakka ochiq + 12 juft ochiq = 51
+    const totalQuestions = 49; // 35 yopiq + 4 yakka ochiq + 10 juft ochiq = 49
     const totalFilled = totalQuestions - totalUnfilled;
 
     // 1. Top status bar
@@ -650,7 +650,7 @@ const AdminApp = {
         this.answers[key].ans = input.value.trim();
       }
     }
-    for (let q = 40; q <= 45; q++) {
+    for (let q = 40; q <= 44; q++) {
       for (let sub of ['a', 'b']) {
         const key = `${q}${sub}`;
         const input = document.getElementById(`input-${key}`);
@@ -666,9 +666,9 @@ const AdminApp = {
     const { totalUnfilled, closedUnfilled, openUnfilled } = this.updateUnfilledStats();
 
     if (totalUnfilled > 0) {
-      const confirmMsg = `DIQQAT! Jami 51 ta savoldan ${totalUnfilled} tasiga javob belgilanmagan:\n\n` +
+      const confirmMsg = `DIQQAT! Jami 49 ta savoldan ${totalUnfilled} tasiga javob belgilanmagan:\n\n` +
         `• Yopiq savollarda (1-35): ${closedUnfilled} ta belgilanmagan\n` +
-        `• Ochiq savollarda (36-45): ${openUnfilled} ta kiritilmagan\n\n` +
+        `• Ochiq savollarda (36-44): ${openUnfilled} ta kiritilmagan\n\n` +
         `Iltimos, avval barcha savollarga to'g'ri javobni belgilang!`;
       
       if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.showAlert) {
@@ -856,8 +856,8 @@ const AdminApp = {
           const normKey = String(k).toLowerCase().trim();
           if (this.answers[normKey]) {
             let cleanVal = String(v).trim();
-            // 36a-45b ochiq savollari uchun sanitarizatsiyani majburiy chaqiramiz:
-            if (/[ab]$/.test(normKey) || (parseInt(normKey) >= 36 && parseInt(normKey) <= 45)) {
+            // 36a-44b ochiq savollari uchun sanitarizatsiyani majburiy chaqiramiz:
+            if (/[ab]$/.test(normKey) || (parseInt(normKey) >= 36 && parseInt(normKey) <= 44)) {
               cleanVal = this.sanitizeMath(cleanVal);
             }
             this.answers[normKey].ans = cleanVal;

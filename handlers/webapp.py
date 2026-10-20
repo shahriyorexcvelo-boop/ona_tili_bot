@@ -27,7 +27,8 @@ from core import (
     get_test_schedule_status, get_test_min_submit_info,
     BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, CACHED_BOT_USERNAME, log, bot,
     GLOBAL_RATE_LIMITER, SUBMIT_CONCURRENCY_SEMAPHORE, COMPARE_CONCURRENCY_SEMAPHORE,
-    verify_telegram_webapp_data, check_user_membership, set_cached_membership
+    verify_telegram_webapp_data, check_user_membership, set_cached_membership,
+    is_user_gone_error
 )
 from services import (
     MAINT_START_TEXT, MAINT_END_TEXT,
@@ -101,10 +102,10 @@ async def handle_submit_test_api(request):
                     "success": False,
                     "message": "⚠️ Iltimos, avval Telegram botimizda ro'yxatdan o'ting!"
                 }, status=403)
-            if user_obj.get("status") in ["blocked", "rejected"]:
+            if user_obj.get("status") in ["pending", "rejected", "deleted"]:
                 return web.json_response({
                     "success": False,
-                    "message": "⛔️ Sizning profilingizga ruxsat berilmagan yoki to'xtatilgan."
+                    "message": "⛔️ Sizning profilingiz kutilmoqda yoki rad etilgan holatda. Test topshirish uchun admin ruxsati kerak."
                 }, status=403)
 
             # Allaqachon topshirganlikni RAM keshdan tekshirish (Zero-DB)
@@ -391,6 +392,9 @@ async def handle_create_test_api(request):
         
         subject = data.get("subject", "Ona tili").strip() or "Ona tili"
         answers = data.get("answers", {})
+        if isinstance(answers, dict):
+            for k in ["45", "45a", "45b", 45]:
+                answers.pop(k, None)
         time_limit_min = int(data.get("time_limit_min", 0))
         key_access_code = data.get("key_access_code", "").strip()
         youtube_url = (data.get("youtube_url") or "").strip()
@@ -590,6 +594,9 @@ async def handle_admin_update_test_keys(request):
             return web.json_response({"success": False, "message": "Test ID ko'rsatilmadi"}, status=400)
 
         answers = data.get("answers", {})
+        if isinstance(answers, dict):
+            for k in ["45", "45a", "45b", 45]:
+                answers.pop(k, None)
         if not answers:
             return web.json_response({"success": False, "message": "Kalitlar kiritilmadi"}, status=400)
 
@@ -1521,6 +1528,15 @@ async def handle_app_active_tests(request):
                 except Exception:
                     pass
 
+        if tg_id and not test_db.is_admin(tg_id, ADMIN_ID):
+            u_check = test_db.get_user(tg_id)
+            if u_check and u_check.get("status") in ["pending", "rejected", "deleted"]:
+                return web.json_response({
+                    "success": False,
+                    "message": "⛔️ Profilingizga ruxsat berilmagan yoki arizangiz ko'rib chiqilmoqda.",
+                    "status": u_check.get("status")
+                }, status=403)
+
         result, is_user_admin, now_uzb = await asyncio.to_thread(_fetch_active_tests_payload_sync, tg_id)
         return web.json_response({
             "success": True, 
@@ -1602,11 +1618,16 @@ async def handle_app_update_user_status(request):
             return web.json_response({"success": False, "message": "Foydalanuvchi ID ko'rsatilmadi"}, status=400)
 
         if action == 'delete':
-            # Foydalanuvchini bazadan butunlay o'chirish
-            deleted_user = test_db.delete_user(target_uid)
+            # Foydalanuvchini bazadan butunlay tozalash va admin_deleted_users ga yozish
+            deleted_user = test_db.delete_user(target_uid, deleted_by=admin_id, by_admin=True)
             return web.json_response({"success": bool(deleted_user), "status": "deleted"})
 
-        if action not in ['approved', 'rejected', 'blocked', 'pending']:
+        if action == 'restore':
+            # Foydalanuvchini qayta tiklash
+            restored = test_db.restore_user(target_uid)
+            return web.json_response({"success": bool(restored), "status": "approved"})
+
+        if action not in ['approved', 'rejected', 'pending']:
             return web.json_response({"success": False, "message": "Noto'g'ri amal"}, status=400)
 
         if action == 'approved':
@@ -1623,7 +1644,16 @@ async def handle_app_update_user_status(request):
                 )
             except Exception:
                 pass
-        elif action in ['rejected', 'pending']:
+        elif action == 'rejected':
+            test_db.reject_user(target_uid)
+            try:
+                await bot.send_message(
+                    chat_id=target_uid,
+                    text="❌ <b>Sizning botdan foydalanish huquqingiz admin tomonidan rad etildi!</b>\n\nMurojaat uchun: @eshmbetov"
+                )
+            except Exception:
+                pass
+        elif action == 'pending':
             test_db.set_user_pending(target_uid)
             try:
                 req_kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -1636,16 +1666,6 @@ async def handle_app_update_user_status(request):
                         "Qayta foydalanish uchun quyidagi tugma orqali adminga so'rov yuborishingiz mumkin."
                     ),
                     reply_markup=req_kb
-                )
-            except Exception:
-                pass
-        elif action == 'blocked':
-            test_db.block_user(target_uid)
-            try:
-                await bot.send_message(
-                    chat_id=target_uid,
-                    text="⛔️ <b>Sizning botdan foydalanish huquqingiz admin tomonidan bekor qilindi va bloklandingiz!</b>",
-                    reply_markup=ReplyKeyboardRemove()
                 )
             except Exception:
                 pass
@@ -1716,7 +1736,7 @@ async def handle_app_delete_my_account(request):
         if not tg_id:
             return web.json_response({"success": False, "message": "Foydalanuvchi aniqlanmadi"}, status=400)
 
-        user_info = test_db.delete_user(tg_id)
+        user_info = test_db.delete_user(tg_id, deleted_by=tg_id, is_self_delete=True)
         if ADMIN_ID and user_info:
             try:
                 fn = user_info.get("fullname", "Noma'lum")
@@ -1729,7 +1749,7 @@ async def handle_app_delete_my_account(request):
                     f"🔗 <b>Username:</b> {un}\n"
                     f"🆔 <b>Telegram ID:</b> <code>{tg_id}</code>\n"
                     f"🕒 <b>Vaqt:</b> {format_uzb_time()}\n\n"
-                    f"<i>Foydalanuvchi Mini ilovadagi Profil bo'limidan akkauntini o'chirdi.</i>"
+                    f"<i>Foydalanuvchi Mini ilovadagi Profil bo'limidan akkauntini o'chirdi. Ma'lumotlar anonimlashtirildi, test natijalari saqlandi.</i>"
                 )
                 await bot.send_message(chat_id=ADMIN_ID, text=alert_text)
             except Exception as ex:
@@ -1740,7 +1760,7 @@ async def handle_app_delete_my_account(request):
         return web.json_response({"success": False, "message": str(e)}, status=400)
 
 async def handle_app_restrict_all_users(request):
-    """Admin tomonidan barcha oddiy foydalanuvchilarni kutilmoqda (pending) holatiga o'tkazish."""
+    """Admin tomonidan barcha oddiy foydalanuvchilarni kutilmoqda (pending) holatiga o'tkazish (oldingi status saqlanadi)."""
     try:
         data = await request.json()
         admin_id = int(data.get('admin_id', 0))
@@ -1752,6 +1772,85 @@ async def handle_app_restrict_all_users(request):
     except Exception as e:
         log.error(f"App Restrict All Users Error: {e}", exc_info=True)
         return web.json_response({"success": False, "message": str(e)}, status=400)
+
+async def handle_app_unrestrict_all_users(request):
+    """Admin tomonidan barcha cheklangan foydalanuvchilarning oldingi statusini qaytarish."""
+    try:
+        data = await request.json()
+        admin_id = int(data.get('admin_id', 0))
+        if not test_db.is_admin(admin_id, ADMIN_ID):
+            return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
+
+        count = test_db.unrestrict_all_users(ADMIN_ID)
+        return web.json_response({"success": True, "count": count})
+    except Exception as e:
+        log.error(f"App Unrestrict All Users Error: {e}", exc_info=True)
+        return web.json_response({"success": False, "message": str(e)}, status=400)
+
+async def handle_app_autosave_answer(request):
+    """
+    O'quvchi test ishlayotganda har bir savolga belgilangan javobni darhol DB'ga qoralama (draft) sifatida saqlash.
+    """
+    try:
+        data = await request.json()
+        test_id = int(data.get("test_id", 0))
+        user_tg_id = data.get("user_tg_id")
+
+        if not user_tg_id:
+            init_data = data.get("init_data") or request.headers.get("X-Telegram-Init-Data", "")
+            if init_data:
+                _, u_dict = verify_telegram_webapp_data(init_data, BOT_TOKEN)
+                if u_dict and u_dict.get("id"):
+                    user_tg_id = int(u_dict["id"])
+
+        if not user_tg_id or not test_id:
+            return web.json_response({"success": False, "message": "test_id yoki user_tg_id yetishmaydi"}, status=400)
+
+        user_tg_id = int(user_tg_id)
+
+        # Butun javoblar to'plami yuborilgan bo'lsa
+        bulk_answers = data.get("answers")
+        if isinstance(bulk_answers, dict) and bulk_answers:
+            ok = await asyncio.to_thread(test_db.save_bulk_draft, user_tg_id, test_id, bulk_answers)
+            return web.json_response({"success": ok, "saved_at": int(time.time()), "count": len(bulk_answers)})
+
+        # Bitta savol javobi bo'lsa
+        q_key = str(data.get("question_key") or data.get("key") or "").strip()
+        ans_val = str(data.get("answer_val") or data.get("value") or "").strip()
+        if not q_key:
+            return web.json_response({"success": False, "message": "question_key ko'rsatilmadi"}, status=400)
+
+        ok = await asyncio.to_thread(test_db.save_answer_draft, user_tg_id, test_id, q_key, ans_val)
+        return web.json_response({"success": ok, "saved_at": int(time.time()), "key": q_key})
+    except Exception as e:
+        log.warning(f"Autosave answer error: {e}")
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+async def handle_app_get_draft(request):
+    """
+    O'quvchi sahifani qayta yuklaganda yoki ilova tasodifan yopilib ochilganda,
+    bazadagi saqlangan qoralama javoblarni qaytarish.
+    """
+    try:
+        test_id = int(request.rel_url.query.get("test_id", 0))
+        user_tg_id = request.rel_url.query.get("user_tg_id")
+
+        if not user_tg_id:
+            init_data = request.headers.get("X-Telegram-Init-Data", "")
+            if init_data:
+                _, u_dict = verify_telegram_webapp_data(init_data, BOT_TOKEN)
+                if u_dict and u_dict.get("id"):
+                    user_tg_id = int(u_dict["id"])
+
+        if not user_tg_id or not test_id:
+            return web.json_response({"success": False, "answers": {}}, status=400)
+
+        user_tg_id = int(user_tg_id)
+        drafts = await asyncio.to_thread(test_db.get_answer_drafts, user_tg_id, test_id)
+        return web.json_response({"success": True, "test_id": test_id, "answers": drafts})
+    except Exception as e:
+        log.warning(f"Get draft error: {e}")
+        return web.json_response({"success": False, "answers": {}, "error": str(e)}, status=500)
 
 async def handle_app_broadcast(request):
     """Admin tomonidan barcha o'quvchilarga xabar yuborish (Mini App orqali)."""
@@ -2132,15 +2231,18 @@ async def handle_dashboard_user_action(request):
         if action == 'approve':
             test_db.approve_user(target_uid)
             msg = "Foydalanuvchi faollashtirildi"
-        elif action == 'block':
-            test_db.block_user(target_uid)
-            msg = "Foydalanuvchi bloklandi"
+        elif action in ['block', 'reject']:
+            test_db.reject_user(target_uid)
+            msg = "Foydalanuvchi rad etildi"
         elif action == 'pending':
             test_db.set_user_pending(target_uid)
             msg = "Foydalanuvchi kutilmoqda holatiga o'tkazildi"
         elif action == 'delete':
-            test_db.delete_user(target_uid)
-            msg = "Foydalanuvchi bazadan o'chirildi"
+            test_db.delete_user(target_uid, deleted_by=ADMIN_ID, by_admin=True)
+            msg = "Foydalanuvchi bazadan to'liq o'chirildi va admin_deleted_users ga kiritildi"
+        elif action == 'restore':
+            test_db.restore_user(target_uid)
+            msg = "Foydalanuvchi muvaffaqiyatli tiklandi"
         else:
             return web.json_response({"success": False, "error": f"Noma'lum amal: {action}"}, status=400)
             
@@ -2345,9 +2447,8 @@ async def handle_dashboard_warn_user(request):
                 "message": f"✅ {fname} ({tg_id}) ga rasmiy ogohlantirish xabari yetkazildi!"
             })
         except Exception as e:
-            err_text = str(e).lower()
-            if "blocked" in err_text or "forbidden" in err_text or "deactivated" in err_text:
-                await asyncio.to_thread(test_db.delete_user, tg_id)
+            if is_user_gone_error(e):
+                await asyncio.to_thread(test_db.delete_user, tg_id, is_self_delete=True)
                 return web.json_response({
                     "success": False,
                     "blocked": True,
@@ -2407,9 +2508,8 @@ async def handle_dashboard_warn_users_batch(request):
                 sent_count += 1
                 await asyncio.sleep(0.04)
             except Exception as e:
-                err_text = str(e).lower()
-                if "blocked" in err_text or "forbidden" in err_text or "deactivated" in err_text:
-                    await asyncio.to_thread(test_db.delete_user, tg_id)
+                if is_user_gone_error(e):
+                    await asyncio.to_thread(test_db.delete_user, tg_id, is_self_delete=True)
                     deleted_count += 1
                 else:
                     failed_count += 1
@@ -2514,9 +2614,8 @@ async def handle_dashboard_broadcast(request):
                 sent_count += 1
                 await asyncio.sleep(0.04)
             except Exception as e:
-                err_text = str(e).lower()
-                if "blocked" in err_text or "forbidden" in err_text or "deactivated" in err_text:
-                    await asyncio.to_thread(test_db.delete_user, uid)
+                if is_user_gone_error(e):
+                    await asyncio.to_thread(test_db.delete_user, uid, is_self_delete=True)
                     deleted_count += 1
                 else:
                     fail_count += 1
@@ -2747,6 +2846,9 @@ async def create_web_app():
     app.router.add_get('/api/app/users', handle_app_users)
     app.router.add_post('/api/app/update-user-status', handle_app_update_user_status)
     app.router.add_post('/api/app/restrict-all-users', handle_app_restrict_all_users)
+    app.router.add_post('/api/app/unrestrict-all-users', handle_app_unrestrict_all_users)
+    app.router.add_post('/api/app/autosave-answer', handle_app_autosave_answer)
+    app.router.add_get('/api/app/get-draft', handle_app_get_draft)
     app.router.add_post('/api/app/broadcast', handle_app_broadcast)
     app.router.add_post('/api/app/broadcast/delete', handle_app_broadcast_delete)
     app.router.add_get('/api/next-test-code', handle_next_test_code_api)

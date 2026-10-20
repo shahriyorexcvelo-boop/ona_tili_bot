@@ -46,8 +46,8 @@ async def schedule_checker():
             
             # 1. Agar birorta ham rejalashtirilgan test bo'lmasa:
             if not tests:
-                # 15 daqiqa (yoki tunda 30 daqiqa) kutamiz, yangi test kiritilsa darhol uyg'onadi
-                sleep_interval = 1800 if not working_hours else 900
+                # 15 daqiqa (yoki tunda faol test bo'lmasa 30 daqiqa) kutamiz, yangi test kiritilsa darhol uyg'onadi
+                sleep_interval = 1800 if (not working_hours and not test_db.has_any_active_test()) else 900
             else:
                 has_today_test = False
                 min_wait_minutes = 9999
@@ -208,7 +208,7 @@ async def schedule_checker():
 
                 # Agar bugun uchun test bo'lmasa:
                 if not has_today_test:
-                    sleep_interval = 1800 if not working_hours else 900
+                    sleep_interval = 1800 if (not working_hours and not test_db.has_any_active_test()) else 900
                 elif has_active_running_test:
                     sleep_interval = 60
                 elif min_wait_minutes < 9999:

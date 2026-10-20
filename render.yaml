@@ -10,7 +10,17 @@ services:
     healthCheckPath: /healthz
     envVars:
       - key: BOT_TOKEN
-        value: 8901806535:AAGxii87Xnz14xibxNxXlI2LU9f5o27fUZE
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: USE_WEBHOOK
+        value: "1"
       - key: ADMIN_ID
         value: "8039427064"
       - key: BOT_USERNAME
@@ -25,5 +35,3 @@ services:
         value: "25"
       - key: WEBAPP_URL
         value: https://ona-tili-bot.onrender.com
-      - key: DATABASE_URL
-        value: postgresql://postgres.mvijmbrbjumpacavmbpe:tysXoj-wochep-typvu4@aws-0-ap-south-1.pooler.supabase.com:6543/postgres
