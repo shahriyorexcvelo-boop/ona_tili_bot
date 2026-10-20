@@ -2126,6 +2126,36 @@ def extract_uzbek_alternatives(c_str: str) -> List[str]:
     return [r for r in results if r]
 
 
+def _is_minor_typo(s1: str, s2: str) -> bool:
+    """Kichik imlo xatosi (1 ta harf farqi) mavjudligini aniqlash"""
+    if not s1 or not s2:
+        return False
+    if len(s1) < 4 or len(s2) < 4:
+        return False
+    if abs(len(s1) - len(s2)) > 1:
+        return False
+    if s1[0] != s2[0]:
+        return False
+    diff = 0
+    i, j = 0, 0
+    while i < len(s1) and j < len(s2):
+        if s1[i] != s2[j]:
+            diff += 1
+            if diff > 1:
+                return False
+            if len(s1) > len(s2):
+                i += 1
+            elif len(s2) > len(s1):
+                j += 1
+            else:
+                i += 1
+                j += 1
+        else:
+            i += 1
+            j += 1
+    return True
+
+
 def check_answer_match(user_ans: Any, correct_ans: Any) -> Tuple[bool, float, str]:
     """
     Foydalanuvchi javobini to'g'ri kalitga solishtirish va moslik koeffitsientini hisoblash:
@@ -2154,10 +2184,21 @@ def check_answer_match(user_ans: Any, correct_ans: Any) -> Tuple[bool, float, st
     if u_uz.replace(" ", "") == c_uz.replace(" ", ""):
         return (True, 1.0, "correct")
 
+    # 1b-1. Tutuq belgisi (') va probellar farqi (masalan: "talim" vs "ta'lim", "marifat" vs "ma'rifat")
+    u_no_tutuq = re.sub(r"['\s\-_.,:;\"`ʼʻ\(\)]", "", u_uz)
+    c_no_tutuq = re.sub(r"['\s\-_.,:;\"`ʼʻ\(\)]", "", c_uz)
+    if u_no_tutuq and u_no_tutuq == c_no_tutuq:
+        return (True, 1.0, "correct")
+
+    # 1b-2. Kichik imlo xatosi (1 ta harf farqi, masalan: x/h yoki harf adashishi)
+    if _is_minor_typo(u_no_tutuq, c_no_tutuq):
+        return (True, 1.0, "correct")
+
     # 1c. Ona tili alternativ variantlari (qo'shimchalar, sleshlar, izohlar)
     c_alts = extract_uzbek_alternatives(c_str)
     for alt in c_alts:
-        if u_uz == alt or u_uz.replace(" ", "") == alt.replace(" ", ""):
+        alt_no = re.sub(r"['\s\-_.,:;\"`ʼʻ\(\)]", "", alt)
+        if u_uz == alt or u_uz.replace(" ", "") == alt.replace(" ", "") or (u_no_tutuq and u_no_tutuq == alt_no) or _is_minor_typo(u_no_tutuq, alt_no):
             return (True, 1.0, "correct")
 
     # 1d. O'quvchi javobida ham ajratuvchi bo'lsa (masalan: "yor og'zi yoki yor labi")
@@ -2206,7 +2247,61 @@ def check_answer_match(user_ans: Any, correct_ans: Any) -> Tuple[bool, float, st
                     return (True, 0.3, "partial")
                 return (True, 1.0, "correct")
 
+    # 4. Ona tili Milliy sertifikat ochiq savollari uchun Gemini AI tekshiruvi (fallback)
+    if len(u_str) >= 2 and len(c_str) >= 2 and not u_str.isdigit():
+        if ai_evaluate_open_answer(u_str, c_str):
+            return (True, 1.0, "correct")
+
     return (False, 0.0, "incorrect")
+
+
+def ai_evaluate_open_answer(student_answer: str, correct_answer: str) -> bool:
+    """
+    O'zbek tili fanidan Milliy sertifikat ochiq savollarini Gemini AI orqali tekshirish:
+    1. Imlo va tinish belgilari: Kichik imlo xatolari (masalan, tutuq belgisi (') tushib qolishi yoki probellar)
+       ballni kamaytirmasin, asosiy ma'no to'g'ri bo'lsa qabul qilinsin.
+    2. A va B qismli savollar: Har bir qism alohida tekshirilsin.
+    3. Qat'iy javob: Faqat "True" (to'g'ri) yoki "False" (xato) natijasi qaytariladi.
+    """
+    try:
+        import os, requests
+        gemini_key = (
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+            or get_setting("gemini_api_key", "").strip()
+        )
+        if not gemini_key:
+            return False
+
+        prompt = (
+            "Sen o'zbek tili fanidan Milliy sertifikat imtihonlarini tekshiruvchi aqlli yordamchisan.\n"
+            "Senga o'quvchining yozma javobi va rasmiy kalit beriladi. O'quvchining javobini baholashda quyidagi qoidalarga amal qil:\n\n"
+            "1. **Imlo va tinish belgilari:** Kichik imlo xatolari (masalan, tutuq belgisi (') tushib qolishi yoki probellar) ballni kamaytirmasin, asosiy ma'no to'g'ri bo'lsa qabul qilinsin.\n"
+            "2. **A va B qismli savollar:** Agar savol a) va b) qismlardan iborat bo'lsa, har bir qism alohida tekshirilsin.\n"
+            "3. **Qat'iy javob:** Faqat \"True\" (to'g'ri) yoki \"False\" (xato) natijasini qaytar.\n\n"
+            f"- Rasmiy kalit: {correct_answer}\n"
+            f"- O'quvchining javobi: {student_answer}"
+        )
+
+        models = ["gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-2.0-flash"]
+        for m in models:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={gemini_key}"
+                payload = {
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": 0.0, "maxOutputTokens": 15}
+                }
+                res = requests.post(url, json=payload, timeout=2.5)
+                if res.status_code == 200:
+                    cand = res.json().get("candidates", [])
+                    if cand:
+                        text = cand[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip().lower()
+                        return "true" in text
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return False
 
 
 def is_answer_matching(user_ans: Any, correct_ans: Any) -> bool:
@@ -2385,8 +2480,8 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
     earned_score = 0.0
     total_possible_score = 0.0
 
-    # 1-32 savollar (4 variant, default 2.0 ball)
-    for q in range(1, 33):
+    # 1-35 savollar (Variantli yopiq savollar, default 2.0 ball)
+    for q in range(1, 36):
         key = str(q)
         q_raw = correct_answers_raw.get(key, "A")
         correct_ans, q_score = get_key_and_score(q_raw, default_score=2.0)
@@ -2412,33 +2507,6 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
             "max_score": q_score
         }
 
-    # 33, 34, 35 savollar (6 variant, default 2.0 ball)
-    for q in [33, 34, 35]:
-        key = str(q)
-        q_raw = correct_answers_raw.get(key, "A")
-        correct_ans, q_score = get_key_and_score(q_raw, default_score=2.0)
-        total_possible_score += q_score
-        user_val = user_answers.get(key, "")
-        is_corr = False
-        if not user_val or not str(user_val).strip():
-            status = "unanswered"
-            unanswered_count += 1
-        elif is_answer_matching(user_val, correct_ans):
-            is_corr = True
-            status = "correct"
-            correct_count += 1
-            earned_score += q_score
-        else:
-            status = "incorrect"
-            incorrect_count += 1
-        details[key] = {
-            "num": f"{q}-savol", "type": "choice_6",
-            "user": user_val, "correct": correct_ans,
-            "status": status,
-            "score": q_score if is_corr else 0.0,
-            "max_score": q_score
-        }
-
     # 36, 37, 38, 39 savollar (1 ta variantli yopiq/ochiq savollar)
     for q in range(36, 40):
         key = str(q)
@@ -2456,15 +2524,10 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
             unanswered_count += 1
             item_score = 0.0
         elif is_matched:
-            if ratio >= 1.0:
-                status = "correct"
-                correct_count += 1
-                item_score = q_score
-                earned_score += q_score
-            else:
-                status = "partial"
-                item_score = round(q_score * 0.3, 2)
-                earned_score += item_score
+            status = "correct"
+            correct_count += 1
+            item_score = q_score
+            earned_score += q_score
         else:
             status = "incorrect"
             incorrect_count += 1
@@ -2494,15 +2557,10 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
                 unanswered_count += 1
                 item_score = 0.0
             elif is_matched:
-                if ratio >= 1.0:
-                    status = "correct"
-                    correct_count += 1
-                    item_score = q_score
-                    earned_score += q_score
-                else:
-                    status = "partial"
-                    item_score = round(q_score * 0.3, 2)
-                    earned_score += item_score
+                status = "correct"
+                correct_count += 1
+                item_score = q_score
+                earned_score += q_score
             else:
                 status = "incorrect"
                 incorrect_count += 1
@@ -3069,8 +3127,8 @@ def update_test_keys(test_id: int, new_answers: Dict[str, Any],
             earned_score = 0.0
             total_possible_score = 0.0
 
-            # 1-32 savollar (4 variant, default 2.0 ball)
-            for q in range(1, 33):
+            # 1-35 savollar (Variantli yopiq savollar, default 2.0 ball)
+            for q in range(1, 36):
                 key = str(q)
                 q_raw = correct_answers_raw.get(key, "A")
                 correct_ans, q_score = get_key_and_score(q_raw, default_score=2.0)
@@ -3096,33 +3154,6 @@ def update_test_keys(test_id: int, new_answers: Dict[str, Any],
                     "max_score": q_score
                 }
 
-            # 33, 34, 35 savollar (6 variant, default 2.0 ball)
-            for q in [33, 34, 35]:
-                key = str(q)
-                q_raw = correct_answers_raw.get(key, "A")
-                correct_ans, q_score = get_key_and_score(q_raw, default_score=2.0)
-                total_possible_score += q_score
-                user_val = user_answers.get(key, "")
-                is_corr = False
-                if not user_val or not str(user_val).strip():
-                    status = "unanswered"
-                    unanswered_count += 1
-                elif is_answer_matching(user_val, correct_ans):
-                    is_corr = True
-                    status = "correct"
-                    correct_count += 1
-                    earned_score += q_score
-                else:
-                    status = "incorrect"
-                    incorrect_count += 1
-                details[key] = {
-                    "num": f"{q}-savol", "type": "choice_6",
-                    "user": user_val, "correct": correct_ans,
-                    "status": status,
-                    "score": q_score if is_corr else 0.0,
-                    "max_score": q_score
-                }
-
             # 36, 37, 38, 39 savollar (1 ta variantli yopiq/ochiq savollar)
             for q in range(36, 40):
                 key = str(q)
@@ -3140,15 +3171,10 @@ def update_test_keys(test_id: int, new_answers: Dict[str, Any],
                     unanswered_count += 1
                     item_score = 0.0
                 elif is_matched:
-                    if ratio >= 1.0:
-                        status = "correct"
-                        correct_count += 1
-                        item_score = q_score
-                        earned_score += q_score
-                    else:
-                        status = "partial"
-                        item_score = round(q_score * 0.3, 2)
-                        earned_score += item_score
+                    status = "correct"
+                    correct_count += 1
+                    item_score = q_score
+                    earned_score += q_score
                 else:
                     status = "incorrect"
                     incorrect_count += 1
@@ -3178,15 +3204,10 @@ def update_test_keys(test_id: int, new_answers: Dict[str, Any],
                         unanswered_count += 1
                         item_score = 0.0
                     elif is_matched:
-                        if ratio >= 1.0:
-                            status = "correct"
-                            correct_count += 1
-                            item_score = q_score
-                            earned_score += q_score
-                        else:
-                            status = "partial"
-                            item_score = round(q_score * 0.3, 2)
-                            earned_score += item_score
+                        status = "correct"
+                        correct_count += 1
+                        item_score = q_score
+                        earned_score += q_score
                     else:
                         status = "incorrect"
                         incorrect_count += 1
@@ -3494,7 +3515,7 @@ def recalculate_all_submissions_globally() -> int:
                 details = {}
                 earned_score = 0.0
 
-                for q in range(1, 33):
+                for q in range(1, 36):
                     key = str(q)
                     correct_ans, q_score = get_key_and_score(answers_dict.get(key, "A"), default_score=2.0)
                     user_val = user_answers.get(key, "")
@@ -3518,30 +3539,6 @@ def recalculate_all_submissions_globally() -> int:
                         "status": status, "score": score, "max_score": q_score
                     }
 
-                for q in [33, 34, 35]:
-                    key = str(q)
-                    correct_ans, q_score = get_key_and_score(answers_dict.get(key, "A"), default_score=2.0)
-                    user_val = user_answers.get(key, "")
-                    is_matched, ratio, _ = check_answer_match(user_val, correct_ans)
-                    if not user_val or not str(user_val).strip():
-                        status = "unanswered"
-                        unanswered_count += 1
-                        score = 0.0
-                    elif is_matched and ratio >= 1.0:
-                        status = "correct"
-                        correct_count += 1
-                        score = q_score
-                        earned_score += q_score
-                    else:
-                        status = "incorrect"
-                        incorrect_count += 1
-                        score = 0.0
-                    details[key] = {
-                        "num": f"{q}-savol", "type": "choice_6",
-                        "user": user_val, "correct": correct_ans,
-                        "status": status, "score": score, "max_score": q_score
-                    }
-
                 # 36, 37, 38, 39 savollar (1 ta variantli yopiq/ochiq savollar)
                 for q in range(36, 40):
                     key = str(q)
@@ -3558,15 +3555,10 @@ def recalculate_all_submissions_globally() -> int:
                         unanswered_count += 1
                         score = 0.0
                     elif is_matched:
-                        if ratio >= 1.0:
-                            status = "correct"
-                            correct_count += 1
-                            score = q_score
-                            earned_score += q_score
-                        else:
-                            status = "partial"
-                            score = round(q_score * 0.3, 2)
-                            earned_score += score
+                        status = "correct"
+                        correct_count += 1
+                        score = q_score
+                        earned_score += q_score
                     else:
                         status = "incorrect"
                         incorrect_count += 1
@@ -3591,15 +3583,10 @@ def recalculate_all_submissions_globally() -> int:
                             unanswered_count += 1
                             score = 0.0
                         elif is_matched:
-                            if ratio >= 1.0:
-                                status = "correct"
-                                correct_count += 1
-                                score = q_score
-                                earned_score += q_score
-                            else:
-                                status = "partial"
-                                score = round(q_score * 0.3, 2)
-                                earned_score += score
+                            status = "correct"
+                            correct_count += 1
+                            score = q_score
+                            earned_score += q_score
                         else:
                             status = "incorrect"
                             incorrect_count += 1

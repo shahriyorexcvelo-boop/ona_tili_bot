@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any, Tuple, List
 
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart, StateFilter
-from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, KICKED, MEMBER
+from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, KICKED, MEMBER, JOIN_TRANSITION
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
@@ -33,7 +33,7 @@ from core import (
     invalidate_dashboard_cache, get_test_schedule_status
 )
 from .common import (
-    get_all_admin_ids, check_access, validate_fullname, send_test_card, send_test_card_to_user_chat,
+    get_all_admin_ids, notify_all_admins, check_access, validate_fullname, send_test_card, send_test_card_to_user_chat,
     build_detailed_tahlil_text, BLACKLIST_NAME_WORDS
 )
 
@@ -92,6 +92,19 @@ async def start_handler(message: Message, state: FSMContext):
             if not test_db.is_registration_open():
                 await send_registration_closed_message(message, user_tg_id)
                 return
+
+        # Yangi foydalanuvchi botga kirganda barcha adminlar (bosh admin va tayinlanganlar)ga darhol xabarnoma yuborish
+        safe_from_name = html.escape(message.from_user.full_name or "Noma'lum")
+        safe_username = html.escape(f"@{message.from_user.username}") if message.from_user.username else "Mavjud emas"
+        admin_join_text = (
+            f"👋 <b>Yangi foydalanuvchi botga kirdi (/start)!</b>\n\n"
+            f"👤 <b>Telegram profili:</b> {safe_from_name}\n"
+            f"🆔 <b>Telegram ID:</b> <code>{user_tg_id}</code>\n"
+            f"🔗 <b>Username:</b> {safe_username}\n"
+            f"🕒 <b>Vaqt:</b> {format_uzb_time()}\n\n"
+            f"ℹ️ <i>Foydalanuvchi hozirda ro'yxatdan o'tish jarayonida...</i>"
+        )
+        await notify_all_admins(message.bot, admin_join_text)
 
         await state.set_state(RegistrationState.fullname)
         await message.answer(
@@ -177,7 +190,7 @@ async def reg_fullname(message: Message, state: FSMContext):
             reply_markup=main_menu_kb(user_tg_id)
         )
 
-        # Adminlarga yangi foydalanuvchi qo'shilganligi haqida axborot
+        # Adminlarga (bosh admin va barcha tayinlanganlarga) yangi o'quvchi ro'yxatdan o'tgani haqida axborot
         safe_fullname = html.escape(fullname)
         safe_username = html.escape(f"@{username}") if username else "Mavjud emas"
         admin_notify_text = (
@@ -187,15 +200,7 @@ async def reg_fullname(message: Message, state: FSMContext):
             f"🔗 <b>Username:</b> {safe_username}\n"
             f"🕒 <b>Vaqt:</b> {format_uzb_time()}"
         )
-
-        for adm_id in get_all_admin_ids():
-            try:
-                await message.bot.send_message(
-                    chat_id=adm_id,
-                    text=admin_notify_text
-                )
-            except Exception as ex:
-                log.warning(f"Adminga ({adm_id}) xabar yuborishda xatolik: {ex}")
+        await notify_all_admins(message.bot, admin_notify_text)
 
 # Ixtiyoriy: Telefon yuborilgan holat uchun zaxira handler
 @user_router.message(RegistrationState.phone)
@@ -219,6 +224,17 @@ async def reg_phone(message: Message, state: FSMContext):
         pass
     invalidate_dashboard_cache()
     await state.clear()
+
+    # Barcha adminlarga xabar
+    admin_notify_text = (
+        f"👤 <b>Yangi o'quvchi ro'yxatdan o'tdi (telefon orqali):</b>\n\n"
+        f"👤 <b>Ism-familiya:</b> {html.escape(fullname)}\n"
+        f"📞 <b>Telefon:</b> <code>{html.escape(phone)}</code>\n"
+        f"🆔 <b>Telegram ID:</b> <code>{user_tg_id}</code>\n"
+        f"🔗 <b>Username:</b> {html.escape(f'@{username}') if username else 'Mavjud emas'}\n"
+        f"🕒 <b>Vaqt:</b> {format_uzb_time()}"
+    )
+    await notify_all_admins(message.bot, admin_notify_text)
 
     await message.answer(
         f"🎉 <b>Tabriklaymiz, {fullname}! Siz muvaffaqiyatli ro'yxatdan o'tdingiz!</b>\n\n"
@@ -634,16 +650,17 @@ async def do_delete_my_account_handler(call: CallbackQuery, state: FSMContext):
                 f"🕒 <b>Vaqt:</b> {format_uzb_time()}\n\n"
                 f"<i>Foydalanuvchi Telegram botidagi «Akkauntni o'chirish» tugmasini bosib chiqib ketdi.</i>"
             )
-            await bot.send_message(chat_id=ADMIN_ID, text=alert_text)
+            await notify_all_admins(bot, alert_text)
         except Exception as ex:
             log.warning(f"Admin alert yuborishda xatolik: {ex}")
 
 
 
+@user_router.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=KICKED))
 async def user_blocked_bot_handler(event: ChatMemberUpdated):
     """
     Foydalanuvchi botni to'xtatganda (Stop bot), bloklaganda yoki chatni o'chirganda
-    Telegram avtomatik ravishda botga ushbu hodisani yuboradi (foydalanuvchiga xabar bormaydi).
+    Telegram avtomatik ravishda botga ushbu hodisani yuboradi (barcha adminlarga xabar boradi).
     """
     try:
         user_id = event.from_user.id
@@ -666,12 +683,7 @@ async def user_blocked_bot_handler(event: ChatMemberUpdated):
             f"🕒 <b>Vaqt:</b> <b>{now_str}</b>\n\n"
             f"🗑 <i>Foydalanuvchi botni to'xtatgani/bloklagani sababli uning barcha ma'lumotlari bazadan to'liq o'chirildi.</i>"
         )
-        
-        # Faqat Bosh adminga (ADMIN_ID) yuboriladi, tayinlangan yordamchi adminlarga yuborilmaydi
-        try:
-            await bot.send_message(chat_id=ADMIN_ID, text=alert_text)
-        except Exception as ex:
-            log.warning(f"Bosh adminga ({ADMIN_ID}) blok bildirishnomasi yuborishda xatolik: {ex}")
+        await notify_all_admins(bot, alert_text)
     except Exception as e:
         log.error(f"user_blocked_bot_handler error: {e}", exc_info=True)
 
@@ -679,7 +691,7 @@ async def user_blocked_bot_handler(event: ChatMemberUpdated):
 @user_router.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=MEMBER))
 async def user_unblocked_bot_handler(event: ChatMemberUpdated):
     """
-    Foydalanuvchi botni blokdan chiqarganda (Unblock/Restart).
+    Foydalanuvchi botni blokdan chiqarganda (Unblock/Restart) barcha adminlarga xabar boradi.
     """
     try:
         user_id = event.from_user.id
@@ -706,14 +718,60 @@ async def user_unblocked_bot_handler(event: ChatMemberUpdated):
             f"🕒 <b>Vaqt:</b> <b>{now_str}</b>\n\n"
             f"ℹ️ {note}"
         )
-        
-        # Faqat Bosh adminga (ADMIN_ID) yuboriladi, tayinlangan yordamchi adminlarga yuborilmaydi
-        try:
-            await bot.send_message(chat_id=ADMIN_ID, text=alert_text)
-        except Exception as ex:
-            log.warning(f"Bosh adminga ({ADMIN_ID}) unblock bildirishnomasi yuborishda xatolik: {ex}")
+        await notify_all_admins(bot, alert_text)
     except Exception as e:
         log.error(f"user_unblocked_bot_handler error: {e}", exc_info=True)
+
+
+# Guruh/chatga yangi a'zo qo'shilganda (Message orqali)
+@user_router.message(F.new_chat_members)
+async def new_chat_members_handler(message: Message):
+    for member in message.new_chat_members:
+        if member.id == message.bot.id:
+            chat_title = message.chat.title or "Guruh"
+            inviter = message.from_user.full_name if message.from_user else "Noma'lum"
+            alert = (
+                f"🤖 <b>Bot guruhga qo'shildi!</b>\n\n"
+                f"👥 <b>Guruh nomi:</b> {html.escape(chat_title)}\n"
+                f"🆔 <b>Guruh ID:</b> <code>{message.chat.id}</code>\n"
+                f"👤 <b>Qo'shgan:</b> {html.escape(inviter)}\n"
+                f"🕒 <b>Vaqt:</b> {format_uzb_time()}"
+            )
+            await notify_all_admins(message.bot, alert)
+        else:
+            m_name = member.full_name or "Noma'lum"
+            m_user = f"@{member.username}" if member.username else "Mavjud emas"
+            chat_title = message.chat.title or "Guruh"
+            alert = (
+                f"👥 <b>Guruhga yangi a'zo qo'shildi!</b>\n\n"
+                f"🏛 <b>Guruh:</b> {html.escape(chat_title)}\n"
+                f"👤 <b>Foydalanuvchi:</b> {html.escape(m_name)}\n"
+                f"🆔 <b>ID:</b> <code>{member.id}</code>\n"
+                f"🔗 <b>Username:</b> {m_user}\n"
+                f"🕒 <b>Vaqt:</b> {format_uzb_time()}"
+            )
+            await notify_all_admins(message.bot, alert)
+
+
+# Havola orqali yoki to'g'ridan-to'g'ri guruh/kanalga a'zo bo'lganda (ChatMemberUpdated)
+@user_router.chat_member(ChatMemberUpdatedFilter(member_status_changed=JOIN_TRANSITION))
+async def chat_member_joined_handler(event: ChatMemberUpdated):
+    member = event.new_chat_member.user
+    if member.id == event.bot.id:
+        return
+    m_name = member.full_name or "Noma'lum"
+    m_user = f"@{member.username}" if member.username else "Mavjud emas"
+    chat_title = event.chat.title or "Chat/Kanal"
+    alert = (
+        f"👥 <b>Chatga yangi a'zo qo'shildi!</b>\n\n"
+        f"🏛 <b>Chat:</b> {html.escape(chat_title)}\n"
+        f"👤 <b>Foydalanuvchi:</b> {html.escape(m_name)}\n"
+        f"🆔 <b>ID:</b> <code>{member.id}</code>\n"
+        f"🔗 <b>Username:</b> {m_user}\n"
+        f"🕒 <b>Vaqt:</b> {format_uzb_time()}"
+    )
+    await notify_all_admins(event.bot, alert)
+
 
 
 

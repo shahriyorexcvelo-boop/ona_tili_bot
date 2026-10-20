@@ -258,10 +258,10 @@ const TestApp = {
     const part2 = document.getElementById('questions-part-2');
     const part3 = document.getElementById('questions-part-3');
 
-    // 1. 1-32 Variantli Savollar (A, B, C, D)
+    // 1. 1-35 Variantli Savollar (A, B, C, D)
     if (part1) {
       let html1 = '';
-      for (let q = 1; q <= 32; q++) {
+      for (let q = 1; q <= 35; q++) {
         html1 += `
           <div class="question-card" id="qcard-${q}">
             <span class="question-num-tag">${q}-savol</span>
@@ -278,27 +278,9 @@ const TestApp = {
       part1.innerHTML = html1;
     }
 
-    // 2. 33, 34, 35 savollar: 6 ta variantli (A, B, C, D, E, F)
     if (part2) {
-      let html2 = '';
-      for (let q = 33; q <= 35; q++) {
-        html2 += `
-          <div class="question-card" id="qcard-${q}" style="flex-direction: column; align-items: flex-start; gap: 8px; margin-bottom: 8px;">
-            <div style="display: flex; justify-content: space-between; width: 100%;">
-              <span class="question-num-tag" style="font-size: 13.5px; font-weight: 800;">${q}-savol (6 ta variant)</span>
-              <span style="font-size: 11px; color: var(--text-muted);">Maxsus savol</span>
-            </div>
-            <div class="options-group-6" style="width: 100%;">
-              ${['A', 'B', 'C', 'D', 'E', 'F'].map(opt => `
-                <button class="option-btn" id="opt-${q}-${opt}" onclick="TestApp.selectOption(${q}, '${opt}')">
-                  ${opt}
-                </button>
-              `).join('')}
-            </div>
-          </div>
-        `;
-      }
-      part2.innerHTML = html2;
+      part2.innerHTML = '';
+      part2.style.display = 'none';
     }
 
     // 3. 36-39 Yopiq Savollar (1 ta variantli — bitta ochiq qator)
@@ -498,7 +480,7 @@ const TestApp = {
 
     // 1-35 variantli savollar tugmalari va kartalarini tozalash
     for (let q = 1; q <= 35; q++) {
-      const opts = [33, 34, 35].includes(q) ? ['A', 'B', 'C', 'D', 'E', 'F'] : ['A', 'B', 'C', 'D'];
+      const opts = ['A', 'B', 'C', 'D'];
       opts.forEach(opt => {
         const btn = document.getElementById(`opt-${q}-${opt}`);
         if (btn) btn.classList.remove('selected');
@@ -545,8 +527,8 @@ const TestApp = {
     const key = String(qNum);
     const prev = this.answers[key];
 
-    // Variant tugmalarini yangilash (33, 34, 35 savollar 6 ta variant: A, B, C, D, E, F)
-    const opts = [33, 34, 35].includes(qNum) ? ['A', 'B', 'C', 'D', 'E', 'F'] : ['A', 'B', 'C', 'D'];
+    // Variant tugmalarini yangilash (1-35 savollar: A, B, C, D)
+    const opts = ['A', 'B', 'C', 'D'];
     opts.forEach(opt => {
       const btn = document.getElementById(`opt-${qNum}-${opt}`);
       if (btn) btn.classList.toggle('selected', opt === option);

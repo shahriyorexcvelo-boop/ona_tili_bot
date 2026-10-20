@@ -113,6 +113,17 @@ def get_all_admin_ids() -> list:
     return list(admin_ids)
 
 
+async def notify_all_admins(bot: Bot, text: str, reply_markup=None):
+    """Barcha adminlarga (Bosh admin va barcha tayinlangan yordamchi adminlarga) xabar yuborish"""
+    admin_ids = get_all_admin_ids()
+    for adm_id in admin_ids:
+        try:
+            await bot.send_message(chat_id=adm_id, text=text, reply_markup=reply_markup)
+        except Exception as ex:
+            log.warning(f"Adminga ({adm_id}) xabar yuborishda xatolik: {ex}")
+
+
+
 async def check_access(message: Message) -> bool:
     """Foydalanuvchi admin tomonidan tasdiqlanganligini tekshiradi."""
     uid = message.from_user.id

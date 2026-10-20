@@ -360,10 +360,10 @@ const AdminApp = {
     const part3 = document.getElementById('admin-part-3');
     const part4 = document.getElementById('admin-part-4');
 
-    // 1. 1-32 savollar (A, B, C, D)
+    // 1. 1-35 savollar (A, B, C, D)
     if (part1) {
       let html = '';
-      for (let q = 1; q <= 32; q++) {
+      for (let q = 1; q <= 35; q++) {
         const curAns = this.answers[String(q)] ? this.answers[String(q)].ans : '';
         html += `
           <div class="q-admin-row">
@@ -381,27 +381,9 @@ const AdminApp = {
       part1.innerHTML = html;
     }
 
-    // 2. 33, 34, 35 savollar (6 ta variant: A, B, C, D, E, F)
     if (part2) {
-      let html = '';
-      for (let q = 33; q <= 35; q++) {
-        const curAns = this.answers[String(q)] ? this.answers[String(q)].ans : '';
-        html += `
-          <div class="q-admin-row" style="flex-direction: column; align-items: stretch; gap: 8px; margin-bottom: 8px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span class="q-admin-num" style="font-weight: 800;">${q}-savol (6 ta variant)</span>
-            </div>
-            <div class="options-group-6">
-              ${['A', 'B', 'C', 'D', 'E', 'F'].map(opt => `
-                <button class="option-btn ${opt === curAns ? 'selected' : ''}" id="adm-opt-${q}-${opt}" onclick="AdminApp.selectChoice(${q}, '${opt}')">
-                  ${opt}
-                </button>
-              `).join('')}
-            </div>
-          </div>
-        `;
-      }
-      part2.innerHTML = html;
+      part2.innerHTML = '';
+      part2.style.display = 'none';
     }
 
     // 3. 36-39 (1 ta variantli yopiq savollar)
@@ -474,7 +456,7 @@ const AdminApp = {
     const key = String(qNum);
     this.answers[key].ans = option;
 
-    const opts = [33, 34, 35].includes(qNum) ? ['A', 'B', 'C', 'D', 'E', 'F'] : ['A', 'B', 'C', 'D'];
+    const opts = ['A', 'B', 'C', 'D'];
     opts.forEach(opt => {
       const btn = document.getElementById(`adm-opt-${qNum}-${opt}`);
       if (btn) btn.classList.toggle('selected', opt === option);
@@ -514,7 +496,7 @@ const AdminApp = {
   updateUnfilledStats() {
     let closedUnfilled = 0;
     let sec1Unfilled = 0;
-    for (let q = 1; q <= 32; q++) {
+    for (let q = 1; q <= 35; q++) {
       const item = this.answers[String(q)];
       if (!item || !item.ans || !String(item.ans).trim()) {
         closedUnfilled++;
@@ -523,13 +505,6 @@ const AdminApp = {
     }
 
     let sec2Unfilled = 0;
-    for (let q = 33; q <= 35; q++) {
-      const item = this.answers[String(q)];
-      if (!item || !item.ans || !String(item.ans).trim()) {
-        closedUnfilled++;
-        sec2Unfilled++;
-      }
-    }
 
     let sec3Unfilled = 0;
     for (let q = 36; q <= 39; q++) {
@@ -599,7 +574,7 @@ const AdminApp = {
     const sec1El = document.getElementById('cnt-sec-1');
     if (sec1El) {
       if (sec1Unfilled === 0) {
-        sec1El.textContent = 'Barchasi belgilandi (32/32)';
+        sec1El.textContent = 'Barchasi belgilandi (35/35)';
         sec1El.style.color = '#10B981';
       } else {
         sec1El.textContent = `${sec1Unfilled} ta belgilanmagan`;
@@ -609,13 +584,7 @@ const AdminApp = {
 
     const sec2El = document.getElementById('cnt-sec-2');
     if (sec2El) {
-      if (sec2Unfilled === 0) {
-        sec2El.textContent = 'Barchasi belgilandi (3/3)';
-        sec2El.style.color = '#10B981';
-      } else {
-        sec2El.textContent = `${sec2Unfilled} ta belgilanmagan`;
-        sec2El.style.color = '#EF4444';
-      }
+      sec2El.style.display = 'none';
     }
 
     const sec3El = document.getElementById('cnt-sec-3');
