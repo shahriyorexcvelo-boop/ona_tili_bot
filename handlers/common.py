@@ -133,13 +133,13 @@ async def notify_all_admins(bot: Bot, text: str, reply_markup=None):
 async def check_access(message: Message) -> bool:
     """Foydalanuvchi admin tomonidan tasdiqlanganligini tekshiradi."""
     uid = message.from_user.id
-    if test_db.is_admin(uid, ADMIN_ID):
+    if await test_db.db(test_db.is_admin, uid, ADMIN_ID):
         return True
     # Tun rejimi tekshiruvi (faol test bo'lmagandagina to'xtatadi)
     if should_apply_night_mode(uid):
         await message.answer(get_night_message())
         return False
-    u = test_db.get_user(uid)
+    u = await test_db.db(test_db.get_user, uid)
     if not u:
         await message.answer("⚠️ Iltimos, avval /start buyrug'i orqali ro'yxatdan o'ting.")
         return False
@@ -155,12 +155,12 @@ async def check_access(message: Message) -> bool:
 
 async def send_test_card_to_user_chat(user_tg_id: int, test: Dict[str, Any]):
     """Test ma'lumotlari, PDF va WebApp tugmasini foydalanuvchining chatiga yuboradi. Agar foydalanuvchi allaqachon topshirgan bo'lsa qayta topshirish taqiqlanadi."""
-    existing_sub = test_db.get_user_submission_for_test(test["id"], user_tg_id)
-    is_admin = test_db.is_admin(user_tg_id, ADMIN_ID)
+    existing_sub = await test_db.db(test_db.get_user_submission_for_test, test["id"], user_tg_id)
+    is_admin = await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)
     
     if existing_sub and not is_admin:
         dt = format_uzb_time(existing_sub["submitted_at"])
-        is_published = test_db.is_test_results_published(test["id"])
+        is_published = await test_db.db(test_db.is_test_results_published, test["id"])
         if is_published:
             grade = test_db.calculate_grade(existing_sub.get("score", 0))
             score_val = existing_sub.get("score", 0)
@@ -275,7 +275,7 @@ async def clean_blocked_users_from_db(initiator_id: int = ADMIN_ID) -> dict:
     Bazada mavjud barcha foydalanuvchilarni tekshirib, botni bloklaganlarni bazadan to'liq o'chirib tashlash.
     """
     deleted_users = []
-    users = test_db.get_all_users()
+    users = await test_db.db(test_db.get_all_users)
     admin_ids = set(get_all_admin_ids())
 
     active_users = []
@@ -289,7 +289,7 @@ async def clean_blocked_users_from_db(initiator_id: int = ADMIN_ID) -> dict:
             active_users.append(u)
         except Exception as ex:
             if is_user_gone_error(ex):
-                test_db.delete_user(uid, is_self_delete=True)
+                await test_db.db(test_db.delete_user, uid, is_self_delete=True)
                 deleted_users.append({
                     "id": u.get("id"),
                     "tg_id": uid,
@@ -406,7 +406,7 @@ async def send_inactive_warning_messages(
             await asyncio.sleep(0.04)
         except Exception as e:
             if is_user_gone_error(e):
-                test_db.delete_user(uid, is_self_delete=True)
+                await test_db.db(test_db.delete_user, uid, is_self_delete=True)
                 deleted_blocked_users.append(u)
             failed_users.append({
                 "id": u.get("id"),

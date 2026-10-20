@@ -16,7 +16,7 @@ class MaintenanceMiddleware(BaseMiddleware):
     """Texnik profilaktika vaqtida FAQAT Bosh Admin (ADMIN_ID) o'ta oladi. Boshqalar to'xtatiladi."""
     async def __call__(self, handler, event, data):
         user = data.get("event_from_user")
-        if user and test_db.is_maintenance_mode():
+        if user and await test_db.db(test_db.is_maintenance_mode):
             if user.id != ADMIN_ID:
                 if isinstance(event, Message):
                     await event.answer(get_maintenance_message())

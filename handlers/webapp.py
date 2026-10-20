@@ -94,8 +94,8 @@ async def handle_submit_test_api(request):
             })
 
         # 3. RAM keshdan foydalanuvchini tekshirish (Zero-DB SELECT)
-        user_obj = test_db.get_user(user_tg_id)
-        is_admin_user = test_db.is_admin(user_tg_id, ADMIN_ID)
+        user_obj = await test_db.db(test_db.get_user, user_tg_id)
+        is_admin_user = await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)
         if not is_admin_user:
             if not user_obj:
                 return web.json_response({
@@ -109,7 +109,7 @@ async def handle_submit_test_api(request):
                 }, status=403)
 
             # Allaqachon topshirganlikni RAM keshdan tekshirish (Zero-DB)
-            if test_db.has_user_submitted(test_id, user_tg_id):
+            if await test_db.db(test_db.has_user_submitted, test_id, user_tg_id):
                 return web.json_response({
                     "success": False,
                     "message": "Siz ushbu testni allaqachon topshirgansiz! Qayta topshirish taqiqlanadi."
@@ -294,7 +294,7 @@ async def _async_submission_followup(result, test_obj, user_tg_id, is_late_submi
             sub_id = result.get("submission_id")
             corr_cnt = result.get("correct_count", 0)
             score_val = result.get("score", 0.0)
-            u_info = test_db.get_user(user_tg_id)
+            u_info = await test_db.db(test_db.get_user, user_tg_id)
             username_str = f" (@{u_info.get('username')})" if (u_info and u_info.get('username')) else ""
             phone_str = f"\n📞 <b>Telefon:</b> {result.get('phone', '—')}" if result.get('phone') else ""
 
@@ -314,7 +314,7 @@ async def _async_submission_followup(result, test_obj, user_tg_id, is_late_submi
             ])
 
             target_admin = ADMIN_ID
-            if test_obj.get("created_by") and test_db.is_admin(test_obj.get("created_by"), ADMIN_ID):
+            if test_obj.get("created_by") and (await test_db.db(test_db.is_admin, test_obj.get("created_by"), ADMIN_ID)):
                 target_admin = test_obj.get("created_by")
 
             try:
@@ -357,7 +357,7 @@ async def handle_admin_test_pdf_report(request):
         # Admin tekshiruvi (query, header yoki admin ID)
         tg_id = int(request.rel_url.query.get('admin_id', 0) or request.rel_url.query.get('tg_id', 0))
         secret_key = str(request.rel_url.query.get('secret_key', '')).strip()
-        is_auth = (tg_id and test_db.is_admin(tg_id, ADMIN_ID)) or (secret_key == "rash_admin_secret_2026") or (tg_id == ADMIN_ID)
+        is_auth = (tg_id and (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID))) or (secret_key == "rash_admin_secret_2026") or (tg_id == ADMIN_ID)
         
         # Test mavjudligini tekshirish
         test = await asyncio.to_thread(test_db.get_test_by_id, test_id)
@@ -388,7 +388,7 @@ async def handle_create_test_api(request):
         title = data.get("title", "").strip() or "Ona tili Milliy Sertifikat Testi"
         test_code = data.get("test_code", "").strip().upper()
         if not test_code:
-            test_code = test_db.get_next_test_code()
+            test_code = await test_db.db(test_db.get_next_test_code)
         
         subject = data.get("subject", "Ona tili").strip() or "Ona tili"
         answers = data.get("answers", {})
@@ -415,7 +415,7 @@ async def handle_create_test_api(request):
 
         creator_name = ""
         if creator_id:
-            u_info = test_db.get_user(creator_id)
+            u_info = await test_db.db(test_db.get_user, creator_id)
             if u_info:
                 creator_name = u_info.get("fullname", "")
             if not creator_name and creator_id == ADMIN_ID:
@@ -424,8 +424,7 @@ async def handle_create_test_api(request):
         if not creator_name:
             creator_name = "Admin"
 
-        success = test_db.create_test(
-            test_code=test_code,
+        success = await test_db.db(test_db.create_test, test_code=test_code,
             title=title,
             subject=subject,
             answers=answers,
@@ -433,8 +432,7 @@ async def handle_create_test_api(request):
             key_access_code=key_access_code,
             created_by=creator_id,
             created_by_name=creator_name,
-            youtube_url=youtube_url
-        )
+            youtube_url=youtube_url)
 
         sched_date = data.get("scheduled_date", "").strip()
         sched_start = data.get("scheduled_start", "").strip()
@@ -447,10 +445,10 @@ async def handle_create_test_api(request):
                 
                 # Jadval vaqtini sozlash
                 if sched_start and sched_end and test_id:
-                    test_db.set_test_schedule(test_id, sched_date, sched_start, sched_end)
+                    await test_db.db(test_db.set_test_schedule, test_id, sched_date, sched_start, sched_end)
 
                 if youtube_url and test_id:
-                    test_db.set_test_youtube_url(test_id, youtube_url)
+                    await test_db.db(test_db.set_test_youtube_url, test_id, youtube_url)
 
                 time_info = f"⏱ <b>Vaqt chegarasi:</b> {time_limit_min} daqiqa\n" if time_limit_min > 0 else ""
                 sched_info = f"⏰ <b>O'tkazilish vaqti:</b> {sched_date} {sched_start}–{sched_end} (UZB)\n" if (sched_start and sched_end) else ""
@@ -476,7 +474,7 @@ async def handle_create_test_api(request):
                         except Exception:
                             pass
 
-                target_chat_id = creator_id if (creator_id and test_db.is_admin(creator_id, ADMIN_ID)) else ADMIN_ID
+                target_chat_id = creator_id if (creator_id and (await test_db.db(test_db.is_admin, creator_id, ADMIN_ID))) else ADMIN_ID
 
                 # Testni yaratgan adminga (bosh admin yoki tayinlangan admin) PDF so'rovini yuborish
                 await bot.send_message(
@@ -496,7 +494,7 @@ async def handle_create_test_api(request):
                 # Agar testni tayinlangan admin yaratgan bo'lsa -> Bosh Adminga PDF so'rovsiz, faqat 1 ta toza bildirishnoma:
                 if target_chat_id != ADMIN_ID:
                     try:
-                        creator_u = test_db.get_user(target_chat_id)
+                        creator_u = await test_db.db(test_db.get_user, target_chat_id)
                         creator_name = creator_u.get("fullname", "Admin") if creator_u else f"Admin (ID: {target_chat_id})"
                         await bot.send_message(
                             chat_id=ADMIN_ID,
@@ -514,7 +512,7 @@ async def handle_create_test_api(request):
                 else:
                     # Agar Bosh Admin yaratgan bo'lsa -> tayinlangan adminlarga ham PDF so'rovsiz 1 ta toza bildirishnoma:
                     try:
-                        all_adms = test_db.get_all_admins()
+                        all_adms = await test_db.db(test_db.get_all_admins)
                         for adm in (all_adms or []):
                             aid = adm.get("tg_id")
                             if aid and aid != ADMIN_ID:
@@ -608,8 +606,7 @@ async def handle_admin_update_test_keys(request):
         scheduled_end = data.get("scheduled_end")
         youtube_url = data.get("youtube_url")
 
-        res = test_db.update_test_keys(
-            test_id=test_id,
+        res = await test_db.db(test_db.update_test_keys, test_id=test_id,
             new_answers=answers,
             title=title,
             time_limit_min=time_limit_min,
@@ -617,8 +614,7 @@ async def handle_admin_update_test_keys(request):
             scheduled_date=scheduled_date,
             scheduled_start=scheduled_start,
             scheduled_end=scheduled_end,
-            youtube_url=youtube_url
-        )
+            youtube_url=youtube_url)
 
         # Adminga Telegram orqali ham bildirishnoma yuborish
         try:
@@ -870,7 +866,7 @@ async def handle_set_gemini_key_api(request):
         key = (data.get("key") or "").strip()
         if not key:
             return web.json_response({"success": False, "message": "API kalit kiritilmadi"}, status=400)
-        test_db.set_setting("gemini_api_key", key)
+        await test_db.db(test_db.set_setting, "gemini_api_key", key)
         return web.json_response({"success": True, "message": "Gemini API kaliti saqlandi!"})
     except Exception as e:
         log.error(f"Set Gemini key API error: {e}", exc_info=True)
@@ -1226,7 +1222,7 @@ async def handle_app_profile(request):
                     log.warning(f"handle_app_profile init_data parse xatolik: {ex}")
 
         # Agar foydalanuvchi admin bo'lsa va hali bazada yo'q bo'lsa, avtomatik yaratamiz
-        is_admin_user = test_db.is_admin(tg_id or 0, ADMIN_ID)
+        is_admin_user = await test_db.db(test_db.is_admin, tg_id or 0, ADMIN_ID)
         if is_admin_user and tg_id and tg_id > 0:
             existing_user = await asyncio.to_thread(test_db.get_user, tg_id)
             if not existing_user:
@@ -1363,7 +1359,7 @@ async def handle_app_compare_keys(request):
         # ── RATE LIMITING (1-3 soniya cheklovi) ─────────────────
         rate_key = f"compare_{tg_id or request.remote or 'unknown'}"
         is_allowed, retry_sec = await GLOBAL_RATE_LIMITER.check(rate_key, max_requests=1, window_seconds=2.0)
-        if not is_allowed and not test_db.is_admin(tg_id or 0, ADMIN_ID):
+        if not is_allowed and not (await test_db.db(test_db.is_admin, tg_id or 0, ADMIN_ID)):
             return web.json_response({
                 "success": False,
                 "retry_after": retry_sec,
@@ -1536,8 +1532,8 @@ async def handle_app_active_tests(request):
                 except Exception:
                     pass
 
-        if tg_id and not test_db.is_admin(tg_id, ADMIN_ID):
-            u_check = test_db.get_user(tg_id)
+        if tg_id and not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
+            u_check = await test_db.db(test_db.get_user, tg_id)
             if u_check and u_check.get("status") in ["pending", "rejected", "deleted"]:
                 return web.json_response({
                     "success": False,
@@ -1573,7 +1569,7 @@ async def handle_app_users(request):
     """Admin uchun barcha foydalanuvchilar ro'yxati va statistika."""
     try:
         tg_id = int(request.rel_url.query.get('tg_id', 0))
-        if not tg_id or not test_db.is_admin(tg_id, ADMIN_ID):
+        if not tg_id or not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
             init_data = request.rel_url.query.get('init_data', '') or request.headers.get('X-Telegram-Init-Data', '')
             import urllib.parse, json
             try:
@@ -1585,11 +1581,11 @@ async def handle_app_users(request):
             except Exception:
                 pass
 
-        if not test_db.is_admin(tg_id, ADMIN_ID):
+        if not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
             return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
 
-        users = test_db.get_all_users()
-        counts = test_db.get_users_count()
+        users = await test_db.db(test_db.get_all_users)
+        counts = await test_db.db(test_db.get_users_count)
         return web.json_response({
             "success": True,
             "users": users,
@@ -1607,7 +1603,7 @@ async def handle_app_update_user_status(request):
         target_uid = int(data.get('target_uid', 0))
         action = str(data.get('status', '')).strip().lower()
 
-        if not admin_id or not test_db.is_admin(admin_id, ADMIN_ID):
+        if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
             init_data = data.get('init_data', '') or request.headers.get('X-Telegram-Init-Data', '')
             import urllib.parse, json
             try:
@@ -1619,7 +1615,7 @@ async def handle_app_update_user_status(request):
             except Exception:
                 pass
 
-        if not test_db.is_admin(admin_id, ADMIN_ID):
+        if not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
             return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
 
         if not target_uid:
@@ -1627,19 +1623,19 @@ async def handle_app_update_user_status(request):
 
         if action == 'delete':
             # Foydalanuvchini bazadan butunlay tozalash va admin_deleted_users ga yozish
-            deleted_user = test_db.delete_user(target_uid, deleted_by=admin_id, by_admin=True)
+            deleted_user = await test_db.db(test_db.delete_user, target_uid, deleted_by=admin_id, by_admin=True)
             return web.json_response({"success": bool(deleted_user), "status": "deleted"})
 
         if action == 'restore':
             # Foydalanuvchini qayta tiklash
-            restored = test_db.restore_user(target_uid)
+            restored = await test_db.db(test_db.restore_user, target_uid)
             return web.json_response({"success": bool(restored), "status": "approved"})
 
         if action not in ['approved', 'rejected', 'pending']:
             return web.json_response({"success": False, "message": "Noto'g'ri amal"}, status=400)
 
         if action == 'approved':
-            test_db.approve_user(target_uid)
+            await test_db.db(test_db.approve_user, target_uid)
             try:
                 await bot.send_message(
                     chat_id=target_uid,
@@ -1653,7 +1649,7 @@ async def handle_app_update_user_status(request):
             except Exception:
                 pass
         elif action == 'rejected':
-            test_db.reject_user(target_uid)
+            await test_db.db(test_db.reject_user, target_uid)
             try:
                 await bot.send_message(
                     chat_id=target_uid,
@@ -1662,7 +1658,7 @@ async def handle_app_update_user_status(request):
             except Exception:
                 pass
         elif action == 'pending':
-            test_db.set_user_pending(target_uid)
+            await test_db.db(test_db.set_user_pending, target_uid)
             try:
                 req_kb = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="🔔 Admindan ruxsat so'rash", callback_data=f"user_req_access_{target_uid}")]
@@ -1717,7 +1713,7 @@ async def handle_app_update_profile(request):
         # Chiroyli bosh harflar bilan formatlash
         fullname = " ".join(w.capitalize() for w in fullname.split())
 
-        ok = test_db.update_user_profile(tg_id, fullname=fullname, phone=phone if phone else None)
+        ok = await test_db.db(test_db.update_user_profile, tg_id, fullname=fullname, phone=phone if phone else None)
         return web.json_response({"success": ok})
     except Exception as e:
         log.error(f"App Update Profile Error: {e}", exc_info=True)
@@ -1744,7 +1740,7 @@ async def handle_app_delete_my_account(request):
         if not tg_id:
             return web.json_response({"success": False, "message": "Foydalanuvchi aniqlanmadi"}, status=400)
 
-        user_info = test_db.delete_user(tg_id, deleted_by=tg_id, is_self_delete=True)
+        user_info = await test_db.db(test_db.delete_user, tg_id, deleted_by=tg_id, is_self_delete=True)
         if ADMIN_ID and user_info:
             try:
                 fn = user_info.get("fullname", "Noma'lum")
@@ -1772,10 +1768,10 @@ async def handle_app_restrict_all_users(request):
     try:
         data = await request.json()
         admin_id = int(data.get('admin_id', 0))
-        if not test_db.is_admin(admin_id, ADMIN_ID):
+        if not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
             return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
 
-        count = test_db.restrict_all_users(ADMIN_ID)
+        count = await test_db.db(test_db.restrict_all_users, ADMIN_ID)
         return web.json_response({"success": True, "count": count})
     except Exception as e:
         log.error(f"App Restrict All Users Error: {e}", exc_info=True)
@@ -1786,10 +1782,10 @@ async def handle_app_unrestrict_all_users(request):
     try:
         data = await request.json()
         admin_id = int(data.get('admin_id', 0))
-        if not test_db.is_admin(admin_id, ADMIN_ID):
+        if not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
             return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
 
-        count = test_db.unrestrict_all_users(ADMIN_ID)
+        count = await test_db.db(test_db.unrestrict_all_users, ADMIN_ID)
         return web.json_response({"success": True, "count": count})
     except Exception as e:
         log.error(f"App Unrestrict All Users Error: {e}", exc_info=True)
@@ -1867,7 +1863,7 @@ async def handle_app_broadcast(request):
         admin_id = int(data.get('admin_id', 0))
         message_text = str(data.get('message', '')).strip()
 
-        if not admin_id or not test_db.is_admin(admin_id, ADMIN_ID):
+        if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
             init_data = data.get('init_data', '') or request.headers.get('X-Telegram-Init-Data', '')
             import urllib.parse, json
             try:
@@ -1879,7 +1875,7 @@ async def handle_app_broadcast(request):
             except Exception:
                 pass
 
-        if not test_db.is_admin(admin_id, ADMIN_ID):
+        if not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
             return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
 
         if not message_text:
@@ -1906,7 +1902,7 @@ async def handle_app_broadcast_delete(request):
         batch_id = str(data.get('batch_id', '')).strip()
         clean_count = int(data.get('clean_count', 0))
 
-        if not admin_id or not test_db.is_admin(admin_id, ADMIN_ID):
+        if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
             init_data = data.get('init_data', '') or request.headers.get('X-Telegram-Init-Data', '')
             import urllib.parse, json
             try:
@@ -1918,7 +1914,7 @@ async def handle_app_broadcast_delete(request):
             except Exception:
                 pass
 
-        if not test_db.is_admin(admin_id, ADMIN_ID):
+        if not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
             return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
 
         if batch_id:
@@ -1946,7 +1942,7 @@ async def handle_app_broadcast_delete(request):
 async def handle_next_test_code_api(request):
     """Keyingi navbatdagi ketma-ket unikal test kodini qaytarish."""
     try:
-        next_code = test_db.get_next_test_code()
+        next_code = await test_db.db(test_db.get_next_test_code)
         return web.json_response({"success": True, "next_code": next_code})
     except Exception as e:
         return web.json_response({"success": False, "next_code": "1", "message": str(e)})
@@ -1955,10 +1951,10 @@ async def handle_app_test_submissions(request):
     """Admin uchun test topshirgan barcha foydalanuvchilar va ularning tafsilotlari."""
     try:
         tg_id = int(request.rel_url.query.get('tg_id', 0))
-        if not test_db.is_admin(tg_id, ADMIN_ID):
+        if not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
             return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
         test_id = int(request.match_info.get('test_id', 0))
-        subs = test_db.get_test_submissions_with_users(test_id)
+        subs = await test_db.db(test_db.get_test_submissions_with_users, test_id)
         return web.json_response({"success": True, "submissions": subs})
     except Exception as e:
         log.error(f"App Test Submissions Error: {e}", exc_info=True)
@@ -1968,8 +1964,8 @@ async def handle_rasch_evaluate_api(request):
     try:
         test_id = int(request.match_info.get('test_id', 0))
         tg_id = int(request.rel_url.query.get('tg_id', 0))
-        is_adm = test_db.is_admin(tg_id, ADMIN_ID) if tg_id else False
-        is_pub = test_db.is_test_results_published(test_id)
+        is_adm = await test_db.db(test_db.is_admin, tg_id, ADMIN_ID) if tg_id else False
+        is_pub = await test_db.db(test_db.is_test_results_published, test_id)
 
         if not is_adm and not is_pub:
             return web.json_response({
@@ -1977,7 +1973,7 @@ async def handle_rasch_evaluate_api(request):
                 "message": "Ushbu test natijalari hali e'lon qilinmagan yoki ruxsat yo'q"
             }, status=403)
 
-        res = test_db.evaluate_test_rasch(test_id)
+        res = await test_db.db(test_db.evaluate_test_rasch, test_id)
         if not res:
             return web.json_response({"success": False, "message": "Kamida 2 ta talaba topshirgan bo'lishi kerak yoki test topilmadi"}, status=400)
         return web.json_response({"success": True, "data": res})
@@ -2028,7 +2024,7 @@ async def handle_app_trigger_solve(request):
             return web.json_response({"ok": False, "error": "Test topilmadi"}, status=404)
 
         sched_stat = get_test_schedule_status(test)
-        if sched_stat["is_upcoming"] and not test_db.is_admin(tg_id, ADMIN_ID):
+        if sched_stat["is_upcoming"] and not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
             sdate = test.get('scheduled_date') or 'Bugun'
             sstart = test.get('scheduled_start') or ''
             return web.json_response({
@@ -2237,19 +2233,19 @@ async def handle_dashboard_user_action(request):
             return web.json_response({"success": False, "error": "Foydalanuvchi ID ko'rsatilmadi"}, status=400)
             
         if action == 'approve':
-            test_db.approve_user(target_uid)
+            await test_db.db(test_db.approve_user, target_uid)
             msg = "Foydalanuvchi faollashtirildi"
         elif action in ['block', 'reject']:
-            test_db.reject_user(target_uid)
+            await test_db.db(test_db.reject_user, target_uid)
             msg = "Foydalanuvchi rad etildi"
         elif action == 'pending':
-            test_db.set_user_pending(target_uid)
+            await test_db.db(test_db.set_user_pending, target_uid)
             msg = "Foydalanuvchi kutilmoqda holatiga o'tkazildi"
         elif action == 'delete':
-            test_db.delete_user(target_uid, deleted_by=ADMIN_ID, by_admin=True)
+            await test_db.db(test_db.delete_user, target_uid, deleted_by=ADMIN_ID, by_admin=True)
             msg = "Foydalanuvchi bazadan to'liq o'chirildi va admin_deleted_users ga kiritildi"
         elif action == 'restore':
-            test_db.restore_user(target_uid)
+            await test_db.db(test_db.restore_user, target_uid)
             msg = "Foydalanuvchi muvaffaqiyatli tiklandi"
         else:
             return web.json_response({"success": False, "error": f"Noma'lum amal: {action}"}, status=400)
@@ -2268,10 +2264,10 @@ async def handle_dashboard_late_action(request):
             return web.json_response({"success": False, "error": "Submission ID ko'rsatilmadi"}, status=400)
             
         if action == 'accept':
-            test_db.set_submission_late_status(sub_id, 0)
+            await test_db.db(test_db.set_submission_late_status, sub_id, 0)
             msg = "Kech topshirilgan natija testga qabul qilindi!"
         elif action == 'reject':
-            test_db.set_submission_late_status(sub_id, 1)
+            await test_db.db(test_db.set_submission_late_status, sub_id, 1)
             msg = "Natija hisobga olinmaydigan (kechikkan) deb belgilandi."
         else:
             return web.json_response({"success": False, "error": "Noma'lum amal"}, status=400)
@@ -2299,7 +2295,7 @@ async def handle_dashboard_cancel_submission(request):
         if action not in ['reject', 'allow_retake']:
             return web.json_response({"success": False, "error": "Noto'g'ri amal turi (reject yoki allow_retake)"}, status=400)
 
-        sub = test_db.get_submission_by_id(sub_id)
+        sub = await test_db.db(test_db.get_submission_by_id, sub_id)
         if not sub:
             return web.json_response({"success": False, "error": "Topshirilgan natija topilmadi"}, status=404)
 
@@ -2312,7 +2308,7 @@ async def handle_dashboard_cancel_submission(request):
 
         if action == 'reject':
             # 1. Javobni qabul qilmaslik (rad etish)
-            success = test_db.reject_submission(sub_id, reason=reason)
+            success = await test_db.db(test_db.reject_submission, sub_id, reason=reason)
             if not success:
                 return web.json_response({"success": False, "error": "Natijani rad etishda xatolik yuz berdi"}, status=500)
 
@@ -2327,7 +2323,7 @@ async def handle_dashboard_cancel_submission(request):
 
         elif action == 'allow_retake':
             # 2. Qayta topshirish (avvalgi javob o'chiriladi, yangidan topshira oladi)
-            success = test_db.delete_submission(sub_id)
+            success = await test_db.db(test_db.delete_submission, sub_id)
             if not success:
                 return web.json_response({"success": False, "error": "Natijani o'chirishda xatolik yuz berdi"}, status=500)
 
@@ -2351,11 +2347,9 @@ async def handle_dashboard_cancel_submission(request):
 
         # Audit jurnaliga yozish
         try:
-            test_db.log_activity(
-                action=f"submission_{action}",
+            await test_db.db(test_db.log_activity, action=f"submission_{action}",
                 details=f"Test #{test_code} (Sub ID: {sub_id}) - {fullname} (ID: {user_tg_id}) amali: {action}. Userga xabar: {'yetkazildi' if sent_to_user else 'yetkazilmadi'}",
-                actor="admin"
-            )
+                actor="admin")
         except Exception:
             pass
 
@@ -2373,7 +2367,7 @@ async def handle_dashboard_test_toggle(request):
     try:
         data = await request.json()
         test_id = int(data.get('test_id', 0))
-        new_status = test_db.toggle_test_status(test_id)
+        new_status = await test_db.db(test_db.toggle_test_status, test_id)
         return web.json_response({
             "success": True,
             "is_active": new_status,
@@ -2392,7 +2386,7 @@ async def handle_dashboard_test_publish(request):
             return web.json_response({"success": False, "error": "Test topilmadi"}, status=404)
         cur_pub = t.get('results_published', 0)
         new_pub = 0 if cur_pub == 1 else 1
-        test_db.set_test_results_published(test_id, new_pub)
+        await test_db.db(test_db.set_test_results_published, test_id, new_pub)
         if new_pub == 1:
             pub_id = int(data.get("admin_id") or data.get("tg_id") or ADMIN_ID)
             asyncio.create_task(notify_admins_test_results_published(test_id, pub_id, eval_type="rasch"))
@@ -2409,7 +2403,7 @@ async def handle_dashboard_query(request):
     try:
         data = await request.json()
         query = str(data.get('query', '')).strip()
-        res = test_db.execute_admin_safe_query(query, limit=100)
+        res = await test_db.db(test_db.execute_admin_safe_query, query, limit=100)
         return web.json_response(res)
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)}, status=400)
@@ -2691,7 +2685,7 @@ async def handle_notify_inactive_users(request):
         target_count = str(data.get('target_count', '') or request.rel_url.query.get('target_count', 'both')).strip()
         time_filter = str(data.get('time_filter', '') or request.rel_url.query.get('time_filter', 'min_2d')).strip()
 
-        is_auth = (admin_id and test_db.is_admin(admin_id, ADMIN_ID)) or (secret_key == "rash_admin_secret_2026") or (admin_id == ADMIN_ID)
+        is_auth = (admin_id and (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID))) or (secret_key == "rash_admin_secret_2026") or (admin_id == ADMIN_ID)
         if not is_auth:
             return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
 
@@ -2716,7 +2710,7 @@ async def handle_clean_blocked_users(request):
         admin_id = int(data.get('admin_id', 0) or request.rel_url.query.get('admin_id', 0))
         secret_key = str(data.get('secret_key', '') or request.rel_url.query.get('secret_key', '')).strip()
 
-        is_auth = (admin_id and test_db.is_admin(admin_id, ADMIN_ID)) or (secret_key == "rash_admin_secret_2026") or (admin_id == ADMIN_ID)
+        is_auth = (admin_id and (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID))) or (secret_key == "rash_admin_secret_2026") or (admin_id == ADMIN_ID)
         if not is_auth:
             return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
 
@@ -2731,7 +2725,7 @@ async def handle_admin_registration_status(request):
     """Yangi foydalanuvchilar qabuli holatini olish."""
     return web.json_response({
         "success": True,
-        "registration_open": test_db.is_registration_open()
+        "registration_open": await test_db.db(test_db.is_registration_open)
     })
 
 
@@ -2746,20 +2740,20 @@ async def handle_admin_toggle_registration(request):
         admin_id = int(data.get('admin_id', 0) or request.rel_url.query.get('admin_id', 0))
         secret_key = str(data.get('secret_key', '') or request.rel_url.query.get('secret_key', '')).strip()
 
-        is_auth = (admin_id and test_db.is_admin(admin_id, ADMIN_ID)) or (secret_key == "rash_admin_secret_2026") or (admin_id == ADMIN_ID)
+        is_auth = (admin_id and (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID))) or (secret_key == "rash_admin_secret_2026") or (admin_id == ADMIN_ID)
         if not is_auth:
             return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
 
         action = str(data.get("action") or request.rel_url.query.get("action", "")).strip().lower()
         if action == "open":
-            test_db.set_registration_open(True)
+            await test_db.db(test_db.set_registration_open, True)
         elif action == "close":
-            test_db.set_registration_open(False)
+            await test_db.db(test_db.set_registration_open, False)
         else:
-            current = test_db.is_registration_open()
-            test_db.set_registration_open(not current)
+            current = await test_db.db(test_db.is_registration_open)
+            await test_db.db(test_db.set_registration_open, not current)
 
-        is_open = test_db.is_registration_open()
+        is_open = await test_db.db(test_db.is_registration_open)
         return web.json_response({
             "success": True,
             "registration_open": is_open,
@@ -2791,7 +2785,7 @@ async def handle_app_check_membership(request):
 
 async def create_web_app():
     try:
-        test_db.ensure_db_initialized()
+        await test_db.db(test_db.ensure_db_initialized)
     except Exception as ex:
         log.warning(f"create_web_app ensure_db_initialized xatolik: {ex}")
 

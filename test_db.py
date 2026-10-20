@@ -41,6 +41,29 @@ _conn_last_used = {}
 PG_POOL_MINCONN = int(os.getenv("PG_POOL_MINCONN", "1"))
 PG_POOL_MAXCONN = int(os.getenv("PG_POOL_MAXCONN", "25"))
 
+# ── ASYNC DB HELPER (Non-blocking ThreadPoolExecutor) ──
+import asyncio
+import functools
+from concurrent.futures import ThreadPoolExecutor
+
+# Chegaralangan ThreadPoolExecutor: thread soni pool hajmidan (PG_POOL_MAXCONN) oshmaydi
+# Masalan, pool max 25 bo'lsa, 20 ta worker ishlatiladi.
+_DB_MAX_WORKERS = min(20, max(4, PG_POOL_MAXCONN - 2)) if PG_POOL_MAXCONN > 4 else PG_POOL_MAXCONN
+_db_executor = ThreadPoolExecutor(max_workers=_DB_MAX_WORKERS, thread_name_prefix="db_pool_worker")
+
+async def db(func, *args, **kwargs):
+    """
+    Sinxron test_db funksiyalarini alohida thread pool da ishga tushirish uchun yagona async yordamchi.
+    Aiogram / Aiohttp bitta umumiy event loop da ishlayotganda event loop ni bloklashdan to'liq himoya qiladi.
+    """
+    if asyncio.iscoroutinefunction(func):
+        return await func(*args, **kwargs)
+    loop = asyncio.get_running_loop()
+    if kwargs:
+        pfunc = functools.partial(func, *args, **kwargs)
+        return await loop.run_in_executor(_db_executor, pfunc)
+    return await loop.run_in_executor(_db_executor, func, *args)
+
 # ── ZERO-DB-READ ARXITEKTURASI (Global Memory Cache) ──
 # 1,000+ o'quvchi bir vaqtda kirganda bazaga yuklama bermaslik uchun
 # barcha testlar, variantlar va kalitlar server xotirasida (RAM) saqlanadi.
@@ -277,9 +300,11 @@ def get_connection():
         from psycopg2.extras import RealDictCursor
         pool = _get_pg_pool()
         if pool:
-            # Yuqori yuklamada pool to'lib qolsa, kutib turmasdan darhol yangi connect ochish o'rniga
-            # qisqa vaqt (30-50ms) kutib qayta urinish (Retry) orqali ulanish oladi
-            for attempt in range(4):
+            # Yuqori yuklamada pool to'lib qolsa, thread ichida qisqa kutish bilan qayta urinish.
+            # Umumiy kutish vaqti 2.0 soniyadan oshmaydi va ulanish olinmasa xato qaytariladi.
+            start_wait = time.time()
+            sleep_time = 0.04
+            while True:
                 try:
                     conn = pool.getconn()
                     # O'lik / uzilgan ulanishni aniqlab yangilash
@@ -291,24 +316,27 @@ def get_connection():
                         conn = pool.getconn()
 
                     conn_id = id(conn)
-                    now_t = time.time()
-                    _conn_last_used[conn_id] = now_t
+                    _conn_last_used[conn_id] = time.time()
                     conn.cursor_factory = RealDictCursor
                     conn.autocommit = False
                     _pool_connections.add(conn_id)
                     return conn
                 except Exception as pe:
                     import psycopg2.pool
-                    if isinstance(pe, psycopg2.pool.PoolError) and attempt < 3:
-                        time.sleep(0.04 * (attempt + 1))
-                        continue
-                    break
+                    if isinstance(pe, psycopg2.pool.PoolError):
+                        elapsed = time.time() - start_wait
+                        if elapsed + sleep_time <= 2.0:
+                            time.sleep(sleep_time)
+                            sleep_time = min(sleep_time * 1.5, 0.2)
+                            continue
+                        raise TimeoutError(f"PostgreSQL connection pool band (kutish 2s dan oshdi): {pe}") from pe
+                    raise
 
-        # Fallback: Agar pool to'liq to'lgan va kutish muddati tugagan bo'lsagina yangi ulanish
+        # Fallback: Agar pool mavjud bo'lmasa to'g'ridan-to'g'ri ulanish
         conn = psycopg2.connect(
             DATABASE_URL,
             cursor_factory=RealDictCursor,
-            connect_timeout=10,
+            connect_timeout=2,
             keepalives=1,
             keepalives_idle=30,
             keepalives_interval=10,

@@ -85,12 +85,12 @@ async def start_handler(message: Message, state: FSMContext):
         await message.answer(get_night_message())
         return
 
-    user = test_db.get_user(user_tg_id)
+    user = await test_db.db(test_db.get_user, user_tg_id)
 
     if not user:
         # Yangi ro'yxatdan o'tmoqchi bo'lgan foydalanuvchi
-        if not test_db.is_admin(user_tg_id, ADMIN_ID):
-            if not test_db.is_registration_open():
+        if not (await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)):
+            if not (await test_db.db(test_db.is_registration_open)):
                 await send_registration_closed_message(message, user_tg_id)
                 return
 
@@ -104,13 +104,13 @@ async def start_handler(message: Message, state: FSMContext):
             reply_markup=ReplyKeyboardRemove()
         )
     else:
-        is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
+        is_adm = await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)
         st = user.get("status", "approved")
         if not is_adm:
             if st == "pending":
-                can_req, diff_hours = test_db.can_request_access(user_tg_id, cooldown_hours=6)
+                can_req, diff_hours = await test_db.db(test_db.can_request_access, user_tg_id, cooldown_hours=6)
                 if can_req:
-                    test_db.touch_admin_deleted_request(user_tg_id)
+                    await test_db.db(test_db.touch_admin_deleted_request, user_tg_id)
                     safe_fn = html.escape(user.get("fullname", "O'quvchi"))
                     safe_un = html.escape(f"@{user.get('username')}") if user.get("username") else "Mavjud emas"
                     alert_text = (
@@ -158,9 +158,9 @@ async def start_handler(message: Message, state: FSMContext):
 @user_router.message(RegistrationState.fullname)
 async def reg_fullname(message: Message, state: FSMContext):
     user_tg_id = message.from_user.id
-    is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
+    is_adm = await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)
 
-    if not is_adm and not test_db.is_registration_open():
+    if not is_adm and not (await test_db.db(test_db.is_registration_open)):
         await state.clear()
         await send_registration_closed_message(message, user_tg_id)
         return
@@ -183,8 +183,8 @@ async def reg_fullname(message: Message, state: FSMContext):
     username = message.from_user.username
     phone = ""
 
-    is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
-    was_admin_deleted = test_db.is_admin_deleted(user_tg_id)
+    is_adm = await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)
+    was_admin_deleted = await test_db.db(test_db.is_admin_deleted, user_tg_id)
 
     if is_adm:
         status = "approved"
@@ -193,9 +193,9 @@ async def reg_fullname(message: Message, state: FSMContext):
     else:
         status = "approved"
 
-    test_db.add_or_update_user(user_tg_id, fullname, phone, username, status=status)
+    await test_db.db(test_db.add_or_update_user, user_tg_id, fullname, phone, username, status=status)
     try:
-        test_db.log_activity(user_tg_id, "user_register", f"Yangi o'quvchi ro'yxatdan o'tdi: {fullname}", {"tg_id": user_tg_id, "fullname": fullname, "username": username, "status": status})
+        await test_db.db(test_db.log_activity, user_tg_id, "user_register", f"Yangi o'quvchi ro'yxatdan o'tdi: {fullname}", {"tg_id": user_tg_id, "fullname": fullname, "username": username, "status": status})
     except Exception:
         pass
     invalidate_dashboard_cache()
@@ -208,7 +208,7 @@ async def reg_fullname(message: Message, state: FSMContext):
             reply_markup=main_menu_kb(user_tg_id)
         )
     elif status == "pending":
-        test_db.touch_admin_deleted_request(user_tg_id)
+        await test_db.db(test_db.touch_admin_deleted_request, user_tg_id)
         safe_fullname = html.escape(fullname)
         safe_username = html.escape(f"@{username}") if username else "Mavjud emas"
         alert_text = (
@@ -267,8 +267,8 @@ async def reg_phone(message: Message, state: FSMContext):
     user_tg_id = message.from_user.id
     username = message.from_user.username
 
-    is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
-    was_admin_deleted = test_db.is_admin_deleted(user_tg_id)
+    is_adm = await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)
+    was_admin_deleted = await test_db.db(test_db.is_admin_deleted, user_tg_id)
     if is_adm:
         status = "approved"
     elif was_admin_deleted:
@@ -276,9 +276,9 @@ async def reg_phone(message: Message, state: FSMContext):
     else:
         status = "approved"
 
-    test_db.add_or_update_user(user_tg_id, fullname, phone, username, status=status)
+    await test_db.db(test_db.add_or_update_user, user_tg_id, fullname, phone, username, status=status)
     try:
-        test_db.log_activity(user_tg_id, "user_register", f"Yangi o'quvchi ro'yxatdan o'tdi: {fullname}", {"tg_id": user_tg_id, "fullname": fullname, "username": username, "status": status})
+        await test_db.db(test_db.log_activity, user_tg_id, "user_register", f"Yangi o'quvchi ro'yxatdan o'tdi: {fullname}", {"tg_id": user_tg_id, "fullname": fullname, "username": username, "status": status})
     except Exception:
         pass
     invalidate_dashboard_cache()
@@ -376,15 +376,15 @@ async def solve_test_cb(call: CallbackQuery):
         return
 
     sched_stat = get_test_schedule_status(t)
-    if sched_stat["is_upcoming"] and not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if sched_stat["is_upcoming"] and not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         sstart = t.get('scheduled_start') or ''
         sdate = t.get('scheduled_date') or 'Bugun'
         await call.answer(f"⏳ Test hali boshlanmagan! Boshlanish vaqti: {sdate} {sstart} (UZB)", show_alert=True)
         return
     
-    existing_sub = test_db.get_user_submission_for_test(test_id, call.from_user.id)
+    existing_sub = await test_db.db(test_db.get_user_submission_for_test, test_id, call.from_user.id)
     if existing_sub:
-        is_published = test_db.is_test_results_published(test_id)
+        is_published = await test_db.db(test_db.is_test_results_published, test_id)
         if is_published:
             grade = test_db.calculate_grade(existing_sub.get("score", 0))
             score_val = existing_sub.get("score", 0)
@@ -431,7 +431,7 @@ async def admin_webapp_info_cb(call: CallbackQuery):
 @user_router.message(F.text == "📊 Mening natijalarim")
 @user_router.message(Command("results"))
 async def show_my_results(message: Message):
-    subs = test_db.get_user_submissions(message.from_user.id)
+    subs = await test_db.db(test_db.get_user_submissions, message.from_user.id)
     pub_subs = [s for s in subs if s.get("results_published")]
 
     kb_rows = []
@@ -454,12 +454,12 @@ async def show_my_results(message: Message):
 @user_router.message(F.text == "👤 Profilim")
 @user_router.message(Command("profile"))
 async def show_profile(message: Message):
-    user = test_db.get_user(message.from_user.id)
+    user = await test_db.db(test_db.get_user, message.from_user.id)
     if not user:
         await message.answer("Profil topilmadi. /start buyrug'ini bosing.")
         return
 
-    submissions = test_db.get_user_submissions(message.from_user.id)
+    submissions = await test_db.db(test_db.get_user_submissions, message.from_user.id)
     tests_count = len(submissions)
     dt = format_uzb_time(user.get("registered_at"), "%d.%m.%Y") if user.get("registered_at") else "Noma'lum"
 
@@ -498,11 +498,11 @@ async def show_profile(message: Message):
 
 @user_router.callback_query(F.data == "profile_show_details")
 async def profile_show_details_handler(call: CallbackQuery):
-    user = test_db.get_user(call.from_user.id)
+    user = await test_db.db(test_db.get_user, call.from_user.id)
     if not user:
         await call.answer("Foydalanuvchi topilmadi", show_alert=True)
         return
-    submissions = test_db.get_user_submissions(call.from_user.id)
+    submissions = await test_db.db(test_db.get_user_submissions, call.from_user.id)
     tests_count = len(submissions)
     dt = format_uzb_time(user.get("registered_at"), "%d.%m.%Y %H:%M") if user.get("registered_at") else "Noma'lum"
     phone_str = user.get('phone') or "Biriktirilmagan"
@@ -538,11 +538,11 @@ async def profile_show_details_handler(call: CallbackQuery):
 
 @user_router.callback_query(F.data == "profile_hide_details")
 async def profile_hide_details_handler(call: CallbackQuery):
-    user = test_db.get_user(call.from_user.id)
+    user = await test_db.db(test_db.get_user, call.from_user.id)
     if not user:
         await call.answer("Foydalanuvchi topilmadi", show_alert=True)
         return
-    submissions = test_db.get_user_submissions(call.from_user.id)
+    submissions = await test_db.db(test_db.get_user_submissions, call.from_user.id)
     tests_count = len(submissions)
     scores = [float(s.get('score', s.get('correct_count', 0))) for s in submissions] if submissions else []
     avg_score = f"{sum(scores)/len(scores):.1f}" if scores else "0.0"
@@ -597,7 +597,7 @@ async def process_new_profile_name(message: Message, state: FSMContext):
         await message.answer("⚠️ Iltimos, haqiqiy ism va familiyangizni to'liq kiriting (kamida 3 ta belgi):")
         return
     
-    test_db.update_user_profile(message.from_user.id, fullname=new_name)
+    await test_db.db(test_db.update_user_profile, message.from_user.id, fullname=new_name)
     await state.clear()
     await message.answer(f"✅ Ismingiz muvaffaqiyatli yangilandi: <b>{new_name}</b>")
     await show_profile(message)
@@ -629,7 +629,7 @@ async def process_new_profile_phone_contact(message: Message, state: FSMContext)
     phone = contact.phone_number
     if not phone.startswith("+"):
         phone = "+" + phone
-    test_db.update_user_profile(message.from_user.id, phone=phone)
+    await test_db.db(test_db.update_user_profile, message.from_user.id, phone=phone)
     await state.clear()
     await message.answer(
         f"✅ Telefon raqamingiz muvaffaqiyatli yangilandi: <b>{phone}</b>",
@@ -654,7 +654,7 @@ async def process_new_profile_phone_text(message: Message, state: FSMContext):
     if not cleaned.startswith("+"):
         cleaned = "+" + cleaned
 
-    test_db.update_user_profile(message.from_user.id, phone=cleaned)
+    await test_db.db(test_db.update_user_profile, message.from_user.id, phone=cleaned)
     await state.clear()
     await message.answer(
         f"✅ Telefon raqamingiz muvaffaqiyatli yangilandi: <b>{cleaned}</b>",
@@ -686,7 +686,7 @@ async def profile_delete_account_confirm(call: CallbackQuery):
 async def do_delete_my_account_handler(call: CallbackQuery, state: FSMContext):
     await state.clear()
     uid = call.from_user.id
-    user_info = test_db.delete_user(uid, is_self_delete=True)
+    user_info = await test_db.db(test_db.delete_user, uid, is_self_delete=True)
     await call.message.answer(
         "🗑 <b>Akkauntingiz va barcha natijalaringiz butunlay o'chirildi.</b>\n\n"
         "Qaytadan ro'yxatdan o'tish uchun /start buyrug'ini bosing.",
@@ -723,10 +723,10 @@ async def user_blocked_bot_handler(event: ChatMemberUpdated):
     """
     try:
         user_id = event.from_user.id
-        u = test_db.get_user(user_id)
+        u = await test_db.db(test_db.get_user, user_id)
         
         # Botni bloklagan foydalanuvchini bazadan to'liq o'chiramiz (o'zi ketgani uchun is_self_delete=True)
-        test_db.delete_user(user_id, is_self_delete=True)
+        await test_db.db(test_db.delete_user, user_id, is_self_delete=True)
         
         fn = (u and u.get("fullname")) or event.from_user.full_name or "Noma'lum"
         un = f"@{u.get('username')}" if (u and u.get('username')) else (f"@{event.from_user.username}" if event.from_user.username else "Mavjud emas")
@@ -754,7 +754,7 @@ async def user_unblocked_bot_handler(event: ChatMemberUpdated):
     """
     try:
         user_id = event.from_user.id
-        u = test_db.get_user(user_id)
+        u = await test_db.db(test_db.get_user, user_id)
         note = "<i>Botdan qayta foydalanishi mumkin.</i>"
             
         fn = (u and u.get("fullname")) or event.from_user.full_name or "Noma'lum"
@@ -875,7 +875,7 @@ async def user_req_tahlil_cb(call: CallbackQuery, state: FSMContext):
         await call.answer("Test topilmadi!", show_alert=True)
         return
 
-    sub = test_db.get_user_submission_for_test(test_id, call.from_user.id)
+    sub = await test_db.db(test_db.get_user_submission_for_test, test_id, call.from_user.id)
     if not sub:
         await call.answer("Siz ushbu testni topshirmagansiz!", show_alert=True)
         return
@@ -952,7 +952,7 @@ async def process_tahlil_code(message: Message, state: FSMContext):
         await message.answer("Test topilmadi.")
         return
 
-    sub = test_db.get_user_submission_for_test(test_id, message.from_user.id)
+    sub = await test_db.db(test_db.get_user_submission_for_test, test_id, message.from_user.id)
     if not sub:
         await state.clear()
         await message.answer("Siz ushbu testni topshirmagansiz.")
@@ -1007,13 +1007,13 @@ async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
     if raw_text.startswith("/"):
         return
 
-    user = test_db.get_user(user_tg_id)
+    user = await test_db.db(test_db.get_user, user_tg_id)
     if not user:
-        if test_db.is_admin(user_tg_id, ADMIN_ID):
-            test_db.add_or_update_user(user_tg_id, message.from_user.full_name or "Administrator", "", message.from_user.username, status="approved")
-            user = test_db.get_user(user_tg_id)
+        if await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID):
+            await test_db.db(test_db.add_or_update_user, user_tg_id, message.from_user.full_name or "Administrator", "", message.from_user.username, status="approved")
+            user = await test_db.db(test_db.get_user, user_tg_id)
         else:
-            if not test_db.is_registration_open():
+            if not (await test_db.db(test_db.is_registration_open)):
                 await state.clear()
                 await send_registration_closed_message(message, user_tg_id)
                 return
@@ -1034,7 +1034,7 @@ async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
 
     # Faqat kutilayotgan (pending) yoki rad etilgan bo'lsa to'xtatamiz
     st = user.get("status", "approved")
-    if not test_db.is_admin(user_tg_id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)):
         if st == "pending":
             await message.answer(
                 "⏳ <b>Sizning so'rovingiz ko'rib chiqilmoqda...</b>\n\n"

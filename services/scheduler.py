@@ -42,12 +42,13 @@ async def schedule_checker():
             # Tun rejimi tekshiruvi: 23:00 dan 07:00 gacha
             working_hours = is_working_hours()
 
-            tests = test_db.get_scheduled_tests()
+            tests = await test_db.db(test_db.get_scheduled_tests)
             
             # 1. Agar birorta ham rejalashtirilgan test bo'lmasa:
             if not tests:
+                has_active = (await test_db.db(test_db.has_any_active_test)) if not working_hours else False
                 # 15 daqiqa (yoki tunda faol test bo'lmasa 30 daqiqa) kutamiz, yangi test kiritilsa darhol uyg'onadi
-                sleep_interval = 1800 if (not working_hours and not test_db.has_any_active_test()) else 900
+                sleep_interval = 1800 if (not working_hours and not has_active) else 900
             else:
                 has_today_test = False
                 min_wait_minutes = 9999
@@ -94,7 +95,7 @@ async def schedule_checker():
 
                     # 1. ⏳ 30 daqiqa qoldi ogohlantirishi (start - 30 daqiqadan start - 10 daqiqagacha)
                     if (start_minutes - 30) <= now_minutes < (start_minutes - 10) and "30m" not in notified:
-                        test_db.mark_test_auto_notified(test_id, "30m")
+                        await test_db.db(test_db.mark_test_auto_notified, test_id, "30m")
                         clean_title = re.sub(r'\s*#[\w\d]+\s*$', '', test_title).strip() or test_title
                         msg_30m = (
                             "⏳ <b>Diqqat! Test boshlanishiga 30 daqiqa qoldi!</b>\n\n"
@@ -107,7 +108,7 @@ async def schedule_checker():
 
                     # 2. ⚠️ 10 daqiqa qoldi ogohlantirishi (start - 10 daqiqadan start gacha)
                     if (start_minutes - 10) <= now_minutes < start_minutes and "10m" not in notified:
-                        test_db.mark_test_auto_notified(test_id, "10m")
+                        await test_db.db(test_db.mark_test_auto_notified, test_id, "10m")
                         clean_title = re.sub(r'\s*#[\w\d]+\s*$', '', test_title).strip() or test_title
                         msg_10m = (
                             "⚠️ <b>Test boshlanishiga 10 daqiqa qoldi!</b>\n\n"
@@ -122,12 +123,12 @@ async def schedule_checker():
                     if start_minutes <= now_minutes < end_minutes:
                         has_active_running_test = True
                         if not is_active:
-                            test_db.set_test_active_status(test_id, 1)
+                            await test_db.db(test_db.set_test_active_status, test_id, 1)
                             is_active = True
                             log.info(f"⏰ Test #{test_id} avtomatik faollashtirildi ({sstart})")
 
                         if "started" not in notified:
-                            test_db.mark_test_auto_notified(test_id, "started")
+                            await test_db.db(test_db.mark_test_auto_notified, test_id, "started")
                             msg_started = (
                                 "🚀 <b>Test boshlandi! Barchaga omad tilaymiz.</b>\n"
                                 "Belgilangan vaqt ichida javoblarni topshirishni unutmang.\n\n"
@@ -155,7 +156,7 @@ async def schedule_checker():
 
                     # 4. ⏰ 15 daqiqa qoldi ogohlantirishi
                     if (end_minutes - 15) <= now_minutes < end_minutes and "15m" not in notified and "started" in notified:
-                        test_db.mark_test_auto_notified(test_id, "15m")
+                        await test_db.db(test_db.mark_test_auto_notified, test_id, "15m")
                         msg_15m = (
                             "⏰ <b>Diqqat, test yakunlanishiga 15 daqiqa qoldi!</b>\n\n"
                             "Qolgan javoblarni tekshirib, topshirishga shoshiling.\n\n"
@@ -168,8 +169,8 @@ async def schedule_checker():
 
                     # 5. 🔴 Tugash vaqti keldi va test hali faol bo'lsa
                     if now_minutes >= end_minutes and is_active:
-                        test_db.set_test_active_status(test_id, 0)
-                        test_db.clear_test_schedule(test_id)
+                        await test_db.db(test_db.set_test_active_status, test_id, 0)
+                        await test_db.db(test_db.clear_test_schedule, test_id)
                         log.info(f"⏰ Test #{test_id} avtomatik to'xtatildi ({send})")
 
                         msg_ended = (
@@ -208,7 +209,8 @@ async def schedule_checker():
 
                 # Agar bugun uchun test bo'lmasa:
                 if not has_today_test:
-                    sleep_interval = 1800 if (not working_hours and not test_db.has_any_active_test()) else 900
+                    has_active = (await test_db.db(test_db.has_any_active_test)) if not working_hours else False
+                    sleep_interval = 1800 if (not working_hours and not has_active) else 900
                 elif has_active_running_test:
                     sleep_interval = 60
                 elif min_wait_minutes < 9999:

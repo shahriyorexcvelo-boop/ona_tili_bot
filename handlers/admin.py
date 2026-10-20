@@ -55,11 +55,11 @@ async def admin_check_blocks_handler(message: Message):
     """
     Admin uchun: Bazadagi barcha foydalanuvchilarni tekshirib, botni bloklaganlarni bazadan to'liq o'chirish.
     """
-    if not test_db.is_admin(message.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         await message.answer("⛔️ Bu buyruq faqat bot administratori uchun!")
         return
 
-    users = test_db.get_all_users()
+    users = await test_db.db(test_db.get_all_users)
     total = len(users)
     status_msg = await message.answer(
         f"🔍 <b>Bazadagi {total} ta foydalanuvchi tekshirilmoqda...</b>\n\n"
@@ -94,7 +94,7 @@ async def admin_check_blocks_handler(message: Message):
 
 
 async def admin_warn_inactive_handler(message: Message):
-    if not test_db.is_admin(message.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         await message.answer("⛔️ Bu buyruq faqat bot administratori uchun!")
         return
     text, kb = get_warn_inactive_step1_kb()
@@ -102,7 +102,7 @@ async def admin_warn_inactive_handler(message: Message):
 
 @admin_router.callback_query(F.data == "admin_warn_inactive_menu")
 async def admin_warn_inactive_menu_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         await call.answer("Ruxsat yo'q!", show_alert=True)
         return
     text, kb = get_warn_inactive_step1_kb()
@@ -114,7 +114,7 @@ async def admin_warn_inactive_menu_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_warn_cnt_"))
 async def adm_warn_cnt_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     cnt = call.data.replace("adm_warn_cnt_", "")
     cnt_labels = {
@@ -146,7 +146,7 @@ async def adm_warn_cnt_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_warn_time_"))
 async def adm_warn_time_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     parts = call.data.replace("adm_warn_time_", "").split("_", 1)
     cnt = parts[0]
@@ -201,7 +201,7 @@ async def adm_warn_time_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_warn_send_"))
 async def adm_warn_send_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     parts = call.data.replace("adm_warn_send_", "").split("_", 1)
     cnt = parts[0]
@@ -245,10 +245,10 @@ async def adm_warn_send_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data == "admin_clean_blocked_prompt")
 async def admin_clean_blocked_prompt_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
-    users_count = len(test_db.get_all_users())
+    users_count = len((await test_db.db(test_db.get_all_users)))
     text = (
         f"🧹 <b>BOTNI BLOKLAGANLARNI TOZALASH</b>\n\n"
         f"Hozirda bazada jami: <b>{users_count} nafar</b> foydalanuvchi mavjud.\n\n"
@@ -265,7 +265,7 @@ async def admin_clean_blocked_prompt_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data == "adm_clean_blocked_start")
 async def adm_clean_blocked_start_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
     await call.answer("⏳ Tozalash boshlandi...")
@@ -305,7 +305,7 @@ async def adm_clean_blocked_start_cb(call: CallbackQuery):
 
 @admin_router.message(F.text == "➕ Yangi test yaratish")
 async def admin_create_test_text_handler(message: Message):
-    if not test_db.is_admin(message.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         return
     admin_webapp_url = f"{WEBAPP_URL}/admin.html?tg_id={message.from_user.id}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -320,7 +320,7 @@ async def admin_create_test_text_handler(message: Message):
 # 📋 Testlarni boshqarish (O'chirish, to'xtatish, vaqt)
 @admin_router.message(F.text == "📋 Testlarni boshqarish")
 async def admin_manage_tests_text_handler(message: Message):
-    if not test_db.is_admin(message.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         return
     tests = test_db.get_all_tests()
     if not tests:
@@ -344,9 +344,9 @@ async def admin_manage_tests_text_handler(message: Message):
 # 📊 Test natijalari va reyting
 @admin_router.message(F.text == "📊 Test natijalari va reyting")
 async def admin_leaderboard_text_handler(message: Message):
-    if not test_db.is_admin(message.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         return
-    tests = test_db.get_tests_with_stats()
+    tests = await test_db.db(test_db.get_tests_with_stats)
     if not tests:
         await message.answer("⚠️ Hozirda tizimda mavjud testlar yo'q.")
         return
@@ -374,7 +374,7 @@ async def admin_leaderboard_text_handler(message: Message):
 @admin_router.message(Command("admin"))
 @admin_router.message(Command("dashboard"))
 async def admin_panel_handler(message: Message):
-    if not test_db.is_admin(message.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         await message.answer("⛔️ Bu bo'lim faqat bot administratori uchun!")
         return
 
@@ -392,14 +392,14 @@ async def admin_panel_handler(message: Message):
 @admin_router.message(Command("msg"))
 async def admin_contact_user_command(message: Message, state: FSMContext):
     """Admin uchun /user <id> yoki /user buyrug'i."""
-    if not test_db.is_admin(message.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         await message.answer("⛔️ Bu buyruq faqat bot administratori uchun!")
         return
 
     parts = message.text.strip().split(maxsplit=1)
     if len(parts) > 1:
         query = parts[1].strip()
-        user = test_db.find_user(query)
+        user = await test_db.db(test_db.find_user, query)
         if user:
             await state.clear()
             try:
@@ -460,7 +460,7 @@ async def admin_contact_user_command(message: Message, state: FSMContext):
 @admin_router.callback_query(F.data == "admin_contact_user_prompt")
 async def admin_contact_user_prompt_cb(call: CallbackQuery, state: FSMContext):
     """Admin panel orqali ID so'rash oynasi."""
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         await call.answer("Ruxsat yo'q!", show_alert=True)
         return
 
@@ -484,7 +484,7 @@ async def admin_contact_user_prompt_cb(call: CallbackQuery, state: FSMContext):
 @admin_router.message(ContactUserState.waiting_for_user_id)
 async def admin_process_contact_user_id(message: Message, state: FSMContext):
     """Admin ID yoki Username kiritganda qidirib profil va chat havolalarini ko'rsatish."""
-    if not test_db.is_admin(message.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         await state.clear()
         return
 
@@ -504,7 +504,7 @@ async def admin_process_contact_user_id(message: Message, state: FSMContext):
         await message.answer("⚠️ Iltimos, Telegram ID yoki username matnini kiriting:")
         return
 
-    user = test_db.find_user(query)
+    user = await test_db.db(test_db.find_user, query)
     if not user:
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_back_to_menu")]
@@ -553,11 +553,11 @@ async def admin_process_contact_user_id(message: Message, state: FSMContext):
 @admin_router.callback_query(F.data.startswith("adm_view_user_"))
 async def adm_view_user_cb(call: CallbackQuery, state: FSMContext):
     """Foydalanuvchi kartasini qayta ko'rsatish."""
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     await state.clear()
     target_tg_id = int(call.data.replace("adm_view_user_", ""))
-    user = test_db.find_user(target_tg_id)
+    user = await test_db.db(test_db.find_user, target_tg_id)
     if not user:
         await call.answer("Foydalanuvchi topilmadi!", show_alert=True)
         return
@@ -572,12 +572,12 @@ async def adm_view_user_cb(call: CallbackQuery, state: FSMContext):
 @admin_router.callback_query(F.data.startswith("adm_msg_user_"))
 async def adm_msg_user_cb(call: CallbackQuery, state: FSMContext):
     """Foydalanuvchiga bot nomidan xabar yozish holatiga o'tish."""
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         await call.answer("Ruxsat yo'q!", show_alert=True)
         return
 
     target_tg_id = int(call.data.replace("adm_msg_user_", ""))
-    user = test_db.find_user(target_tg_id)
+    user = await test_db.db(test_db.find_user, target_tg_id)
     fullname = user.get("fullname", f"ID: {target_tg_id}") if user else f"ID: {target_tg_id}"
 
     await state.set_state(ContactUserState.waiting_for_message)
@@ -602,7 +602,7 @@ async def adm_msg_user_cb(call: CallbackQuery, state: FSMContext):
 @admin_router.message(ContactUserState.waiting_for_message)
 async def adm_send_user_message_handler(message: Message, state: FSMContext):
     """Admin yozgan xabarni foydalanuvchiga yetkazish."""
-    if not test_db.is_admin(message.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         await state.clear()
         return
 
@@ -652,7 +652,7 @@ async def adm_send_user_message_handler(message: Message, state: FSMContext):
         else:
             await message.send_copy(chat_id=target_tg_id, reply_markup=user_reply_kb)
 
-        user_info = test_db.find_user(target_tg_id)
+        user_info = await test_db.db(test_db.find_user, target_tg_id)
         uname = (user_info.get("username") or "").strip().lstrip("@") if user_info else ""
         buttons = []
         if uname:
@@ -675,7 +675,7 @@ async def adm_send_user_message_handler(message: Message, state: FSMContext):
     except Exception as e:
         err_msg = str(e)
         log.warning(f"Error sending message to user {target_tg_id}: {err_msg}")
-        user_info = test_db.find_user(target_tg_id)
+        user_info = await test_db.db(test_db.find_user, target_tg_id)
         uname = (user_info.get("username") or "").strip().lstrip("@") if user_info else ""
         buttons = []
         if uname:
@@ -704,7 +704,7 @@ async def adm_send_user_message_handler(message: Message, state: FSMContext):
 @admin_router.callback_query(F.data.startswith("adm_send_contact_"))
 async def adm_send_contact_cb(call: CallbackQuery):
     """Admin uchun foydalanuvchining Telegram kontakt kartasini chatga yuborish."""
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         await call.answer("⛔️ Ruxsat yo'q!", show_alert=True)
         return
     parts = call.data.split("_")
@@ -713,7 +713,7 @@ async def adm_send_contact_cb(call: CallbackQuery):
     except Exception:
         await call.answer("Xatolik: ID topilmadi", show_alert=True)
         return
-    user = test_db.find_user(target_tg_id)
+    user = await test_db.db(test_db.find_user, target_tg_id)
     if not user:
         await call.answer("Foydalanuvchi topilmadi!", show_alert=True)
         return
@@ -749,7 +749,7 @@ async def adm_send_contact_cb(call: CallbackQuery):
 # 1. Yangi test yaratish (Faqat Admin Mini App orqali)
 @admin_router.callback_query(F.data == "admin_add_test")
 async def admin_start_add_test(call: CallbackQuery, state: FSMContext):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     await state.clear()
     from .user import admin_webapp_info_cb
@@ -759,7 +759,7 @@ async def admin_start_add_test(call: CallbackQuery, state: FSMContext):
 # 2. Testlarni boshqarish (O'chirish, To'xtatish/Yoqish, Vaqt)
 @admin_router.callback_query(F.data == "admin_manage_tests")
 async def admin_manage_tests(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
     tests = test_db.get_all_tests()
@@ -798,7 +798,7 @@ async def admin_manage_tests(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_mng_test_"))
 async def admin_manage_test_card(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[3])
     t = test_db.get_test_by_id(test_id)
@@ -844,10 +844,10 @@ async def admin_manage_test_card(call: CallbackQuery):
 # Test holatini o'zgartirish (Toggle Active)
 @admin_router.callback_query(F.data.startswith("toggle_test_"))
 async def admin_toggle_test_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[2])
-    new_status = test_db.toggle_test_status(test_id)
+    new_status = await test_db.db(test_db.toggle_test_status, test_id)
     if new_status is not None:
         status_text = "🟢 Faol" if new_status == 1 else "🔴 To'xtatildi"
         await call.answer(f"Test holati: {status_text}", show_alert=True)
@@ -859,7 +859,7 @@ async def admin_toggle_test_cb(call: CallbackQuery):
 # Test vaqtini belgilash prompt
 @admin_router.callback_query(F.data.startswith("set_time_prompt_"))
 async def admin_set_time_prompt(call: CallbackQuery, state: FSMContext):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[3])
     await state.update_data(target_test_id=test_id)
@@ -883,7 +883,7 @@ async def admin_save_time_limit(message: Message, state: FSMContext):
     test_id = data.get("target_test_id")
     try:
         minutes = int(message.text.strip())
-        test_db.update_test_time_limit(test_id, minutes)
+        await test_db.db(test_db.update_test_time_limit, test_id, minutes)
         await state.clear()
         time_text = f"{minutes} daqiqa" if minutes > 0 else "Cheksiz"
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -897,10 +897,10 @@ async def admin_save_time_limit(message: Message, state: FSMContext):
 # Testni o'chirish
 @admin_router.callback_query(F.data.startswith("del_test_confirm_"))
 async def admin_delete_test_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[3])
-    ok = test_db.delete_test(test_id)
+    ok = await test_db.db(test_db.delete_test, test_id)
     if ok:
         await call.answer("🗑 Test muvaffaqiyatli o'chirildi!", show_alert=True)
     else:
@@ -910,11 +910,11 @@ async def admin_delete_test_cb(call: CallbackQuery):
 # ── TEZKOR FOYDALANUVCHI TASDIQLASH / RAD ETISH HANDLERLARI ──
 @admin_router.callback_query(F.data.startswith("user_quick_approve_"))
 async def user_quick_approve_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         await call.answer("Siz admin emassiz!", show_alert=True)
         return
     uid = int(call.data.split("_")[3])
-    u = test_db.get_user(uid)
+    u = await test_db.db(test_db.get_user, uid)
 
     # Agar allaqachon hal qilingan bo'lsa — xabar chiqar, qayta ishlamasin
     if u and u.get("status") in ["approved", "rejected"]:
@@ -933,7 +933,7 @@ async def user_quick_approve_cb(call: CallbackQuery):
     uname = u["fullname"] if u else f"ID: {uid}"
     admin_name = call.from_user.full_name or "Admin"
 
-    test_db.approve_user(uid)
+    await test_db.db(test_db.approve_user, uid)
 
     # Ushbu admindagi xabarni yangilash
     try:
@@ -976,11 +976,11 @@ async def user_quick_approve_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("user_quick_reject_"))
 async def user_quick_reject_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         await call.answer("Siz admin emassiz!", show_alert=True)
         return
     uid = int(call.data.split("_")[3])
-    u = test_db.get_user(uid)
+    u = await test_db.db(test_db.get_user, uid)
 
     # Agar allaqachon hal qilingan bo'lsa
     if u and u.get("status") in ["approved", "rejected"]:
@@ -998,7 +998,7 @@ async def user_quick_reject_cb(call: CallbackQuery):
     uname = u["fullname"] if u else f"ID: {uid}"
     admin_name = call.from_user.full_name or "Admin"
 
-    test_db.reject_user(uid)
+    await test_db.db(test_db.reject_user, uid)
 
     # Ushbu admindagi xabarni yangilash
     try:
@@ -1039,13 +1039,13 @@ async def user_quick_reject_cb(call: CallbackQuery):
 async def user_req_access_cb(call: CallbackQuery):
     """O'quvchi tomonidan ruxsat so'rash tugmasi bosilganda - adminga so'rov yuborish (avto-tasdiqlash EMAS)"""
     uid = int(call.data.split("_")[3])
-    u = test_db.get_user(uid)
-    can_req, diff_h = test_db.can_request_access(uid, cooldown_hours=6)
+    u = await test_db.db(test_db.get_user, uid)
+    can_req, diff_h = await test_db.db(test_db.can_request_access, uid, cooldown_hours=6)
     if not can_req:
         await call.answer("⏳ So'rovingiz ko'rib chiqilmoqda. Iltimos, admin javobini kuting.", show_alert=True)
         return
 
-    test_db.touch_admin_deleted_request(uid)
+    await test_db.db(test_db.touch_admin_deleted_request, uid)
     uname = u["fullname"] if u else f"ID: {uid}"
     username = f"@{u['username']}" if (u and u.get('username')) else "Mavjud emas"
 
@@ -1081,7 +1081,7 @@ async def user_req_access_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("ask_pdf_"))
 async def ask_pdf_cb(call: CallbackQuery, state: FSMContext):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[2])
     await state.update_data(test_id=test_id)
@@ -1094,7 +1094,7 @@ async def ask_pdf_cb(call: CallbackQuery, state: FSMContext):
 
 @admin_router.callback_query(F.data.startswith("no_pdf_"))
 async def no_pdf_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     await call.message.edit_text(
         f"{call.message.text}\n\n❌ <i>PDF fayl yuklanmadi. Test asosiysiz qabul qilindi.</i>",
@@ -1103,7 +1103,7 @@ async def no_pdf_cb(call: CallbackQuery):
 
 @admin_router.message(UploadPostPdfState.pdf_file, F.document)
 async def process_post_create_pdf(message: Message, state: FSMContext):
-    if not test_db.is_admin(message.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         await message.answer("Sizda ushbu amalni bajarish uchun admin ruxsati yo'q.")
         await state.clear()
         return
@@ -1118,7 +1118,7 @@ async def process_post_create_pdf(message: Message, state: FSMContext):
     pdf_file_id = message.document.file_id
     pdf_file_name = message.document.file_name
 
-    test_db.update_test_pdf(test_id, pdf_file_id, pdf_file_name)
+    await test_db.db(test_db.update_test_pdf, test_id, pdf_file_id, pdf_file_name)
     await message.answer(f"✅ <b>PDF fayl muvaffaqiyatli biriktirildi!</b>\n📄 Fayl: {pdf_file_name}")
     await state.clear()
 
@@ -1129,7 +1129,7 @@ async def process_post_create_pdf(message: Message, state: FSMContext):
 @admin_router.message(Command("watermark"))
 async def admin_pdf_watermark_info_handler(event: Message | CallbackQuery, state: FSMContext):
     user_tg_id = event.from_user.id
-    if not (test_db.is_admin(user_tg_id, ADMIN_ID) or user_tg_id in get_config_admin_ids()):
+    if not ((await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)) or user_tg_id in get_config_admin_ids()):
         if isinstance(event, CallbackQuery):
             await event.answer("⛔️ Faqat administratorlar uchun!", show_alert=True)
         else:
@@ -1174,7 +1174,7 @@ async def admin_pdf_watermark_handler(message: Message, state: FSMContext):
         return
 
     user_tg_id = message.from_user.id
-    is_adm = test_db.is_admin(user_tg_id, ADMIN_ID) or (user_tg_id in get_config_admin_ids())
+    is_adm = (await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)) or (user_tg_id in get_config_admin_ids())
     if not is_adm:
         await message.answer("⛔️ Sizda ushbu funksiyadan foydalanish huquqi yo'q.")
         return
@@ -1239,7 +1239,7 @@ async def admin_pdf_watermark_handler(message: Message, state: FSMContext):
 # 3. Foydalanuvchilar boshqaruvi to'liq Asosiy Web Ilovaga (Main App) ko'chirildi
 @admin_router.callback_query(F.data.in_(["admin_view_users", "admin_webapp_redirect_info"]))
 async def admin_view_users_redirect_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     text = (
         "🌐 <b>Foydalanuvchilar boshqaruvi Asosiy Web Ilovaga (Main App) ko'chirildi!</b>\n\n"
@@ -1264,10 +1264,10 @@ async def adm_legacy_users_redirect_cb(call: CallbackQuery):
 # 4. Adminlar boshqaruvi
 @admin_router.callback_query(F.data == "admin_manage_admins")
 async def admin_manage_admins_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
-    admins = test_db.get_all_admins()
+    admins = await test_db.db(test_db.get_all_admins)
     text = "👑 <b>Adminlar ro'yxati:</b>\n\n"
     for idx, a in enumerate(admins, 1):
         is_super = " (Bosh Admin)" if a["tg_id"] == ADMIN_ID else ""
@@ -1323,11 +1323,11 @@ async def admin_add_new_prompt_cb(call: CallbackQuery, state: FSMContext):
 async def admin_save_new_admin(message: Message, state: FSMContext):
     try:
         new_tg_id = int(message.text.strip())
-        user_info = test_db.get_user(new_tg_id)
+        user_info = await test_db.db(test_db.get_user, new_tg_id)
         fullname = user_info["fullname"] if user_info else "Admin"
         username = user_info["username"] if user_info else ""
 
-        test_db.add_admin(new_tg_id, fullname, username, added_by=message.from_user.id)
+        await test_db.db(test_db.add_admin, new_tg_id, fullname, username, added_by=message.from_user.id)
         await state.clear()
         await message.answer(
             f"✅ <b>Yangi admin tayinlandi!</b>\n\n"
@@ -1351,7 +1351,7 @@ async def admin_toggle_maint_prompt_cb(call: CallbackQuery):
         await call.answer("⛔️ Faqat Bosh Admin texnik profilaktika rejimini boshqarishi mumkin!", show_alert=True)
         return
 
-    is_maint = test_db.is_maintenance_mode()
+    is_maint = await test_db.db(test_db.is_maintenance_mode)
     if not is_maint:
         text = (
             "🛠 <b>TEXNIK PROFILAKTIKA REJIMINI YOQISH</b>\n\n"
@@ -1389,7 +1389,7 @@ async def adm_maint_set_on_cb(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         await call.answer("Faqat Bosh Admin!", show_alert=True)
         return
-    test_db.set_maintenance_mode(True)
+    await test_db.db(test_db.set_maintenance_mode, True)
     if call.data == "adm_maint_set_on_notify":
         await call.answer("⏳ Xabar tarqatilmoqda...")
         status_msg = await call.message.answer("⏳ O'quvchilarga texnik profilaktika boshlanganligi haqida xabar yuborilmoqda...")
@@ -1418,7 +1418,7 @@ async def adm_maint_set_off_cb(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         await call.answer("Faqat Bosh Admin!", show_alert=True)
         return
-    test_db.set_maintenance_mode(False)
+    await test_db.db(test_db.set_maintenance_mode, False)
     if call.data == "adm_maint_set_off_notify":
         await call.answer("⏳ Xabar tarqatilmoqda...")
         status_msg = await call.message.answer("⏳ O'quvchilarga texnik ishlar yakunlanganligi haqida xabar yuborilmoqda...")
@@ -1445,13 +1445,13 @@ async def adm_maint_set_off_cb(call: CallbackQuery):
 # ── YANGI FOYDALANUVCHILAR QABULINI BOSHQARISH (OCHISH / YOPISH) ──
 @admin_router.callback_query(F.data == "admin_toggle_registration")
 async def admin_toggle_registration_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         await call.answer("⛔️ Faqat administrator uchun!", show_alert=True)
         return
 
-    current = test_db.is_registration_open()
+    current = await test_db.db(test_db.is_registration_open)
     new_state = not current
-    test_db.set_registration_open(new_state)
+    await test_db.db(test_db.set_registration_open, new_state)
 
     if new_state:
         alert_msg = "✅ Yangi o'quvchilar qabuli OCHILDI!\nEndi yangi o'quvchilar yana bemalol ro'yxatdan o'tishlari mumkin."
@@ -1530,11 +1530,11 @@ BROADCAST_TEMPLATES = {
 
 @admin_router.callback_query(F.data == "admin_broadcast_menu")
 async def admin_broadcast_menu_cb(call: CallbackQuery, state: FSMContext):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         await call.answer("Siz admin emassiz!", show_alert=True)
         return
     await state.clear()
-    users_count = len(test_db.get_broadcast_users())
+    users_count = len((await test_db.db(test_db.get_broadcast_users)))
     text = (
         f"📢 <b>O'QUVCHILARGA XABAR YUBORISH BO'LIMI</b>\n\n"
         f"👥 <b>Qabul qiluvchilar:</b> {users_count} nafar faol foydalanuvchi\n\n"
@@ -1576,7 +1576,7 @@ async def admin_broadcast_menu_cb(call: CallbackQuery, state: FSMContext):
 
 @admin_router.callback_query(F.data.startswith("adm_bc_tmpl_"))
 async def adm_bc_tmpl_preview_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     tmpl_key = call.data.replace("adm_bc_tmpl_", "")
     tmpl = BROADCAST_TEMPLATES.get(tmpl_key)
@@ -1602,7 +1602,7 @@ async def adm_bc_tmpl_preview_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_bc_send_tmpl_"))
 async def adm_bc_send_tmpl_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     tmpl_key = call.data.replace("adm_bc_send_tmpl_", "")
     tmpl = BROADCAST_TEMPLATES.get(tmpl_key)
@@ -1630,7 +1630,7 @@ async def adm_bc_send_tmpl_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data == "adm_bc_preview_start")
 async def adm_bc_preview_start_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     text = (
         f"📋 <b>XABAR KO'RINISHI (PREVIEW):</b>\n\n"
@@ -1648,7 +1648,7 @@ async def adm_bc_preview_start_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data == "adm_bc_preview_end")
 async def adm_bc_preview_end_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     text = (
         f"📋 <b>XABAR KO'RINISHI (PREVIEW):</b>\n\n"
@@ -1666,7 +1666,7 @@ async def adm_bc_preview_end_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data == "adm_bc_send_start")
 async def adm_bc_send_start_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     await call.answer("⏳ Xabar tarqatilmoqda...")
     status_msg = await call.message.answer("⏳ Barcha o'quvchilarga xabar yuborilmoqda...")
@@ -1685,7 +1685,7 @@ async def adm_bc_send_start_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data == "adm_bc_send_end")
 async def adm_bc_send_end_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     await call.answer("⏳ Xabar tarqatilmoqda...")
     status_msg = await call.message.answer("⏳ Barcha o'quvchilarga xabar yuborilmoqda...")
@@ -1736,7 +1736,7 @@ def get_broadcast_item_summary(message: Message) -> str:
 
 @admin_router.callback_query(F.data == "adm_bc_custom_input")
 async def adm_bc_custom_input_cb(call: CallbackQuery, state: FSMContext):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     await state.clear()
     await state.set_state(BroadcastState.waiting_for_message)
@@ -1804,7 +1804,7 @@ async def adm_bc_receive_custom_msg(message: Message, state: FSMContext):
 
 @admin_router.callback_query(F.data == "adm_bc_custom_clear", BroadcastState.waiting_for_message)
 async def adm_bc_custom_clear_cb(call: CallbackQuery, state: FSMContext):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     await state.update_data(messages_list=[])
     text = (
@@ -1822,7 +1822,7 @@ async def adm_bc_custom_clear_cb(call: CallbackQuery, state: FSMContext):
 
 @admin_router.callback_query(F.data == "adm_bc_custom_confirm")
 async def adm_bc_custom_confirm_cb(call: CallbackQuery, state: FSMContext):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
     data = await state.get_data()
@@ -1861,7 +1861,7 @@ async def adm_bc_custom_confirm_cb(call: CallbackQuery, state: FSMContext):
 @admin_router.callback_query(F.data.startswith("adm_bc_del_"))
 async def adm_bc_del_cb(call: CallbackQuery):
     """Aniq bir batch bo'yicha yuborilgan xabarlarni barcha o'quvchilar chatidan tezkor o'chirish."""
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         await call.answer("Siz admin emassiz!", show_alert=True)
         return
     batch_id = call.data.replace("adm_bc_del_", "").strip()
@@ -1918,9 +1918,9 @@ async def adm_bc_del_cb(call: CallbackQuery):
 @admin_router.callback_query(F.data == "adm_bc_history_menu")
 async def adm_bc_history_menu_cb(call: CallbackQuery):
     """Yaqinda yuborilgan xabarlar ro'yxati va ularni o'chirish menyusi."""
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
-    recent = test_db.get_recent_broadcasts(8)
+    recent = await test_db.db(test_db.get_recent_broadcasts, 8)
     if not recent:
         text = (
             "📭 <b>Yuborilgan xabarlar tarixi bo'sh.</b>\n\n"
@@ -1963,7 +1963,7 @@ async def adm_bc_history_menu_cb(call: CallbackQuery):
 @admin_router.callback_query(F.data == "adm_bc_clean_past_prompt")
 async def adm_bc_clean_past_prompt_cb(call: CallbackQuery):
     """Oldingi xabarlarni barcha o'quvchilar chatidan tozalash taklifi."""
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     text = (
         "🧹 <b>OLDINGI XABARLARNI TOZALASH (DEEP CLEAN)</b>\n\n"
@@ -1989,7 +1989,7 @@ async def adm_bc_clean_past_prompt_cb(call: CallbackQuery):
 @admin_router.callback_query(F.data.startswith("adm_bc_clean_"))
 async def adm_bc_clean_action_cb(call: CallbackQuery):
     """Barcha o'quvchilardan so'nggi N ta xabarni o'chirish amali."""
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     try:
         count = int(call.data.replace("adm_bc_clean_", "").strip())
@@ -2030,7 +2030,7 @@ async def adm_bc_clean_action_cb(call: CallbackQuery):
     except asyncio.TimeoutError:
         log.warning("delete_recent_bot_messages_from_all_users timeout reached")
         deleted_total = 0
-        checked_users = len(test_db.get_broadcast_users())
+        checked_users = len((await test_db.db(test_db.get_broadcast_users)))
 
     res_text = (
         f"🧹 <b>TOZALASH MUVAFFAQIYATLI YAKUNLANDI!</b>\n\n"
@@ -2050,10 +2050,10 @@ async def adm_bc_clean_action_cb(call: CallbackQuery):
 # 5. Natijalar va hisobotlar boshqaruvi
 @admin_router.callback_query(F.data == "admin_leaderboard")
 async def admin_leaderboard(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
-    tests = test_db.get_tests_with_stats()
+    tests = await test_db.db(test_db.get_tests_with_stats)
     if not tests:
         text = "⚠️ Hozirda tizimda mavjud testlar yo'q."
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -2090,7 +2090,7 @@ async def admin_leaderboard(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_tstat_"))
 async def admin_test_stats_detail(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
     test_id = int(call.data.split("_")[2])
@@ -2099,14 +2099,14 @@ async def admin_test_stats_detail(call: CallbackQuery):
         await call.answer("Test topilmadi!", show_alert=True)
         return
 
-    results = test_db.get_test_results_leaderboard(test_id)
+    results = await test_db.db(test_db.get_test_results_leaderboard, test_id)
     count = len(results)
     avg_score = 0
     if count > 0:
         avg_score = round(sum(r['score'] for r in results) / count, 1)
 
     is_active = (test.get("is_active", 1) == 1)
-    is_pub = test_db.is_test_results_published(test_id)
+    is_pub = await test_db.db(test_db.is_test_results_published, test_id)
 
     status_badge = "🟢 Javoblar qabul qilinmoqda" if is_active else "🔴 Javoblar qabul qilish to'xtatilgan"
     pub_badge = "📢 Natijalar e'lon qilingan" if is_pub else "🔒 Yashirin (O'quvchilarga «Javoblar tekshirilmoqda» ko'rinadi)"
@@ -2180,7 +2180,7 @@ async def admin_test_stats_detail(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_set_yt_"))
 async def adm_set_yt_cb(call: CallbackQuery, state: FSMContext):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     await state.clear()
     test_id = int(call.data.split("_")[3])
@@ -2208,7 +2208,7 @@ async def adm_set_yt_cb(call: CallbackQuery, state: FSMContext):
 
 @admin_router.callback_query(F.data.startswith("adm_input_yt_"))
 async def adm_input_yt_cb(call: CallbackQuery, state: FSMContext):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[3])
     await state.update_data(yt_test_id=test_id)
@@ -2222,7 +2222,7 @@ async def adm_input_yt_cb(call: CallbackQuery, state: FSMContext):
 
 @admin_router.message(SetYoutubeState.waiting_for_url)
 async def adm_save_yt_msg(message: Message, state: FSMContext):
-    if not test_db.is_admin(message.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         return
     if message.text and message.text.strip().lower() == "/cancel":
         await state.clear()
@@ -2234,7 +2234,7 @@ async def adm_save_yt_msg(message: Message, state: FSMContext):
     if not ("youtube.com" in url or "youtu.be" in url or url.startswith("http")):
         await message.answer("⚠️ Iltimos, to'g'ri YouTube havolasini (URL) yuboring (masalan: https://youtu.be/...):")
         return
-    test_db.set_test_youtube_url(test_id, url)
+    await test_db.db(test_db.set_test_youtube_url, test_id, url)
     await state.clear()
     test = test_db.get_test_by_id(test_id)
     title = test['title'] if test else f"#{test_id}"
@@ -2246,10 +2246,10 @@ async def adm_save_yt_msg(message: Message, state: FSMContext):
 
 @admin_router.callback_query(F.data.startswith("adm_del_yt_"))
 async def adm_del_yt_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[3])
-    test_db.set_test_youtube_url(test_id, "")
+    await test_db.db(test_db.set_test_youtube_url, test_id, "")
     await call.answer("🗑 Video tahlil havolasi o'chirildi!", show_alert=True)
     call.data = f"adm_tstat_{test_id}"
     await admin_test_stats_detail(call)
@@ -2257,7 +2257,7 @@ async def adm_del_yt_cb(call: CallbackQuery):
 # Testni o'chirishni tasdiqlash
 @admin_router.callback_query(F.data.startswith("adm_del_test_prompt_"))
 async def adm_del_test_prompt_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[4])
     test = test_db.get_test_by_id(test_id)
@@ -2283,10 +2283,10 @@ async def adm_del_test_prompt_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_del_test_exec_"))
 async def adm_del_test_exec_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[4])
-    ok = test_db.delete_test(test_id)
+    ok = await test_db.db(test_db.delete_test, test_id)
     if ok:
         await call.answer("🗑 Test muvaffaqiyatli o'chirildi!", show_alert=True)
         call.data = "admin_leaderboard"
@@ -2297,10 +2297,10 @@ async def adm_del_test_exec_cb(call: CallbackQuery):
 # Javob qabul qilishni boshlash / to'xtatish
 @admin_router.callback_query(F.data.startswith("toggle_test_tstat_"))
 async def admin_toggle_test_tstat_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[3])
-    new_status = test_db.toggle_test_status(test_id)
+    new_status = await test_db.db(test_db.toggle_test_status, test_id)
     if new_status is not None:
         status_text = "🟢 Javoblar qabul qilinmoqda" if new_status == 1 else "🔴 Javoblar to'xtatildi"
         try:
@@ -2318,11 +2318,11 @@ async def admin_toggle_test_tstat_cb(call: CallbackQuery):
 # Natijalarni qayta yashirish (o'quvchilarga yana "tekshirilmoqda" qilish)
 @admin_router.callback_query(F.data.startswith("adm_hide_results_"))
 async def admin_hide_results_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[3])
-    test_db.set_test_results_published(test_id, False)
-    test_db.set_test_active_status(test_id, 1)
+    await test_db.db(test_db.set_test_results_published, test_id, False)
+    await test_db.db(test_db.set_test_active_status, test_id, 1)
     await call.answer("🔒 Natijalar yashirildi va test faollashtirildi! Endi o'quvchilarga «Javoblar tekshirilmoqda» ko'rinadi.", show_alert=True)
     call.data = f"adm_tstat_{test_id}"
     await admin_test_stats_detail(call)
@@ -2331,7 +2331,7 @@ async def admin_hide_results_cb(call: CallbackQuery):
 @admin_router.callback_query(F.data.startswith("adm_eval_prompt_"))
 @admin_router.callback_query(F.data.startswith("adm_broadcast_results_"))
 async def admin_eval_prompt_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
     parts = call.data.split("_")
@@ -2502,7 +2502,7 @@ async def no_video_analysis_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_broadcast_rasch_"))
 async def admin_broadcast_rasch_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
     test_id = int(call.data.split("_")[3])
@@ -2516,7 +2516,7 @@ async def admin_broadcast_rasch_cb(call: CallbackQuery):
         f"⏳ <b>«{test['title']}»</b> testi to'xtatilmoqda, Rasch modeli (JMLE) bo'yicha yakuniy ballar kalibrlanmoqda va o'quvchilarga shaxsiy natijalar yuborilmoqda..."
     )
 
-    submissions = test_db.get_test_submissions_with_users(test_id)
+    submissions = await test_db.db(test_db.get_test_submissions_with_users, test_id)
     if not submissions:
         await status_msg.edit_text(
             f"⚠️ <b>«{test['title']}»</b> testini hali hech kim topshirmagan!",
@@ -2539,16 +2539,16 @@ async def admin_broadcast_rasch_cb(call: CallbackQuery):
 
     try:
         # 1. Testni to'xtatish (is_active = 0)
-        test_db.set_test_active_status(test_id, 0)
+        await test_db.db(test_db.set_test_active_status, test_id, 0)
 
         # 2. Rasch modeli orqali yakuniy kalibrlash va bazani yangilash
-        rasch_res = test_db.evaluate_test_rasch(test_id, auto_update_db=True)
+        rasch_res = await test_db.db(test_db.evaluate_test_rasch, test_id, auto_update_db=True)
 
         # 3. Test natijalarini e'lon qilingan holatga o'tkazish
-        test_db.set_test_results_published(test_id, True)
+        await test_db.db(test_db.set_test_results_published, test_id, True)
 
         # 4. Topshirgan barcha o'quvchilarga shaxsiy Telegram xabarini yuborish
-        submissions = test_db.get_test_submissions_with_users(test_id)
+        submissions = await test_db.db(test_db.get_test_submissions_with_users, test_id)
         sent_count = 0
         fail_count = 0
 
@@ -2596,7 +2596,7 @@ async def admin_broadcast_rasch_cb(call: CallbackQuery):
 # 2. Standart baholash (To'g'ri javoblar soni) bo'yicha e'lon qilish
 @admin_router.callback_query(F.data.startswith("adm_broadcast_std_"))
 async def admin_broadcast_std_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
     test_id = int(call.data.split("_")[3])
@@ -2610,7 +2610,7 @@ async def admin_broadcast_std_cb(call: CallbackQuery):
         f"⏳ <b>«{test['title']}»</b> testi to'xtatilmoqda va standart to'g'ri javoblar soni bo'yicha natijalar yuborilmoqda..."
     )
 
-    submissions = test_db.get_test_submissions_with_users(test_id)
+    submissions = await test_db.db(test_db.get_test_submissions_with_users, test_id)
     if not submissions:
         await status_msg.edit_text(
             f"⚠️ <b>«{test['title']}»</b> testini hali hech kim topshirmagan!",
@@ -2622,10 +2622,10 @@ async def admin_broadcast_std_cb(call: CallbackQuery):
 
     try:
         # 1. Testni to'xtatish (is_active = 0)
-        test_db.set_test_active_status(test_id, 0)
+        await test_db.db(test_db.set_test_active_status, test_id, 0)
 
         # 2. Test natijalarini e'lon qilingan holatga o'tkazish
-        test_db.set_test_results_published(test_id, True)
+        await test_db.db(test_db.set_test_results_published, test_id, True)
 
         # 3. Topshirgan barcha o'quvchilarga shaxsiy Telegram xabarini yuborish
         sent_count = 0
@@ -2664,27 +2664,27 @@ async def admin_broadcast_std_cb(call: CallbackQuery):
 # ── KECH TOPSHIRILGAN NATIJANI TESTGA QO'SHISH YOKI RAD ETISH ──
 @admin_router.callback_query(F.data.startswith("adm_accept_late_"))
 async def admin_accept_late_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     sub_id = int(call.data.split("_")[3])
-    sub = test_db.get_submission_by_id(sub_id)
+    sub = await test_db.db(test_db.get_submission_by_id, sub_id)
     if not sub:
         await call.answer("Topshiriq topilmadi!", show_alert=True)
         return
 
     # 1. Bazada statusni yangilash: is_late = 0
-    test_db.set_submission_late_status(sub_id, 0)
+    await test_db.db(test_db.set_submission_late_status, sub_id, 0)
     test_id = sub["test_id"]
     test = test_db.get_test_by_id(test_id)
 
     # 2. Agar test natijalari e'lon qilingan bo'lsa, Rasch va PDF ni yangilash
     if test and test.get("results_published", 0) == 1:
         try:
-            test_db.evaluate_test_rasch(test_id, auto_update_db=True)
+            await test_db.db(test_db.evaluate_test_rasch, test_id, auto_update_db=True)
         except Exception as e:
             log.warning(f"Rasch re-eval error: {e}")
         try:
-            test_db.generate_test_results_pdf(test_id)
+            await test_db.db(test_db.generate_test_results_pdf, test_id)
         except Exception as e:
             log.warning(f"PDF regeneration error: {e}")
 
@@ -2692,7 +2692,7 @@ async def admin_accept_late_cb(call: CallbackQuery):
     uid = sub.get("user_tg_id")
     if uid:
         try:
-            updated_sub = test_db.get_submission_by_id(sub_id) or sub
+            updated_sub = (await test_db.db(test_db.get_submission_by_id, sub_id)) or sub
             msg_text, reply_kb = build_student_result_message(updated_sub, test, eval_type="rasch")
             await bot.send_message(
                 chat_id=uid,
@@ -2719,16 +2719,16 @@ async def admin_accept_late_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_reject_late_"))
 async def admin_reject_late_cb(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     sub_id = int(call.data.split("_")[3])
-    sub = test_db.get_submission_by_id(sub_id)
+    sub = await test_db.db(test_db.get_submission_by_id, sub_id)
     if not sub:
         await call.answer("Topshiriq topilmadi!", show_alert=True)
         return
 
     # 2 = rad etilgan
-    test_db.set_submission_late_status(sub_id, 2)
+    await test_db.db(test_db.set_submission_late_status, sub_id, 2)
 
     try:
         cur_html = call.message.html_text or call.message.text or ""
@@ -2742,7 +2742,7 @@ async def admin_reject_late_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_rasch_"))
 async def admin_test_rasch_eval(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
     test_id = int(call.data.split("_")[2])
@@ -2754,7 +2754,7 @@ async def admin_test_rasch_eval(call: CallbackQuery):
     await call.answer("⏳ Rasch modeli hisoblanmoqda...")
     status_msg = await call.message.answer("⏳ <i>Rasch JMLE modeli bo'yicha savollar qiyinligi va o'quvchilar qobiliyati hisoblanmoqda...</i>")
 
-    res = test_db.evaluate_test_rasch(test_id, auto_update_db=True)
+    res = await test_db.db(test_db.evaluate_test_rasch, test_id, auto_update_db=True)
     if not res or not res.get("students"):
         await status_msg.edit_text(
             f"⚠️ <b>«{test['title']}»</b> testi uchun Rasch modelini hisoblashning imkoni bo'lmadi.\n\n"
@@ -2767,7 +2767,7 @@ async def admin_test_rasch_eval(call: CallbackQuery):
     items = res.get("items", [])
 
     is_active = (test.get("is_active", 1) == 1)
-    is_pub = test_db.is_test_results_published(test_id)
+    is_pub = await test_db.db(test_db.is_test_results_published, test_id)
 
     status_note = ""
     if is_active or not is_pub:
@@ -2796,7 +2796,7 @@ async def admin_test_rasch_eval(call: CallbackQuery):
 
     for idx, s in enumerate(students[:25], 1):
         sid = s.get('student_id')
-        u = test_db.get_user(sid) if sid else None
+        u = await test_db.db(test_db.get_user, sid) if sid else None
         name = u['fullname'] if u else f"ID: {sid}"
         theta_val = s.get('theta', 0.0)
         text += f"<b>{idx}. {name}</b>: <b>{s['final_score']} ball</b> [🎖 <b>{s['grade']}</b>] (θ={theta_val:+.2f})\n"
@@ -2814,7 +2814,7 @@ async def admin_test_rasch_eval(call: CallbackQuery):
 @admin_router.callback_query(F.data.startswith("adm_item_diag_"))
 async def admin_item_diag_cb(call: CallbackQuery):
     """Admin uchun savollarning qiyinligi va shovqin (infit/outfit) tahlili."""
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[3])
     test = test_db.get_test_by_id(test_id)
@@ -2822,7 +2822,7 @@ async def admin_item_diag_cb(call: CallbackQuery):
         await call.answer("Test topilmadi!", show_alert=True)
         return
 
-    res = test_db.evaluate_test_rasch(test_id)
+    res = await test_db.db(test_db.evaluate_test_rasch, test_id)
     if not res or not res.get("items"):
         await call.answer("Tahlil uchun kamida 2 nafar o'quvchi topshirgan bo'lishi kerak!", show_alert=True)
         return
@@ -2881,7 +2881,7 @@ async def admin_item_diag_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_restxt_"))
 async def admin_test_res_text(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
     test_id = int(call.data.split("_")[2])
@@ -2890,7 +2890,7 @@ async def admin_test_res_text(call: CallbackQuery):
         await call.answer("Test topilmadi!", show_alert=True)
         return
 
-    results = test_db.get_test_results_leaderboard(test_id)
+    results = await test_db.db(test_db.get_test_results_leaderboard, test_id)
     if not results:
         await call.answer("Bu testni hali hech kim topshirmagan!", show_alert=True)
         return
@@ -2918,7 +2918,7 @@ async def admin_test_res_text(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_respdf_"))
 async def admin_test_res_pdf(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
     test_id = int(call.data.split("_")[2])
@@ -2927,7 +2927,7 @@ async def admin_test_res_pdf(call: CallbackQuery):
         await call.answer("Test topilmadi!", show_alert=True)
         return
 
-    results = test_db.get_test_results_leaderboard(test_id)
+    results = await test_db.db(test_db.get_test_results_leaderboard, test_id)
     if not results:
         await call.answer("Ushbu testni hali hech kim topshirmagan, PDF chiqarib bo'lmaydi.", show_alert=True)
         return
@@ -2935,7 +2935,7 @@ async def admin_test_res_pdf(call: CallbackQuery):
     await call.answer("⏳ PDF hisobot yaratilmoqda...")
     status_msg = await call.message.answer("⏳ <i>PDF reyting jadvali shakllantirilmoqda, iltimos kuting...</i>")
 
-    pdf_path = test_db.generate_test_results_pdf(test_id)
+    pdf_path = await test_db.db(test_db.generate_test_results_pdf, test_id)
     if pdf_path and os.path.exists(pdf_path):
         try:
             caption = (
@@ -2964,7 +2964,7 @@ async def admin_test_res_pdf(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_schedule_"))
 async def adm_schedule_start(call: CallbackQuery, state: FSMContext):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[2])
     test = test_db.get_test_by_id(test_id)
@@ -3000,10 +3000,10 @@ async def adm_schedule_start(call: CallbackQuery, state: FSMContext):
 
 @admin_router.callback_query(F.data.startswith("adm_sched_clear_"))
 async def adm_sched_clear(call: CallbackQuery):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[3])
-    test_db.clear_test_schedule(test_id)
+    await test_db.db(test_db.clear_test_schedule, test_id)
     await call.answer("✅ Jadval vaqti bekor qilindi!", show_alert=True)
     # test boshqaruv sahifasiga qaytish
     call.data = f"adm_tstat_{test_id}"
@@ -3012,7 +3012,7 @@ async def adm_sched_clear(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_sched_set_"))
 async def adm_sched_set_start(call: CallbackQuery, state: FSMContext):
-    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     test_id = int(call.data.split("_")[3])
     await state.update_data(schedule_test_id=test_id)
@@ -3112,7 +3112,7 @@ async def adm_sched_end_time(message: Message, state: FSMContext):
     await state.clear()
 
     # Saqlash
-    test_db.set_test_schedule(test_id, schedule_date, schedule_start, text)
+    await test_db.db(test_db.set_test_schedule, test_id, schedule_date, schedule_start, text)
 
     test = test_db.get_test_by_id(test_id)
     test_name = test['title'] if test else f"Test #{test_id}"

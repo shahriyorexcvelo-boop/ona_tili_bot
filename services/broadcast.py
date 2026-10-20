@@ -37,7 +37,7 @@ async def send_broadcast_to_users(
     messages_list: Optional[List[Dict[str, Any]]] = None
 ) -> tuple[int, int, str]:
     """Barcha faol (bloklanmagan) o'quvchilarga xabar tarqatish va keyinchalik o'chirish uchun ID larni saqlash."""
-    users = test_db.get_broadcast_users()
+    users = await test_db.db(test_db.get_broadcast_users)
     sent_count = 0
     fail_count = 0
     blocked_users = []  # Botni bloklagan foydalanuvchilar
@@ -50,7 +50,8 @@ async def send_broadcast_to_users(
     else:
         batch_summary = caption or message_text
 
-    test_db.create_broadcast_batch(
+    await test_db.db(
+        test_db.create_broadcast_batch,
         batch_id=batch_id,
         sender_tg_id=sender_tg_id or ADMIN_ID,
         message_text=batch_summary,
@@ -71,18 +72,18 @@ async def send_broadcast_to_users(
                         message_id=m["message_id"]
                     )
                     if sent_msg and hasattr(sent_msg, "message_id"):
-                        test_db.record_broadcast_message(batch_id, uid, sent_msg.message_id)
+                        await test_db.db(test_db.record_broadcast_message, batch_id, uid, sent_msg.message_id)
                         user_sent_any = True
                     await asyncio.sleep(0.02)
             elif photo_id:
                 sent_msg = await bot.send_photo(chat_id=uid, photo=photo_id, caption=caption or message_text)
                 if sent_msg and hasattr(sent_msg, "message_id"):
-                    test_db.record_broadcast_message(batch_id, uid, sent_msg.message_id)
+                    await test_db.db(test_db.record_broadcast_message, batch_id, uid, sent_msg.message_id)
                     user_sent_any = True
             else:
                 sent_msg = await bot.send_message(chat_id=uid, text=message_text)
                 if sent_msg and hasattr(sent_msg, "message_id"):
-                    test_db.record_broadcast_message(batch_id, uid, sent_msg.message_id)
+                    await test_db.db(test_db.record_broadcast_message, batch_id, uid, sent_msg.message_id)
                     user_sent_any = True
 
             if user_sent_any:
@@ -91,11 +92,11 @@ async def send_broadcast_to_users(
         except Exception as e:
             fail_count += 1
             if is_user_gone_error(e):
-                test_db.delete_user(uid, is_self_delete=True)
+                await test_db.db(test_db.delete_user, uid, is_self_delete=True)
                 blocked_users.append(u)
             log.warning(f"Broadcast xatosi user {uid}: {e}")
 
-    test_db.update_broadcast_sent_count(batch_id, sent_count)
+    await test_db.db(test_db.update_broadcast_sent_count, batch_id, sent_count)
 
     # Admin ga bloklagan userlar haqida xabar
     if blocked_users:
@@ -114,9 +115,9 @@ async def send_broadcast_to_users(
 
 async def delete_broadcast_batch_from_users(batch_id: str, progress_callback=None) -> tuple[int, int]:
     """Berilgan batch_id bo'yicha barcha yuborilgan xabarlarni o'quvchilar chatidan tezkor parallel o'chirib tashlash."""
-    msgs = test_db.get_broadcast_messages(batch_id)
+    msgs = await test_db.db(test_db.get_broadcast_messages, batch_id)
     if not msgs:
-        test_db.mark_broadcast_deleted(batch_id)
+        await test_db.db(test_db.mark_broadcast_deleted, batch_id)
         return 0, 0
 
     sem = asyncio.Semaphore(12)  # Bir vaqtning o'zida 12 ta parallel so'rov
@@ -152,7 +153,7 @@ async def delete_broadcast_batch_from_users(batch_id: str, progress_callback=Non
                         pass
 
     await asyncio.gather(*[_del_one(m) for m in msgs], return_exceptions=True)
-    test_db.mark_broadcast_deleted(batch_id)
+    await test_db.db(test_db.mark_broadcast_deleted, batch_id)
     return deleted_count[0], fail_count[0]
 
 async def delete_recent_bot_messages_from_all_users(count: int = 1, progress_callback=None) -> tuple[int, int]:
@@ -162,17 +163,18 @@ async def delete_recent_bot_messages_from_all_users(count: int = 1, progress_cal
     deleted_total = 0
 
     # 1. Agar bazada o'chirilmagan broadcast partiyalar bo'lsa, ularni to'g'ridan-to'g'ri o'chiramiz
-    recent_batches = test_db.get_recent_broadcasts(limit=max(5, count * 2))
+    recent_batches = await test_db.db(test_db.get_recent_broadcasts, limit=max(5, count * 2))
     active_batches = [b for b in recent_batches if b.get('is_deleted') != 1]
     if active_batches:
         for b in active_batches[:count]:
             d_cnt, _ = await delete_broadcast_batch_from_users(b['batch_id'], progress_callback=progress_callback)
             deleted_total += d_cnt
         if deleted_total > 0:
-            return deleted_total, len(test_db.get_broadcast_users())
+            all_u = await test_db.db(test_db.get_broadcast_users)
+            return deleted_total, len(all_u)
 
     # 2. Agar bazada partiya topilmasa, chatdagi so'nggi bot xabarlarini tezkor parallel tozalash:
-    users = test_db.get_broadcast_users()
+    users = await test_db.db(test_db.get_broadcast_users)
     if not users:
         return 0, 0
 
