@@ -58,8 +58,8 @@ else:
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=fsm_storage)
 
-# 1000+ pik foydalanuvchi oqimida bot va bazani himoya qiluvchi Throttling (Rate Limiter: 2.5s)
-throttling_middleware = ThrottlingMiddleware(limit=2.5, admin_ids=get_config_admin_ids())
+# 1000+ pik foydalanuvchi oqimida bot va bazani himoya qiluvchi Throttling (Rate Limiter: 0.35s)
+throttling_middleware = ThrottlingMiddleware(limit=0.35, admin_ids=get_config_admin_ids())
 dp.message.outer_middleware(throttling_middleware)
 dp.callback_query.outer_middleware(throttling_middleware)
 

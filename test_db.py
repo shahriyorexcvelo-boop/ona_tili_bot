@@ -59,6 +59,8 @@ _USER_SUBMISSIONS_MAP_CACHE: Dict[int, Any] = {}
 _USER_SUBMITTED_IDS_CACHE: Dict[Any, Any] = {}
 _CACHE_USERS: Dict[int, Any] = {}
 _CACHE_SETTINGS: Dict[str, Any] = {}
+_ADMIN_DELETED_CACHE: Dict[int, Any] = {}
+_ALL_ADMINS_CACHE: Tuple[float, List[Dict[str, Any]]] = (0.0, [])
 
 # Kesh siyosati (M3): DB — yagona haqiqat manbai. 
 # 45 soniyalik Read-Through TTL bir nechta instance larda kesh nomutanosibligining oldini oladi.
@@ -66,6 +68,8 @@ _CACHE_SETTINGS: Dict[str, Any] = {}
 CACHE_TTL_TESTS = 45.0       # Read-through RAM kesh TTL: 45 soniya
 CACHE_TTL_USERS = 300.0     # 5 daqiqa
 CACHE_TTL_SETTINGS = 300.0  # 5 daqiqa
+CACHE_TTL_ADMINS = 300.0    # 5 daqiqa
+CACHE_TTL_ADMIN_DELETED = 300.0 # 5 daqiqa
 
 def is_tests_cache_valid() -> bool:
     """RAM kesh yuklangan va TTL (45 soniya) muddati o'tmaganligini tekshirish."""
@@ -288,20 +292,6 @@ def get_connection():
 
                     conn_id = id(conn)
                     now_t = time.time()
-                    last_used = _conn_last_used.get(conn_id, 0)
-                    if now_t - last_used > 45:
-                        try:
-                            with conn.cursor() as cur_check:
-                                cur_check.execute("SELECT 1")
-                            conn.rollback()
-                        except Exception:
-                            try:
-                                pool.putconn(conn, close=True)
-                            except Exception:
-                                pass
-                            conn = pool.getconn()
-                            conn_id = id(conn)
-
                     _conn_last_used[conn_id] = now_t
                     conn.cursor_factory = RealDictCursor
                     conn.autocommit = False
@@ -898,17 +888,24 @@ def get_next_test_code() -> str:
 
 
 def get_scheduled_tests() -> List[Dict[str, Any]]:
-    """Jadval vaqti belgilangan barcha testlarni qaytaradi."""
-    conn = get_connection()
+    """Jadval vaqti belgilangan barcha testlarni qaytaradi (Zero-DB RAM Cache)."""
     try:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT * FROM tests WHERE scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL"
-        )
-        rows = cur.fetchall()
-        return [_row_to_dict(r) for r in rows if r]
-    finally:
-        _close_conn(conn)
+        all_tests = get_all_tests()
+        return [
+            t for t in all_tests
+            if t.get("scheduled_start") is not None and t.get("scheduled_end") is not None
+        ]
+    except Exception:
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT * FROM tests WHERE scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL"
+            )
+            rows = cur.fetchall()
+            return [_row_to_dict(r) for r in rows if r]
+        finally:
+            _close_conn(conn)
 
 
 # ──────────────────────────────────────────────────────────
@@ -1332,6 +1329,7 @@ def approve_user(tg_id: int) -> bool:
         cur.execute(f"DELETE FROM admin_deleted_users WHERE tg_id = {_ph()}", (tg_id,))
         conn.commit()
         invalidate_user_cache(tg_id)
+        invalidate_admin_deleted_cache(tg_id)
         try:
             from core import invalidate_dashboard_cache
             invalidate_dashboard_cache()
@@ -1370,6 +1368,14 @@ def block_user(tg_id: int) -> bool:
     return reject_user(tg_id)
 
 
+def invalidate_admin_deleted_cache(tg_id: Optional[int] = None):
+    with _RAM_CACHE_LOCK:
+        if tg_id is not None:
+            _ADMIN_DELETED_CACHE.pop(int(tg_id), None)
+        else:
+            _ADMIN_DELETED_CACHE.clear()
+
+
 def mark_admin_deleted(tg_id: int, admin_id: Optional[int] = None) -> bool:
     """Admin tomonidan o'chirilgan foydalanuvchini admin_deleted_users jadvaliga kiritish."""
     conn = get_connection()
@@ -1393,6 +1399,7 @@ def mark_admin_deleted(tg_id: int, admin_id: Optional[int] = None) -> bool:
                 deleted_by = excluded.deleted_by
             """, (tg_id, now_ts, admin_id))
         conn.commit()
+        invalidate_admin_deleted_cache(tg_id)
         return True
     except Exception as e:
         print(f"Error mark_admin_deleted: {e}")
@@ -1402,17 +1409,8 @@ def mark_admin_deleted(tg_id: int, admin_id: Optional[int] = None) -> bool:
 
 
 def is_admin_deleted(tg_id: int) -> bool:
-    """Foydalanuvchi admin tomonidan o'chirilganlar ro'yxatida bormi?"""
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(f"SELECT 1 FROM admin_deleted_users WHERE tg_id = {_ph()}", (tg_id,))
-        return cur.fetchone() is not None
-    except Exception as e:
-        print(f"Error is_admin_deleted: {e}")
-        return False
-    finally:
-        _close_conn(conn)
+    """Foydalanuvchi admin tomonidan o'chirilganlar ro'yxatida bormi? (Zero-DB RAM Cache)"""
+    return get_admin_deleted_info(tg_id) is not None
 
 
 def clear_admin_deleted(tg_id: int) -> bool:
@@ -1422,6 +1420,7 @@ def clear_admin_deleted(tg_id: int) -> bool:
         cur = conn.cursor()
         cur.execute(f"DELETE FROM admin_deleted_users WHERE tg_id = {_ph()}", (tg_id,))
         conn.commit()
+        invalidate_admin_deleted_cache(tg_id)
         return True
     except Exception as e:
         print(f"Error clear_admin_deleted: {e}")
@@ -1438,6 +1437,7 @@ def touch_admin_deleted_request(tg_id: int) -> bool:
         now_ts = int(time.time())
         cur.execute(f"UPDATE admin_deleted_users SET last_request_at = {_ph()} WHERE tg_id = {_ph()}", (now_ts, tg_id))
         conn.commit()
+        invalidate_admin_deleted_cache(tg_id)
         return True
     except Exception as e:
         print(f"Error touch_admin_deleted_request: {e}")
@@ -1447,13 +1447,23 @@ def touch_admin_deleted_request(tg_id: int) -> bool:
 
 
 def get_admin_deleted_info(tg_id: int) -> Optional[Dict[str, Any]]:
-    """Admin tomonidan o'chirilgan foydalanuvchi ma'lumotlarini olish."""
+    """Admin tomonidan o'chirilgan foydalanuvchi ma'lumotlarini olish (Zero-DB RAM Cache)."""
+    now = time.time()
+    with _RAM_CACHE_LOCK:
+        if tg_id in _ADMIN_DELETED_CACHE:
+            ts, val = _ADMIN_DELETED_CACHE[tg_id]
+            if now - ts < CACHE_TTL_ADMIN_DELETED:
+                return dict(val) if val else None
+
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT * FROM admin_deleted_users WHERE tg_id = {_ph()}", (tg_id,))
         row = cur.fetchone()
-        return _row_to_dict(row) if row else None
+        res = _row_to_dict(row) if row else None
+        with _RAM_CACHE_LOCK:
+            _ADMIN_DELETED_CACHE[tg_id] = (time.time(), res)
+        return res
     except Exception as e:
         print(f"Error get_admin_deleted_info: {e}")
         return None
@@ -1612,6 +1622,7 @@ def delete_user(tg_id: int, deleted_by: Optional[int] = None, is_self_delete: bo
 
         conn.commit()
         invalidate_user_cache(actual_tg_id)
+        invalidate_admin_deleted_cache(actual_tg_id)
         try:
             from core import invalidate_dashboard_cache
             invalidate_dashboard_cache()
@@ -2203,6 +2214,12 @@ def delete_test(test_id: int) -> bool:
 
 _admin_cache = {}
 
+def invalidate_admins_cache():
+    global _ALL_ADMINS_CACHE, _admin_cache
+    with _RAM_CACHE_LOCK:
+        _ALL_ADMINS_CACHE = (0.0, [])
+        _admin_cache.clear()
+
 def is_admin(tg_id: int, super_admin_id: int = 8039427064) -> bool:
     try:
         from core.config import get_config_admin_ids
@@ -2222,7 +2239,7 @@ def is_admin(tg_id: int, super_admin_id: int = 8039427064) -> bool:
         cur.execute(f"SELECT tg_id FROM admins WHERE tg_id = {_ph()}", (tg_id,))
         row = cur.fetchone()
         is_adm = bool(row)
-        _admin_cache[tg_id] = (is_adm, now + 60.0)
+        _admin_cache[tg_id] = (is_adm, now + CACHE_TTL_ADMINS)
         return is_adm
     finally:
         _close_conn(conn)
@@ -2250,6 +2267,7 @@ def add_admin(tg_id: int, fullname: str = "Admin", username: Optional[str] = Non
                 username=excluded.username
             """, (tg_id, fullname, username, added_by, now))
         conn.commit()
+        invalidate_admins_cache()
         return True
     except Exception as e:
         print(f"Error adding admin: {e}")
@@ -2264,6 +2282,7 @@ def remove_admin(tg_id: int) -> bool:
         cur = conn.cursor()
         cur.execute(f"DELETE FROM admins WHERE tg_id = {_ph()}", (tg_id,))
         conn.commit()
+        invalidate_admins_cache()
         return True
     except Exception:
         return False
@@ -2272,12 +2291,22 @@ def remove_admin(tg_id: int) -> bool:
 
 
 def get_all_admins() -> List[Dict[str, Any]]:
+    global _ALL_ADMINS_CACHE
+    now = time.time()
+    with _RAM_CACHE_LOCK:
+        ts, cached = _ALL_ADMINS_CACHE
+        if (now - ts) < CACHE_TTL_ADMINS and cached:
+            return [dict(r) for r in cached]
+
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute("SELECT * FROM admins ORDER BY created_at ASC")
         rows = cur.fetchall()
-        return [_row_to_dict(r) for r in rows if r]
+        admins = [_row_to_dict(r) for r in rows if r]
+        with _RAM_CACHE_LOCK:
+            _ALL_ADMINS_CACHE = (time.time(), admins)
+        return admins
     finally:
         _close_conn(conn)
 

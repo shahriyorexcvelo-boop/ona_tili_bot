@@ -11,6 +11,7 @@ import time
 import urllib.parse
 from typing import Optional, Dict, Any, Tuple, List
 
+from aiogram import Bot
 from aiogram.enums import ParseMode
 from aiogram.types import (
     InlineKeyboardButton, InlineKeyboardMarkup, Message, FSInputFile
@@ -114,13 +115,18 @@ def get_all_admin_ids() -> list:
 
 
 async def notify_all_admins(bot: Bot, text: str, reply_markup=None):
-    """Barcha adminlarga (Bosh admin va barcha tayinlangan yordamchi adminlarga) xabar yuborish"""
+    """Barcha adminlarga (Bosh admin va barcha tayinlangan yordamchi adminlarga) parallel xabar yuborish"""
     admin_ids = get_all_admin_ids()
-    for adm_id in admin_ids:
+    if not admin_ids:
+        return
+
+    async def _send(adm_id: int):
         try:
             await bot.send_message(chat_id=adm_id, text=text, reply_markup=reply_markup)
         except Exception as ex:
             log.warning(f"Adminga ({adm_id}) xabar yuborishda xatolik: {ex}")
+
+    await asyncio.gather(*[_send(aid) for aid in admin_ids], return_exceptions=True)
 
 
 

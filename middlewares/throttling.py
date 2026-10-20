@@ -23,7 +23,7 @@ class ThrottlingMiddleware(BaseMiddleware):
     10,000+ foydalanuvchi oqimida botni spam va flood hujumlaridan himoya qiluvchi
     yuqori unumli Rate-Limiting middleware.
     """
-    def __init__(self, limit: float = 2.5, admin_ids: Optional[Iterable[int]] = None):
+    def __init__(self, limit: float = 0.35, admin_ids: Optional[Iterable[int]] = None):
         self.limit = limit
         self.user_timeouts: Dict[int, float] = {}
         self.user_warned: Dict[int, float] = {}
@@ -51,7 +51,7 @@ class ThrottlingMiddleware(BaseMiddleware):
     def _cleanup_if_needed(self, now: float) -> None:
         """Xotira va Performance optimizatsiyasi: eski yozuvlarni tozalash"""
         if self.request_count % 500 == 0 or len(self.user_timeouts) > 10000:
-            cutoff = now - (self.limit * 4)  # ~10 sekunddan eski yozuvlar
+            cutoff = now - (self.limit * 4)
             self.user_timeouts = {uid: t for uid, t in self.user_timeouts.items() if t > cutoff}
             self.user_warned = {uid: t for uid, t in self.user_warned.items() if t > cutoff}
 
@@ -75,31 +75,14 @@ class ThrottlingMiddleware(BaseMiddleware):
 
         last_time = self.user_timeouts.get(user.id, 0.0)
 
-        # 2. Agar foydalanuvchi 2.5 sekund ichida takroran so'rov yuborsa
+        # 2. Agar foydalanuvchi robotdek o'ta tez (0.35s ichida) bosayotgan bo'lsa (faqat flood himoya)
         if now - last_time < self.limit:
-            # Message bo'lsa:
-            if isinstance(event, Message):
-                last_warn = self.user_warned.get(user.id, 0.0)
-                # Ogohlantirish xabarini ham flood qilmaslik uchun (har 2 soniyada 1 marta)
-                if now - last_warn >= 2.0:
-                    self.user_warned[user.id] = now
-                    try:
-                        await event.answer(
-                            "⏳ <b>Juda ko'p so'rov yuborildi!</b>\n"
-                            "Iltimos, serverni ortiqcha yuklamaslik uchun 2-3 soniya kuting va qayta urinib ko'ring.",
-                            parse_mode=ParseMode.HTML
-                        )
-                    except Exception as err:
-                        logger.debug(f"Throttling ogohlantirish yuborishda xatolik: {err}")
-
-            # CallbackQuery (Tugma) bo'lsa:
-            elif isinstance(event, CallbackQuery):
+            if isinstance(event, CallbackQuery):
                 try:
-                    await event.answer("⏳ Biroz kuting (2-3 sekund)...", show_alert=False)
-                except Exception as err:
-                    logger.debug(f"Callback answer xatolik: {err}")
-
-            # So'rov to'xtatilib, keyingi handler'larga va Supabase bazasiga o'tkazilmasin
+                    await event.answer()
+                except Exception:
+                    pass
+            # Foydalanuvchiga ortiqcha xabar yuborib chalg'itmasdan va Telegram API ni yuklamasdan o'tkazib yuboramiz
             return
 
         # So'rov tasdiqlandi, vaqtni yangilaymiz
