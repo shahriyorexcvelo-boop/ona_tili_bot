@@ -93,18 +93,6 @@ async def start_handler(message: Message, state: FSMContext):
                 await send_registration_closed_message(message, user_tg_id)
                 return
 
-        # Yangi foydalanuvchi botga kirganda barcha adminlar (bosh admin va tayinlanganlar)ga darhol xabarnoma yuborish
-        safe_from_name = html.escape(message.from_user.full_name or "Noma'lum")
-        safe_username = html.escape(f"@{message.from_user.username}") if message.from_user.username else "Mavjud emas"
-        admin_join_text = (
-            f"👋 <b>Yangi foydalanuvchi botga kirdi (/start)!</b>\n\n"
-            f"👤 <b>Telegram profili:</b> {safe_from_name}\n"
-            f"🆔 <b>Telegram ID:</b> <code>{user_tg_id}</code>\n"
-            f"🔗 <b>Username:</b> {safe_username}\n"
-            f"🕒 <b>Vaqt:</b> {format_uzb_time()}\n\n"
-            f"ℹ️ <i>Foydalanuvchi hozirda ro'yxatdan o'tish jarayonida...</i>"
-        )
-        await notify_all_admins(message.bot, admin_join_text)
 
         await state.set_state(RegistrationState.fullname)
         await message.answer(
