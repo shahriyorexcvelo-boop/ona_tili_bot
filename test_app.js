@@ -139,7 +139,17 @@ const TestApp = {
         submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle;margin-right:4px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Bot orqali kiring';
       }
     }
+
+    // O'quvchi ilovani yopib qo'ysa yoki boshqa dasturga o'tsa ham javoblarni zudlik bilan saqlash (Auto-save)
+    window.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        TestApp.saveAnswersToStorage();
+      }
+    });
+    window.addEventListener('pagehide', () => TestApp.saveAnswersToStorage());
+    window.addEventListener('beforeunload', () => TestApp.saveAnswersToStorage());
   },
+
 
   startSplashCanvas() {
     const canvas = document.getElementById('splash-canvas');
@@ -368,10 +378,28 @@ const TestApp = {
       }
       const key = this.getStorageKey();
       localStorage.setItem(key, JSON.stringify(this.answers));
+      this.showAutoSaveIndicator();
     } catch (e) {
       console.warn('Storage save error:', e);
     }
   },
+
+  showAutoSaveIndicator() {
+    let ind = document.getElementById('autosave-indicator');
+    if (!ind) {
+      ind = document.createElement('div');
+      ind.id = 'autosave-indicator';
+      ind.style.cssText = 'position:fixed;bottom:75px;left:50%;transform:translateX(-50%);background:rgba(16,185,129,0.92);color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;box-shadow:0 4px 12px rgba(16,185,129,0.3);z-index:999;pointer-events:none;transition:opacity 0.3s;opacity:0;display:flex;align-items:center;gap:4px;';
+      ind.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg><span>Xotiraga saqlandi</span>';
+      document.body.appendChild(ind);
+    }
+    ind.style.opacity = '1';
+    clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(function() {
+      if (ind) ind.style.opacity = '0';
+    }, 1200);
+  },
+
 
   restoreAnswersFromStorage() {
     try {
@@ -559,8 +587,13 @@ const TestApp = {
     const isFilled = (val || '').trim().length > 0;
     this.updateMapItem(fieldKey, isFilled);
     this.updateProgress();
-    this.saveAnswersToStorage();
+
+    clearTimeout(this._inputSaveTimer);
+    this._inputSaveTimer = setTimeout(() => {
+      this.saveAnswersToStorage();
+    }, 150);
   },
+
 
   setOpenAnswer(fieldKey, val) {
     this.handleOpenInput(fieldKey, val);

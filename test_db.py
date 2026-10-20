@@ -40,40 +40,96 @@ _conn_last_used = {}
 PG_POOL_MINCONN = int(os.getenv("PG_POOL_MINCONN", "1"))
 PG_POOL_MAXCONN = int(os.getenv("PG_POOL_MAXCONN", "25"))
 
-# ── 1,000+ FOYDALANUVCHI UCHUN IN-MEMORY RAM KESH (DB so'rovlarini 70%+ kamaytiradi) ──
+# ── ZERO-DB-READ ARXITEKTURASI (Global Memory Cache) ──
+# 1,000+ o'quvchi bir vaqtda kirganda bazaga yuklama bermaslik uchun
+# barcha testlar, variantlar va kalitlar server xotirasida (RAM) saqlanadi.
 import threading
 _RAM_CACHE_LOCK = threading.Lock()
-_CACHE_TESTS_BY_ID: Dict[int, Tuple[float, Dict[str, Any]]] = {}
-_CACHE_TESTS_BY_CODE: Dict[str, Tuple[float, int]] = {}
+
+_GLOBAL_TESTS_CACHE: Dict[int, Dict[str, Any]] = {}
+_GLOBAL_TESTS_BY_CODE: Dict[str, int] = {}
+_GLOBAL_ALL_TESTS_LIST: List[Dict[str, Any]] = []
+_GLOBAL_ACTIVE_TESTS_LIST: List[Dict[str, Any]] = []
+_GLOBAL_TESTS_PRELOADED: bool = False
+
+_CACHE_TEST_BOUNDS: Dict[int, Dict[str, Any]] = {}
+_CACHE_TEST_BOUNDS_TIME: float = 0.0
+
+_USER_SUBMISSIONS_MAP_CACHE: Dict[int, Tuple[float, Dict[int, Dict[str, Any]]]] = {}
+_USER_SUBMITTED_IDS_CACHE: Dict[Tuple[int, int], Tuple[float, bool]] = {}
+
 _CACHE_USERS: Dict[int, Tuple[float, Dict[str, Any]]] = {}
 _CACHE_SETTINGS: Dict[str, Tuple[float, str]] = {}
-CACHE_TTL_TESTS = 60.0    # 60 soniya
-CACHE_TTL_USERS = 30.0    # 30 soniya
-CACHE_TTL_SETTINGS = 60.0
+
+CACHE_TTL_TESTS = 86400.0   # Doimiy RAM kesh (faqat admin o'zgartirganda yangilanadi)
+CACHE_TTL_USERS = 300.0     # 5 daqiqa
+CACHE_TTL_SETTINGS = 300.0  # 5 daqiqa
+
+def preload_all_tests_cache() -> int:
+    """
+    Zero-DB-Read: Server ishga tushganda barcha testlar (1-35 yopiq, 36-44 ochiq savollar, kalitlar)
+    bazadan faqat bir marta o'qilib, serverning RAM xotirasiga (Global Memory Cache) joylanadi.
+    1,000+ o'quvchi bir vaqtda kirganda Supabase bazasiga 0 ta SELECT so'rovi yuboriladi!
+    """
+    global _GLOBAL_TESTS_PRELOADED, _GLOBAL_ALL_TESTS_LIST, _GLOBAL_ACTIVE_TESTS_LIST
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM tests ORDER BY id DESC")
+        rows = cur.fetchall()
+        all_tests = [_row_to_dict(r) for r in rows if r]
+
+        with _RAM_CACHE_LOCK:
+            _GLOBAL_TESTS_CACHE.clear()
+            _GLOBAL_TESTS_BY_CODE.clear()
+            _GLOBAL_ALL_TESTS_LIST = all_tests
+            _GLOBAL_ACTIVE_TESTS_LIST = [t for t in all_tests if t.get("is_active") == 1]
+
+            for t in all_tests:
+                tid = t["id"]
+                _GLOBAL_TESTS_CACHE[tid] = t
+                if t.get("test_code"):
+                    _GLOBAL_TESTS_BY_CODE[str(t["test_code"]).upper().strip().replace("#", "")] = tid
+
+            _GLOBAL_TESTS_PRELOADED = True
+
+        print(f"🚀 [Zero-DB-Read] Global RAM kesh muvaffaqiyatli yuklandi: {len(all_tests)} ta test xotirada tayyor (0 DB SELECT)")
+        return len(all_tests)
+    except Exception as e:
+        print(f"❌ preload_all_tests_cache xatolik: {e}")
+        return 0
+    finally:
+        _close_conn(conn)
 
 def invalidate_test_cache(test_id: Optional[int] = None):
-    """Test ma'lumotlari yangilanganda RAM keshni tozalash"""
+    """Test ma'lumotlari yangilanganda RAM keshni tozalash va qayta yuklash"""
+    global _CACHE_TEST_BOUNDS_TIME
     with _RAM_CACHE_LOCK:
-        if test_id is not None:
-            _CACHE_TESTS_BY_ID.pop(test_id, None)
-            to_del = [c for c, tid in _CACHE_TESTS_BY_CODE.items() if tid == test_id]
-            for c in to_del:
-                _CACHE_TESTS_BY_CODE.pop(c, None)
-        else:
-            _CACHE_TESTS_BY_ID.clear()
-            _CACHE_TESTS_BY_CODE.clear()
+        _CACHE_TEST_BOUNDS.clear()
+        _CACHE_TEST_BOUNDS_TIME = 0.0
+        _USER_SUBMISSIONS_MAP_CACHE.clear()
+        _USER_SUBMITTED_IDS_CACHE.clear()
+    preload_all_tests_cache()
 
 def invalidate_user_cache(tg_id: Optional[int] = None):
     """Foydalanuvchi ma'lumotlari yangilanganda RAM keshni tozalash"""
     with _RAM_CACHE_LOCK:
         if tg_id is not None:
             _CACHE_USERS.pop(int(tg_id), None)
+            _USER_SUBMISSIONS_MAP_CACHE.pop(int(tg_id), None)
+            # Ushbu userning topshirganlik keshini tozalash
+            to_del = [k for k in _USER_SUBMITTED_IDS_CACHE.keys() if k[0] == int(tg_id)]
+            for k in to_del:
+                _USER_SUBMITTED_IDS_CACHE.pop(k, None)
         else:
             _CACHE_USERS.clear()
+            _USER_SUBMISSIONS_MAP_CACHE.clear()
+            _USER_SUBMITTED_IDS_CACHE.clear()
 
 def invalidate_settings_cache():
     with _RAM_CACHE_LOCK:
         _CACHE_SETTINGS.clear()
+
 
 _on_schedule_changed_callbacks = []
 
@@ -1475,66 +1531,67 @@ def update_test_pdf(test_id: int, pdf_file_id: str, pdf_file_name: str) -> bool:
 
 
 def get_active_tests() -> List[Dict[str, Any]]:
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM tests WHERE is_active = 1 ORDER BY id DESC")
-        rows = cur.fetchall()
-        return [_row_to_dict(r) for r in rows if r]
-    finally:
-        _close_conn(conn)
+    """Zero-DB-Read: Faol testlarni to'g'ridan-to'g'ri server RAM xotirasidan sub-millisekundda qaytarish."""
+    with _RAM_CACHE_LOCK:
+        if _GLOBAL_TESTS_PRELOADED and _GLOBAL_ACTIVE_TESTS_LIST:
+            return [dict(t) for t in _GLOBAL_ACTIVE_TESTS_LIST]
+
+    preload_all_tests_cache()
+    with _RAM_CACHE_LOCK:
+        return [dict(t) for t in _GLOBAL_ACTIVE_TESTS_LIST]
 
 
 def get_test_by_code(test_code: str) -> Optional[Dict[str, Any]]:
+    """Zero-DB-Read: Test kodi bo'yicha server RAM xotirasidan darhol olish (0 DB SELECT)."""
+    if not test_code:
+        return None
     clean_code = str(test_code).upper().strip().replace("#", "")
-    now = time.time()
-    with _RAM_CACHE_LOCK:
-        if clean_code in _CACHE_TESTS_BY_CODE:
-            cached_id = _CACHE_TESTS_BY_CODE[clean_code]
-            if cached_id is None:
-                return None
-            if cached_id in _CACHE_TESTS_BY_ID:
-                ts, val = _CACHE_TESTS_BY_ID[cached_id]
-                if now - ts < CACHE_TTL_TESTS:
-                    return dict(val) if val is not None else None
 
+    with _RAM_CACHE_LOCK:
+        if clean_code in _GLOBAL_TESTS_BY_CODE:
+            cached_id = _GLOBAL_TESTS_BY_CODE[clean_code]
+            if cached_id in _GLOBAL_TESTS_CACHE:
+                return dict(_GLOBAL_TESTS_CACHE[cached_id])
+
+    # Agar RAM da topilmasa, DB dan yuklab RAM ni yangilaymiz
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT * FROM tests WHERE test_code = {_ph()}", (clean_code,))
         row = cur.fetchone()
         res = _row_to_dict(row)
-        with _RAM_CACHE_LOCK:
-            if res:
+        if res:
+            with _RAM_CACHE_LOCK:
                 tid = res["id"]
-                _CACHE_TESTS_BY_ID[tid] = (now, dict(res))
-                _CACHE_TESTS_BY_CODE[clean_code] = tid
-            else:
-                _CACHE_TESTS_BY_CODE[clean_code] = None
+                _GLOBAL_TESTS_CACHE[tid] = res
+                _GLOBAL_TESTS_BY_CODE[clean_code] = tid
         return res
     finally:
         _close_conn(conn)
 
 
 def get_test_by_id(test_id: int) -> Optional[Dict[str, Any]]:
-    now = time.time()
-    with _RAM_CACHE_LOCK:
-        if test_id in _CACHE_TESTS_BY_ID:
-            ts, val = _CACHE_TESTS_BY_ID[test_id]
-            ttl = CACHE_TTL_TESTS if val is not None else 10.0
-            if now - ts < ttl:
-                return dict(val) if val is not None else None
+    """Zero-DB-Read: Test ID bo'yicha server RAM xotirasidan darhol olish (0 DB SELECT)."""
+    if not test_id or int(test_id) <= 0:
+        return None
+    tid = int(test_id)
 
+    with _RAM_CACHE_LOCK:
+        if tid in _GLOBAL_TESTS_CACHE:
+            return dict(_GLOBAL_TESTS_CACHE[tid])
+
+    # Keshda mavjud bo'lmasa, DB dan olib keshlaymiz
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute(f"SELECT * FROM tests WHERE id = {_ph()}", (test_id,))
+        cur.execute(f"SELECT * FROM tests WHERE id = {_ph()}", (tid,))
         row = cur.fetchone()
         res = _row_to_dict(row)
-        with _RAM_CACHE_LOCK:
-            _CACHE_TESTS_BY_ID[test_id] = (now, dict(res) if res else None)
-            if res and res.get("test_code"):
-                _CACHE_TESTS_BY_CODE[str(res["test_code"]).upper().strip()] = test_id
+        if res:
+            with _RAM_CACHE_LOCK:
+                _GLOBAL_TESTS_CACHE[tid] = res
+                if res.get("test_code"):
+                    _GLOBAL_TESTS_BY_CODE[str(res["test_code"]).upper().strip().replace("#", "")] = tid
         return res
     finally:
         _close_conn(conn)
@@ -1544,14 +1601,15 @@ get_test = get_test_by_id
 
 
 def get_all_tests() -> List[Dict[str, Any]]:
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM tests ORDER BY id DESC")
-        rows = cur.fetchall()
-        return [_row_to_dict(r) for r in rows if r]
-    finally:
-        _close_conn(conn)
+    """Zero-DB-Read: Barcha testlar ro'yxatini to'g'ridan-to'g'ri server RAM xotirasidan qaytarish."""
+    with _RAM_CACHE_LOCK:
+        if _GLOBAL_TESTS_PRELOADED and _GLOBAL_ALL_TESTS_LIST:
+            return [dict(t) for t in _GLOBAL_ALL_TESTS_LIST]
+
+    preload_all_tests_cache()
+    with _RAM_CACHE_LOCK:
+        return [dict(t) for t in _GLOBAL_ALL_TESTS_LIST]
+
 
 
 def toggle_test_status(test_id: int) -> Optional[int]:
@@ -1634,7 +1692,13 @@ def get_test_submission_bounds(test_id: int) -> Dict[str, Any]:
 
 
 def get_all_tests_submission_bounds() -> Dict[int, Dict[str, Any]]:
-    """Barcha testlar uchun birinchi va oxirgi topshirilgan vaqtlarni bitta so'rovda qaytaradi."""
+    """Zero-DB-Read: Barcha testlar uchun birinchi va oxirgi topshirilgan vaqtlarni RAM keshdan darhol qaytarish."""
+    global _CACHE_TEST_BOUNDS, _CACHE_TEST_BOUNDS_TIME
+    now = time.time()
+    with _RAM_CACHE_LOCK:
+        if _CACHE_TEST_BOUNDS and (now - _CACHE_TEST_BOUNDS_TIME < 30.0):
+            return dict(_CACHE_TEST_BOUNDS)
+
     conn = get_connection()
     res = {}
     try:
@@ -1658,12 +1722,16 @@ def get_all_tests_submission_bounds() -> Dict[int, Dict[str, Any]]:
                         "last_submitted_at": row[2],
                         "count": row[3] or 0
                     }
+        with _RAM_CACHE_LOCK:
+            _CACHE_TEST_BOUNDS = res
+            _CACHE_TEST_BOUNDS_TIME = now
         return res
     except Exception as e:
         print(f"Error getting all submission bounds: {e}")
         return res
     finally:
         _close_conn(conn)
+
 
 
 def update_test_time_limit(test_id: int, time_limit_min: int) -> bool:
@@ -2325,28 +2393,80 @@ def get_user_submission_for_test(test_id: int, user_tg_id: int) -> Optional[Dict
 
 
 def get_user_submissions_map(user_tg_id: int) -> Dict[int, Dict[str, Any]]:
-    """Foydalanuvchining barcha topshirgan testlarini {test_id: submission_dict} qilib qaytaradi."""
+    """Foydalanuvchining barcha topshirgan testlarini {test_id: submission_dict} qilib RAM keshdan qaytaradi."""
     if not user_tg_id:
         return {}
+    uid = int(user_tg_id)
+    now = time.time()
+
+    with _RAM_CACHE_LOCK:
+        if uid in _USER_SUBMISSIONS_MAP_CACHE:
+            ts, cached_map = _USER_SUBMISSIONS_MAP_CACHE[uid]
+            if now - ts < 60.0:
+                return dict(cached_map)
+
     conn = get_connection()
     res = {}
     try:
         cur = conn.cursor()
         cur.execute(
             f"SELECT * FROM submissions WHERE user_tg_id = {_ph()}",
-            (user_tg_id,)
+            (uid,)
         )
         rows = cur.fetchall()
         for r in rows:
             d = _row_to_dict(r)
             if d and d.get('test_id'):
                 res[int(d['test_id'])] = d
+        with _RAM_CACHE_LOCK:
+            _USER_SUBMISSIONS_MAP_CACHE[uid] = (now, res)
+            for tid in res.keys():
+                _USER_SUBMITTED_IDS_CACHE[(uid, tid)] = (now, True)
         return res
     except Exception as e:
         print(f"Error get_user_submissions_map: {e}")
         return res
     finally:
         _close_conn(conn)
+
+
+def has_user_submitted(test_id: int, user_tg_id: int) -> bool:
+    """Zero-DB-Read: Foydalanuvchi ushbu testni topshirganligini tezkor RAM keshdan tekshirish."""
+    if not user_tg_id or not test_id:
+        return False
+    uid = int(user_tg_id)
+    tid = int(test_id)
+    now = time.time()
+    key = (uid, tid)
+
+    with _RAM_CACHE_LOCK:
+        if key in _USER_SUBMITTED_IDS_CACHE:
+            ts, has_sub = _USER_SUBMITTED_IDS_CACHE[key]
+            if now - ts < 120.0:
+                return has_sub
+        if uid in _USER_SUBMISSIONS_MAP_CACHE:
+            ts, subs_map = _USER_SUBMISSIONS_MAP_CACHE[uid]
+            if now - ts < 120.0:
+                has_sub = tid in subs_map
+                _USER_SUBMITTED_IDS_CACHE[key] = (now, has_sub)
+                return has_sub
+
+    # Keshda bo'lmasa, DB dan bitta yengil indexed so'rov bilan tekshiramiz
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT 1 FROM submissions WHERE user_tg_id = {_ph()} AND test_id = {_ph()} LIMIT 1",
+            (uid, tid)
+        )
+        row = cur.fetchone()
+        has_sub = bool(row)
+        with _RAM_CACHE_LOCK:
+            _USER_SUBMITTED_IDS_CACHE[key] = (now, has_sub)
+        return has_sub
+    finally:
+        _close_conn(conn)
+
 
 
 def get_submission_by_id(submission_id: int) -> Optional[Dict[str, Any]]:

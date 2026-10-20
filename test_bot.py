@@ -29,12 +29,16 @@ dp.include_router(user_router)
 async def main():
     global WEBAPP_URL
 
-    # 1. Baza jadvallarini serverdan oldin yaratish/tekshirish (juda tez bajariladi)
+    # 1. Baza jadvallarini serverdan oldin yaratish/tekshirish va Global Memory Cache ni to'ldirish
     try:
         test_db.init_db()
         log.info("✅ Ma'lumotlar bazasi jadvallari muvaffaqiyatli ishga tushirildi.")
+        # Zero-DB-Read: barcha testlarni bir marta server RAM xotirasiga yuklash
+        loaded_count = test_db.preload_all_tests_cache()
+        log.info(f"🚀 Zero-DB-Read: {loaded_count} ta test RAM xotirasiga muvaffaqiyatli keshlandi!")
     except Exception as dbe:
-        log.error(f"❌ DB init xatolik: {dbe}")
+        log.error(f"❌ DB init / preload xatolik: {dbe}")
+
 
     # 2. aiohttp serverini DARHOL ishga tushirish (Render /healthz tekshiruvidan darhol o'tishi uchun)
     app = await create_web_app()

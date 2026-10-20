@@ -30,7 +30,8 @@ from core import (
     main_menu_kb, profile_webapp_kb, results_webapp_kb,
     contact_share_kb, make_webapp_button,
     is_working_hours, get_night_message,
-    invalidate_dashboard_cache, get_test_schedule_status
+    invalidate_dashboard_cache, get_test_schedule_status,
+    set_cached_membership
 )
 from .common import (
     get_all_admin_ids, notify_all_admins, check_access, validate_fullname, send_test_card, send_test_card_to_user_chat,
@@ -727,6 +728,7 @@ async def new_chat_members_handler(message: Message):
             )
             await notify_all_admins(message.bot, alert)
         else:
+            set_cached_membership(member.id, message.chat.id, True)
             m_name = member.full_name or "Noma'lum"
             m_user = f"@{member.username}" if member.username else "Mavjud emas"
             chat_title = message.chat.title or "Guruh"
@@ -747,6 +749,7 @@ async def chat_member_joined_handler(event: ChatMemberUpdated):
     member = event.new_chat_member.user
     if member.id == event.bot.id:
         return
+    set_cached_membership(member.id, event.chat.id, True)
     m_name = member.full_name or "Noma'lum"
     m_user = f"@{member.username}" if member.username else "Mavjud emas"
     chat_title = event.chat.title or "Chat/Kanal"
@@ -759,6 +762,7 @@ async def chat_member_joined_handler(event: ChatMemberUpdated):
         f"🕒 <b>Vaqt:</b> {format_uzb_time()}"
     )
     await notify_all_admins(event.bot, alert)
+
 
 
 

@@ -19,6 +19,8 @@ from .rate_limit import (
     HighLoadRateLimiter, GLOBAL_RATE_LIMITER,
     SUBMIT_CONCURRENCY_SEMAPHORE, COMPARE_CONCURRENCY_SEMAPHORE
 )
+from .auth_utils import verify_telegram_webapp_data
+from .membership import check_user_membership, set_cached_membership
 
 __all__ = [
     "UZB_TZ", "format_uzb_time", "TG_ICONS", "tg_e",
@@ -32,5 +34,7 @@ __all__ = [
     "main_menu_kb", "profile_webapp_kb", "results_webapp_kb",
     "contact_share_kb", "admin_menu_kb", "make_webapp_button",
     "HighLoadRateLimiter", "GLOBAL_RATE_LIMITER",
-    "SUBMIT_CONCURRENCY_SEMAPHORE", "COMPARE_CONCURRENCY_SEMAPHORE"
+    "SUBMIT_CONCURRENCY_SEMAPHORE", "COMPARE_CONCURRENCY_SEMAPHORE",
+    "verify_telegram_webapp_data", "check_user_membership", "set_cached_membership"
 ]
+

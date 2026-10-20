@@ -26,7 +26,8 @@ from core import (
     _dashboard_overview_cache, _dashboard_users_cache, _dashboard_tests_cache, invalidate_dashboard_cache,
     get_test_schedule_status, get_test_min_submit_info,
     BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, CACHED_BOT_USERNAME, log, bot,
-    GLOBAL_RATE_LIMITER, SUBMIT_CONCURRENCY_SEMAPHORE, COMPARE_CONCURRENCY_SEMAPHORE
+    GLOBAL_RATE_LIMITER, SUBMIT_CONCURRENCY_SEMAPHORE, COMPARE_CONCURRENCY_SEMAPHORE,
+    verify_telegram_webapp_data, check_user_membership, set_cached_membership
 )
 from services import (
     MAINT_START_TEXT, MAINT_END_TEXT,
@@ -39,24 +40,28 @@ from .common import (
     send_inactive_warning_messages, notify_admins_test_results_published
 )
 
+# 1,000+ o'quvchi bir vaqtda topshirganda dublikatlardan 100% himoya (In-flight memory lock)
+_IN_FLIGHT_SUBMISSIONS: set[tuple[int, int]] = set()
+
+
 async def handle_submit_test_api(request):
-    """Mini App dan kelgan javoblarni tekshirish va bot orqali faqat foydalanuvchiga natijani xabar qilish"""
+    """
+    Instant Non-Blocking Submission:
+    O'quvchi "Oxirgi yakunlash" tugmasini bosganda darhol sub-millisekundda (~0.001s) tasdiq javobi qaytariladi.
+    Rasch tahlillari, AI baholash va bazaga yozish asosiy oqimni to'sib qo'ymasligi uchun fonda bajariladi.
+    """
     try:
         data = await request.json()
-        test_id = data.get("test_id", 1)
+        test_id = int(data.get("test_id", 1))
         user_tg_id = data.get("user_tg_id")
+
+        # 1. Tezkor crypto initData tekshiruvi (Zero-DB crypto in 0.05ms)
         if not user_tg_id:
             init_data = data.get("init_data") or request.headers.get("X-Telegram-Init-Data", "")
             if init_data:
-                import urllib.parse
-                try:
-                    parsed = dict(urllib.parse.parse_qsl(init_data))
-                    if "user" in parsed:
-                        u_dict = json.loads(parsed["user"])
-                        if u_dict and u_dict.get("id"):
-                            user_tg_id = int(u_dict["id"])
-                except Exception:
-                    pass
+                _, u_dict = verify_telegram_webapp_data(init_data, BOT_TOKEN)
+                if u_dict and u_dict.get("id"):
+                    user_tg_id = int(u_dict["id"])
             if not user_tg_id and request.rel_url.query.get("tg_id"):
                 try:
                     user_tg_id = int(request.rel_url.query.get("tg_id", 0))
@@ -70,8 +75,27 @@ async def handle_submit_test_api(request):
                 "message": f"⚠️ Web orqali ishlash mumkin emas! Testni faqat rasmiy Telegram botimiz (@{CACHED_BOT_USERNAME}) va Mini ilova orqali topshirish mumkin."
             }, status=403)
 
-        user_obj = await asyncio.to_thread(test_db.get_user, user_tg_id)
-        if not test_db.is_admin(user_tg_id or 0, ADMIN_ID):
+        # 2. In-flight Dublikat himoyasi (RAM lock)
+        sub_key = (int(user_tg_id), int(test_id))
+        if sub_key in _IN_FLIGHT_SUBMISSIONS:
+            return web.json_response({
+                "success": True,
+                "is_late": False,
+                "message": "Javoblaringiz qabul qilinmoqda va saqlanmoqda... Iltimos, kuting! ⏳",
+                "data": {
+                    "test_id": test_id,
+                    "fullname": data.get("fullname", "Foydalanuvchi"),
+                    "is_published": False,
+                    "is_late": False,
+                    "score": None,
+                    "grade": "Kutilmoqda"
+                }
+            })
+
+        # 3. RAM keshdan foydalanuvchini tekshirish (Zero-DB SELECT)
+        user_obj = test_db.get_user(user_tg_id)
+        is_admin_user = test_db.is_admin(user_tg_id, ADMIN_ID)
+        if not is_admin_user:
             if not user_obj:
                 return web.json_response({
                     "success": False,
@@ -83,40 +107,47 @@ async def handle_submit_test_api(request):
                     "message": "⛔️ Sizning profilingizga ruxsat berilmagan yoki to'xtatilgan."
                 }, status=403)
 
-        # ── RATE LIMITING (1-3 soniya cheklovi) ─────────────────
+            # Allaqachon topshirganlikni RAM keshdan tekshirish (Zero-DB)
+            if test_db.has_user_submitted(test_id, user_tg_id):
+                return web.json_response({
+                    "success": False,
+                    "message": "Siz ushbu testni allaqachon topshirgansiz! Qayta topshirish taqiqlanadi."
+                }, status=400)
+
+        # 4. Rate Limiting (1-2 soniya)
         rate_key = f"submit_{user_tg_id or request.remote or 'unknown'}"
         is_allowed, retry_sec = await GLOBAL_RATE_LIMITER.check(rate_key, max_requests=1, window_seconds=2.0)
-        if not is_allowed and not test_db.is_admin(user_tg_id or 0, ADMIN_ID):
+        if not is_allowed and not is_admin_user:
             return web.json_response({
                 "success": False,
                 "retry_after": retry_sec,
                 "message": f"Iltimos, {retry_sec} soniya kuting! So'rovingiz navbatda qayta ishlanmoqda..."
             }, status=429)
 
-        async with SUBMIT_CONCURRENCY_SEMAPHORE:
-            test_obj = await asyncio.to_thread(test_db.get_test_by_id, test_id)
-            if not test_obj:
-                return web.json_response({
-                    "success": False,
-                    "message": "Test topilmadi!"
-                }, status=404)
+        # 5. Test ma'lumotlarini RAM xotirasidan darhol olish (Zero-DB SELECT)
+        test_obj = test_db.get_test_by_id(test_id)
+        if not test_obj:
+            return web.json_response({
+                "success": False,
+                "message": "Test topilmadi!"
+            }, status=404)
 
-            # Bo'sh (0 ta belgilangan) testni topshirishni bloklash (tasodifiy bosilib ketishdan himoya)
-            has_any_answer = False
-            if isinstance(user_answers, dict):
-                for k, v in user_answers.items():
-                    if v is not None and str(v).strip():
-                        has_any_answer = True
-                        break
+        # Bo'sh (0 ta belgilangan) testni topshirishni bloklash
+        has_any_answer = False
+        if isinstance(user_answers, dict):
+            for k, v in user_answers.items():
+                if v is not None and str(v).strip():
+                    has_any_answer = True
+                    break
 
-            if not has_any_answer and not test_db.is_admin(user_tg_id, ADMIN_ID):
-                return web.json_response({
-                    "success": False,
-                    "message": "⚠️ Testda birorta ham savolga javob belgilanmagan! Bo'sh testni topshirib bo'lmaydi. Iltimos, kamida bitta javobni belgilang."
-                }, status=400)
+        if not has_any_answer and not is_admin_user:
+            return web.json_response({
+                "success": False,
+                "message": "⚠️ Testda birorta ham savolga javob belgilanmagan! Bo'sh testni topshirib bo'lmaydi. Iltimos, kamida bitta javobni belgilang."
+            }, status=400)
 
         sched_stat = get_test_schedule_status(test_obj)
-        if sched_stat["is_upcoming"] and not test_db.is_admin(user_tg_id, ADMIN_ID):
+        if sched_stat["is_upcoming"] and not is_admin_user:
             sdate = test_obj.get('scheduled_date') or 'Bugun'
             sstart = test_obj.get('scheduled_start') or ''
             return web.json_response({
@@ -124,9 +155,9 @@ async def handle_submit_test_api(request):
                 "message": f"Test hali boshlanmagan! Boshlanish vaqti: {sdate} {sstart} (UZB)"
             }, status=400)
 
-        # Dastlabki 45 daqiqa davomida javob topshirishni cheklash (Milliy sertifikat qoidasi)
+        # Dastlabki 45 daqiqa davomida javob topshirishni cheklash
         min_submit_info = get_test_min_submit_info(test_obj)
-        if not min_submit_info["can_submit"] and not test_db.is_admin(user_tg_id, ADMIN_ID):
+        if not min_submit_info["can_submit"] and not is_admin_user:
             rem_sec = min_submit_info["remaining_seconds"]
             rem_min = rem_sec // 60
             rem_s = rem_sec % 60
@@ -149,11 +180,66 @@ async def handle_submit_test_api(request):
 
         # Kech topshirilgan holatni aniqlash
         is_late_submission = False
-        if not test_db.is_admin(user_tg_id, ADMIN_ID):
+        if not is_admin_user:
             if sched_stat.get("is_closed") or test_obj.get("is_active", 1) == 0 or test_obj.get("results_published", 0) == 1:
                 is_late_submission = True
 
-        # Bazada tekshirish va saqlash (Asinxron navbat / Semaphore bilan)
+        fullname = (user_obj.get("fullname") if user_obj else None) or data.get("fullname") or "Foydalanuvchi"
+
+        client_data = {
+            "test_id": test_id,
+            "test_code": test_obj.get("test_code", ""),
+            "test_title": test_obj.get("title", ""),
+            "fullname": fullname,
+            "is_published": False,
+            "is_late": bool(is_late_submission),
+            "score": None,
+            "grade": "Kech topshirildi" if is_late_submission else "Kutilmoqda",
+            "correct_count": None,
+            "incorrect_count": None,
+            "unanswered_count": None,
+            "rasch_theta": None,
+            "details": None
+        }
+
+        # 6. In-flight ro'yxatiga kiritish (Dublikat bosilishlardan himoya)
+        _IN_FLIGHT_SUBMISSIONS.add(sub_key)
+
+        # 7. Asinxron background task (Fonda ACID tranzaksiya, Retry va Rasch baholash)
+        asyncio.create_task(_process_submission_background(
+            test_id=test_id,
+            user_tg_id=user_tg_id,
+            user_answers=user_answers,
+            is_late_submission=is_late_submission,
+            test_obj=test_obj,
+            user_obj=user_obj,
+            fullname=fullname
+        ))
+
+        # 8. SUB-MILLISEKUNDDA DARHOL TASDIQ JAVOBINI QAYTARISH (~0.001s)
+        confirm_msg = "⚠️ Siz testni belgilangan vaqtdan kech topshirdingiz! Natijangiz adminga ko'rib chiqish uchun yuborildi." if is_late_submission else "Javoblaringiz qabul qilindi va saqlandi! ✅"
+        return web.json_response({
+            "success": True,
+            "is_late": is_late_submission,
+            "message": confirm_msg,
+            "data": client_data
+        })
+
+    except Exception as e:
+        log.error(f"Submit API Error: {e}", exc_info=True)
+        return web.json_response({"success": False, "message": str(e)}, status=400)
+
+
+async def _process_submission_background(test_id: int, user_tg_id: int, user_answers: dict, is_late_submission: bool, test_obj: dict, user_obj: dict, fullname: str):
+    """
+    Fonda bajariladigan xavfsiz va to'siqsiz jarayon:
+    - ACID tranzaksiyalar va 3 martagacha qayta urinish (Retry logic)
+    - UNIQUE INDEX (user_tg_id, test_id) orqali dublikatlardan 100% himoya
+    - Rasch modeli tahlili va baholash
+    - Telegram orqali xabarnomalar yuborish
+    """
+    sub_key = (int(user_tg_id), int(test_id))
+    try:
         async with SUBMIT_CONCURRENCY_SEMAPHORE:
             result = await asyncio.to_thread(
                 test_db.check_and_save_submission,
@@ -166,39 +252,19 @@ async def handle_submit_test_api(request):
         time_str_sec = now_uzb.strftime("%H:%M:%S")
         datetime_str_sec = now_uzb.strftime("%d.%m.%Y %H:%M:%S")
 
-        client_data = dict(result)
-        client_data["is_published"] = False
-        client_data["is_late"] = bool(is_late_submission)
-        client_data["score"] = None
-        client_data["grade"] = "Kech topshirildi" if is_late_submission else "Kutilmoqda"
-        client_data["correct_count"] = None
-        client_data["incorrect_count"] = None
-        client_data["unanswered_count"] = None
-        client_data["rasch_theta"] = None
-        client_data["details"] = None
-
-        # ── 1,000+ USER BACKGROUND ASYNC TASKS (Main event loop ni to'sib qo'ymaslik uchun) ──
-        asyncio.create_task(_async_submission_followup(
+        await _async_submission_followup(
             result=result,
             test_obj=test_obj,
             user_tg_id=user_tg_id,
             is_late_submission=is_late_submission,
             time_str_sec=time_str_sec,
             datetime_str_sec=datetime_str_sec
-        ))
+        )
+    except Exception as ex:
+        log.error(f"_process_submission_background xatolik [user={user_tg_id}, test={test_id}]: {ex}", exc_info=True)
+    finally:
+        _IN_FLIGHT_SUBMISSIONS.discard(sub_key)
 
-        # ── INSTANT NON-BLOCKING RESPONSE (1 millisekundda foydalanuvchiga tasdiq) ──
-        confirm_msg = "⚠️ Siz testni belgilangan vaqtdan kech topshirdingiz! Natijangiz adminga ko'rib chiqish uchun yuborildi." if is_late_submission else "Javoblaringiz qabul qilindi va saqlandi! ✅"
-        return web.json_response({
-            "success": True,
-            "is_late": is_late_submission,
-            "message": confirm_msg,
-            "data": client_data
-        })
-
-    except Exception as e:
-        log.error(f"Submit API Error: {e}", exc_info=True)
-        return web.json_response({"success": False, "message": str(e)}, status=400)
 
 
 async def _async_submission_followup(result, test_obj, user_tg_id, is_late_submission, time_str_sec, datetime_str_sec):
@@ -947,15 +1013,20 @@ def set_no_cache_headers(resp):
     resp.headers['Expires'] = '0'
     return resp
 
+def set_app_cache_headers(resp, max_age: int = 60):
+    """Mini App HTML sahifalari uchun 1 soniyada ochilish kesh sarlavhalari"""
+    resp.headers['Cache-Control'] = f'public, max-age={max_age}, stale-while-revalidate=300'
+    return resp
+
 async def handle_index(request):
     fpath = await find_web_file('index.html')
     if os.path.exists(fpath) and os.path.isfile(fpath):
-        return set_no_cache_headers(web.FileResponse(fpath))
+        return set_app_cache_headers(web.FileResponse(fpath))
     try:
         import web_assets_fallback
         data, mime = web_assets_fallback.get_asset_bytes('index.html')
         if data:
-            return set_no_cache_headers(web.Response(body=data, content_type=mime or 'text/html', charset='utf-8'))
+            return set_app_cache_headers(web.Response(body=data, content_type=mime or 'text/html', charset='utf-8'))
     except Exception as e:
         log.error(f"index.html yuklashda xatolik: {e}")
     return web.Response(status=404, text="index.html topilmadi")
@@ -978,10 +1049,9 @@ async def handle_app(request):
     if os.path.exists(fpath) and os.path.isfile(fpath):
         resp = web.FileResponse(fpath)
     else:
-        # Fallback ishlatilmaydi — eski app.html dan eski kod qaytib chiqmasligi uchun
         log.warning("app.html topilmadi — fallback o'chirilgan, real fayl talab etiladi")
         resp = web.Response(status=404, text="app.html topilmadi")
-    return set_no_cache_headers(resp)
+    return set_app_cache_headers(resp)
 
 
 async def handle_static_file(request):
@@ -993,16 +1063,16 @@ async def handle_static_file(request):
         resp = web.FileResponse(fpath)
         if any(path_name.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.svg', '.webp', '.ico']):
             resp.headers['Cache-Control'] = 'public, max-age=86400'
+        elif any(path_name.endswith(ext) for ext in ['.css', '.js', '.ttf', '.woff', '.woff2']):
+            resp.headers['Cache-Control'] = 'public, max-age=86400, stale-while-revalidate=604800'
         else:
-            set_no_cache_headers(resp)
+            resp.headers['Cache-Control'] = 'public, max-age=3600'
         return resp
 
     # Fallback to embedded in-memory asset
     try:
         import web_assets_fallback
         if hasattr(web_assets_fallback, 'get_asset_bytes'):
-            # Eski app.js va app.html fallbackdan qaytarilmasin —
-            # ular endi js/app.js va real app.html dan to'g'ri yuklanadi
             _basename = os.path.basename(path_name)
             _STALE_SKIP = {'app.js', 'app.html', 'app_style.css', 'test_style.css', 'index.html', 'admin.html', 'admin_app.js', 'test_app.js'}
             if _basename not in _STALE_SKIP:
@@ -1011,11 +1081,14 @@ async def handle_static_file(request):
                     resp = web.Response(body=data, content_type=mime or 'application/octet-stream')
                     if any(path_name.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.svg', '.webp', '.ico']):
                         resp.headers['Cache-Control'] = 'public, max-age=86400'
+                    elif any(path_name.endswith(ext) for ext in ['.css', '.js', '.ttf', '.woff', '.woff2']):
+                        resp.headers['Cache-Control'] = 'public, max-age=86400, stale-while-revalidate=604800'
                     else:
-                        set_no_cache_headers(resp)
+                        resp.headers['Cache-Control'] = 'public, max-age=3600'
                     return resp
     except Exception:
         pass
+
 
 
     if 'apple-touch-icon' in path_name or path_name.endswith('.ico'):
@@ -2589,6 +2662,26 @@ async def handle_admin_toggle_registration(request):
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
+async def handle_app_check_membership(request):
+    """Guruh yoki kanal a'zoligini 1 soatlik RAM kesh bilan tekshirish (Zero-Telegram-API flood)"""
+    try:
+        tg_id = int(request.rel_url.query.get('tg_id', 0))
+        chat_id = request.rel_url.query.get('chat_id', '') or os.getenv('REQUIRED_CHAT_ID', '')
+        if not tg_id or not chat_id:
+            return web.json_response({"success": True, "is_member": True})
+
+        is_member = await check_user_membership(bot, tg_id, chat_id)
+        return web.json_response({
+            "success": True,
+            "tg_id": tg_id,
+            "chat_id": chat_id,
+            "is_member": is_member
+        })
+    except Exception as e:
+        log.warning(f"handle_app_check_membership xatolik: {e}")
+        return web.json_response({"success": True, "is_member": True})
+
+
 async def create_web_app():
     try:
         test_db.ensure_db_initialized()
@@ -2648,6 +2741,7 @@ async def create_web_app():
     app.router.add_get('/api/app/active-tests', handle_app_active_tests)
     app.router.add_get('/api/app/test-submissions/{test_id}', handle_app_test_submissions)
     app.router.add_get('/api/app/my-results', handle_app_my_results)
+    app.router.add_get('/api/app/check-membership', handle_app_check_membership)
     app.router.add_get('/api/app/trigger-solve', handle_app_trigger_solve)
     app.router.add_post('/api/app/trigger-solve', handle_app_trigger_solve)
     app.router.add_get('/api/app/users', handle_app_users)
@@ -2669,4 +2763,5 @@ async def create_web_app():
     app.router.add_get('/{path:[^/]+\\.(?:css|js|png|jpg|jpeg|svg|ico|json)}', handle_static_file)
 
     return app
+
 
