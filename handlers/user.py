@@ -39,6 +39,41 @@ from .common import (
 
 user_router = Router(name="user_router")
 
+# Yangi foydalanuvchilar qabuli yopilganda takroriy /start spamdan himoya (15 minut cheklov)
+REG_COOLDOWN_SECONDS = 15 * 60  # 900 soniya (15 minut)
+_REG_CLOSED_NOTIFIED: Dict[int, float] = {}
+
+def is_registration_cooldown_active(user_tg_id: int) -> bool:
+    """Yangi foydalanuvchiga oxirgi 15 minut ichida qabul yopiqligi haqida xabar yuborilganmi?"""
+    now = time.time()
+    last_time = _REG_CLOSED_NOTIFIED.get(user_tg_id, 0.0)
+    return (now - last_time) < REG_COOLDOWN_SECONDS
+
+def mark_registration_notified(user_tg_id: int):
+    """Oxirgi ogohlantirish vaqtini saqlash va kesh hajmini nazorat qilish."""
+    now = time.time()
+    _REG_CLOSED_NOTIFIED[user_tg_id] = now
+    if len(_REG_CLOSED_NOTIFIED) > 5000:
+        cutoff = now - REG_COOLDOWN_SECONDS
+        to_del = [uid for uid, t in _REG_CLOSED_NOTIFIED.items() if t < cutoff]
+        for uid in to_del:
+            _REG_CLOSED_NOTIFIED.pop(uid, None)
+
+async def send_registration_closed_message(message: Message, user_tg_id: int):
+    """Yangi foydalanuvchiga qabul yopiqligi haqida uzr so'rab xabar yuborish (15 daqiqada faqat 1 marta)"""
+    if is_registration_cooldown_active(user_tg_id):
+        # 15 minut ichida takroriy /start bosilganda bot qayta xabar yubormaydi (spamdan himoya)
+        return
+    mark_registration_notified(user_tg_id)
+    await message.answer(
+        "🙏 <b>Assalomu alaykum!</b>\n\n"
+        "Keltirilgan noqulaylik uchun uzr so'raymiz, hozirda botimizga yangi o'quvchilarni <b>qabul qilish vaqtincha to'xtatilgan</b>.\n\n"
+        "⏳ <b>Tez orada qabul yana ochiladi.</b> Iltimos, keyinroq qayta urinib ko'ring!\n\n"
+        "<i>ℹ️ Serverni ortiqcha yuklamaslik uchun takroriy so'rovlar 15 daqiqaga cheklangan.</i>",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+
 @user_router.message(CommandStart(), StateFilter("*"))
 async def start_handler(message: Message, state: FSMContext):
     await state.clear()
@@ -52,6 +87,12 @@ async def start_handler(message: Message, state: FSMContext):
     user = test_db.get_user(user_tg_id)
 
     if not user:
+        # Yangi ro'yxatdan o'tmoqchi bo'lgan foydalanuvchi
+        if not test_db.is_admin(user_tg_id, ADMIN_ID):
+            if not test_db.is_registration_open():
+                await send_registration_closed_message(message, user_tg_id)
+                return
+
         await state.set_state(RegistrationState.fullname)
         await message.answer(
             "👋 <b>Assalomu alaykum! Ona tili test tizimiga xush kelibsiz!</b>\n\n"
@@ -80,9 +121,17 @@ async def start_handler(message: Message, state: FSMContext):
 
 
 
-# Ro'yxatdan o'tish: Ism kiritildi (Admin ruxsati talab qilinadi)
+# Ro'yxatdan o'tish: Ism kiritildi
 @user_router.message(RegistrationState.fullname)
 async def reg_fullname(message: Message, state: FSMContext):
+    user_tg_id = message.from_user.id
+    is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
+
+    if not is_adm and not test_db.is_registration_open():
+        await state.clear()
+        await send_registration_closed_message(message, user_tg_id)
+        return
+
     raw_fullname = (message.text or "").strip()
     
     # Qat'iy tekshiruv: g'alati nomlar, buyruqlar va klaviatura spamlarini rad etish
@@ -848,6 +897,10 @@ async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
             test_db.add_or_update_user(user_tg_id, message.from_user.full_name or "Administrator", "", message.from_user.username, status="approved")
             user = test_db.get_user(user_tg_id)
         else:
+            if not test_db.is_registration_open():
+                await state.clear()
+                await send_registration_closed_message(message, user_tg_id)
+                return
             is_valid, _ = validate_fullname(raw_text)
             if is_valid:
                 await reg_fullname(message, state)
@@ -856,7 +909,7 @@ async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
                 await state.set_state(RegistrationState.fullname)
                 await message.answer(
                     "👋 <b>Assalomu alaykum! Ona tili test tizimiga xush kelibsiz!</b>\n\n"
-                    "Tizimdan to'liq foydalanish va ruxsat olish uchun ro'yxatdan o'ting.\n\n"
+                    "Tizimdan to'liq foydalanish uchun ro'yxatdan o'ting.\n\n"
                     "✍️ <b>Iltimos, Ism va Familiyangizni kiriting:</b>\n"
                     "<i>(Misol: Shaxriyor Eshimbetov)</i>",
                     reply_markup=main_menu_kb(user_tg_id)

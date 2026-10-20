@@ -2547,6 +2547,48 @@ async def handle_clean_blocked_users(request):
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
+async def handle_admin_registration_status(request):
+    """Yangi foydalanuvchilar qabuli holatini olish."""
+    return web.json_response({
+        "success": True,
+        "registration_open": test_db.is_registration_open()
+    })
+
+
+async def handle_admin_toggle_registration(request):
+    """Admin yangi foydalanuvchilar qabulini ochishi / yopishi uchun API."""
+    try:
+        data = {}
+        try:
+            data = await request.json()
+        except Exception:
+            pass
+        admin_id = int(data.get('admin_id', 0) or request.rel_url.query.get('admin_id', 0))
+        secret_key = str(data.get('secret_key', '') or request.rel_url.query.get('secret_key', '')).strip()
+
+        is_auth = (admin_id and test_db.is_admin(admin_id, ADMIN_ID)) or (secret_key == "rash_admin_secret_2026") or (admin_id == ADMIN_ID)
+        if not is_auth:
+            return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
+
+        action = str(data.get("action") or request.rel_url.query.get("action", "")).strip().lower()
+        if action == "open":
+            test_db.set_registration_open(True)
+        elif action == "close":
+            test_db.set_registration_open(False)
+        else:
+            current = test_db.is_registration_open()
+            test_db.set_registration_open(not current)
+
+        is_open = test_db.is_registration_open()
+        return web.json_response({
+            "success": True,
+            "registration_open": is_open,
+            "message": "Qabul ochildi" if is_open else "Qabul yopildi"
+        })
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
 async def create_web_app():
     try:
         test_db.ensure_db_initialized()
@@ -2558,6 +2600,9 @@ async def create_web_app():
     app.router.add_get('/api/admin/clean-blocked-users', handle_clean_blocked_users)
     app.router.add_post('/api/admin/notify-inactive-users', handle_notify_inactive_users)
     app.router.add_get('/api/admin/notify-inactive-users', handle_notify_inactive_users)
+    app.router.add_get('/api/admin/registration-status', handle_admin_registration_status)
+    app.router.add_post('/api/admin/toggle-registration', handle_admin_toggle_registration)
+    app.router.add_get('/api/admin/toggle-registration', handle_admin_toggle_registration)
     app.router.add_get('/', handle_index)
     app.router.add_get('/index.html', handle_index)
     app.router.add_get('/admin.html', handle_admin)

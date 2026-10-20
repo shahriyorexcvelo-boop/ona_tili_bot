@@ -758,14 +758,22 @@ def get_scheduled_tests() -> List[Dict[str, Any]]:
 
 def get_setting(key: str, default: str = "") -> str:
     """Tizim sozlamasini olish."""
+    with _RAM_CACHE_LOCK:
+        if key in _CACHE_SETTINGS:
+            ts, val = _CACHE_SETTINGS[key]
+            if time.time() - ts < CACHE_TTL_SETTINGS:
+                return val
+
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT value FROM system_settings WHERE key = {_ph()}", (key,))
         row = cur.fetchone()
         if row:
-            val = row["value"] if isinstance(row, dict) else row[0]
-            return str(val)
+            val = str(row["value"] if isinstance(row, dict) else row[0])
+            with _RAM_CACHE_LOCK:
+                _CACHE_SETTINGS[key] = (time.time(), val)
+            return val
         return default
     finally:
         _close_conn(conn)
@@ -789,6 +797,7 @@ def set_setting(key: str, value: str):
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
             """, (key, str(value)))
         conn.commit()
+        invalidate_settings_cache()
     finally:
         _close_conn(conn)
 
@@ -801,6 +810,16 @@ def is_maintenance_mode() -> bool:
 def set_maintenance_mode(enabled: bool):
     """Texnik profilaktika rejimini yoqish yoki o'chirish."""
     set_setting("maintenance_mode", "1" if enabled else "0")
+
+
+def is_registration_open() -> bool:
+    """Yangi foydalanuvchilar qabuli ochiqmi? (default: True)"""
+    return get_setting("registration_open", "1") == "1"
+
+
+def set_registration_open(enabled: bool):
+    """Yangi foydalanuvchilar qabulini ochish yoki yopish."""
+    set_setting("registration_open", "1" if enabled else "0")
 
 
 def get_broadcast_users() -> List[Dict[str, Any]]:

@@ -1419,6 +1419,28 @@ async def adm_maint_set_off_cb(call: CallbackQuery):
             reply_markup=admin_menu_kb()
         )
 
+# ── YANGI FOYDALANUVCHILAR QABULINI BOSHQARISH (OCHISH / YOPISH) ──
+@admin_router.callback_query(F.data == "admin_toggle_registration")
+async def admin_toggle_registration_cb(call: CallbackQuery):
+    if not test_db.is_admin(call.from_user.id, ADMIN_ID):
+        await call.answer("⛔️ Faqat administrator uchun!", show_alert=True)
+        return
+
+    current = test_db.is_registration_open()
+    new_state = not current
+    test_db.set_registration_open(new_state)
+
+    if new_state:
+        alert_msg = "✅ Yangi o'quvchilar qabuli OCHILDI!\nEndi yangi o'quvchilar yana bemalol ro'yxatdan o'tishlari mumkin."
+    else:
+        alert_msg = "🔴 Yangi o'quvchilar qabuli YOPILDI!\nYangi foydalanuvchilarga qabul yopiqligi bildiriladi va 15 minutlik cheklov qo'yiladi."
+
+    await call.answer(alert_msg, show_alert=True)
+    try:
+        await call.message.edit_reply_markup(reply_markup=admin_menu_kb())
+    except Exception:
+        pass
+
 # 2. O'quvchilarga xabar yuborish menyusi
 def get_broadcast_started_text() -> str:
     active_tests = test_db.get_active_tests()

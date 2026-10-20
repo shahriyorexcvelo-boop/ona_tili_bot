@@ -86,6 +86,11 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     maint_status = "YOQILGAN" if maint_on else "O'CHIQ"
     maint_btn_text = f"🛠 Texnik rejim: {maint_status} {maint_icon}"
 
+    reg_open = test_db.is_registration_open()
+    reg_icon = "🟢" if reg_open else "🔴"
+    reg_status = "OCHIQ" if reg_open else "YOPIQ"
+    reg_btn_text = f"👥 Yangi qabul: {reg_status} {reg_icon}"
+
     buttons = [
         [InlineKeyboardButton(text="💻 MacBook Dashboard (Katta Baza)", url=f"{WEBAPP_URL}/dashboard")],
         [InlineKeyboardButton(text="📄 PDF Watermark qo'yish / Tayyorlash", callback_data="admin_pdf_watermark_info")],
@@ -94,6 +99,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⚠️ Faoliyatsizlarga ogohlantirish", callback_data="admin_warn_inactive_menu")],
         [InlineKeyboardButton(text="🧹 Botni bloklaganlarni tozalash", callback_data="admin_clean_blocked_prompt")],
         [InlineKeyboardButton(text=maint_btn_text, callback_data="admin_toggle_maint_prompt")],
+        [InlineKeyboardButton(text=reg_btn_text, callback_data="admin_toggle_registration")],
         [InlineKeyboardButton(text="👑 Adminlar boshqaruvi", callback_data="admin_manage_admins")],
         [make_webapp_button("👥 Foydalanuvchilar boshqaruvi (Web App)", f"{WEBAPP_URL}/app.html?tab=admin&tg_id={ADMIN_ID}", "admin_webapp_redirect_info")]
     ]
