@@ -86,3 +86,13 @@ Render boshqaruv panelida:
 ```bash
 python scripts/restore.py backups/backup_YYYYMMDD_HHMMSS.json.gz --yes
 ```
+
+---
+
+## ⚡ RENDER BEPUL TARIF (FREE PLAN) VA UYG'OQ SAQLASH
+
+`render.yaml` faylida `plan: free` sozlangan. Render bepul tarifidagi Web Service 15 daqiqa davomida kiruvchi so'rov bo'lmasa, avtomatik ravishda uyqu (spin-down / idle) rejimiga o'tadi. Natijada keyingi so'rov kelganda bot 30–50 soniya "uyg'onish" (cold start) kechikishiga uchrashi mumkin.
+
+**Yechimlar:**
+1. **Bepul tashqi ping (tavsiya etiladi):** Bepul monitoring xizmatlari ([UptimeRobot](https://uptimerobot.com/), [cron-job.org](https://cron-job.org/) yoki [Better Stack](https://betterstack.com/)) orqali botingizning `/healthz` endpointini har 10 daqiqada bir marta chaqirib turing (masalan: `GET https://ona-tili-bot.onrender.com/healthz`). Bu botning uxlamasdan doimiy faol turishini ta'minlaydi.
+2. **Pullik tarifga o'tish:** Render boshqaruv panelida Web Service ni `Starter` ($7/oy) tarifiga o'tkazsangiz, bot 24/7 rejimida hech qachon uxlamaydi va yuqori tezlikda uzluksiz ishlaydi.
