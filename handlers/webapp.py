@@ -703,42 +703,43 @@ def _sync_extract_keys_gemini(image_bytes: bytes, mime_type: str = "image/jpeg")
         "TEST TUZILISHI VA QAT'IY QOIDALAR:\n"
         "1. 1 dan 35 gacha: Variantli savollar. Kalitlar: '1' dan '35' gacha. Qiymati faqat bitta katta harf (A, B, C, D, E, F).\n"
         "2. 36, 37, 38, 39: BITTALIK (1 ta variantli) yopiq/ochiq yozma savollar! DIQQAT: Ularda 'a' va 'b' bandlari BO'LMAYDI. Kalitlar aniq '36', '37', '38', '39' bo'lishi shart!\n"
-        "   - Masalan: '36': 'tiniq'\n"
-        "   - '37': ': -' (tinish belgilari)\n"
-        "   - '38': 'tengdoshlariga (dan)'\n"
-        "   - '39': \"o'shanda muharrir edi\"\n"
-        "3. 40 va undan keyingilar (40, 41, 42, 43, 44...): 2 QISMLI yozma savollar (har bir savolning a va b bandlari bor)!\n"
-        "   Kalitlar: '40a', '40b', '41a', '41b', '42a', '42b', '43a', '43b', '44a', '44b', ...\n"
+        "   - Masalan: '36': 'JIDDIY'\n"
+        "   - '37': '“ , — , — : , ” .' yoki ': -' (tinish belgilari qanday berilgan bo'lsa aynan shunday to'liq saqla)\n"
+        "   - '38': 'TANQIDIY'\n"
+        "   - '39': 'ENAXONNING AKASI'\n"
+        "3. 40 dan 44 gacha (40, 41, 42, 43, 44): 2 QISMLI yozma savollar (har bir savolning a va b bandlari bor)!\n"
+        "   Kalitlar faqat: '40a', '40b', '41a', '41b', '42a', '42b', '43a', '43b', '44a', '44b'.\n"
+        "   DIQQAT: 45-savol esse (ijodiy yozma ish) bo'lgani uchun uning kaliti BO'LMAYDI! Hech qachon '45', '45a' yoki '45b' chiqarma!\n"
         "   - Masalan:\n"
-        "     '40a': 'kesim', '40b': 'kechishini'\n"
-        "     '41a': 'chunki', '41b': 'sabab-oqibat'\n"
-        "     '42a': \"ta'did\", '42b': \"yor og'zi/labi\"\n"
-        "     '43a': 'sh', '43b': 'mutlaq'\n"
-        "     '44a': 'qanoat', '44b': 'isrof'\n\n"
+        "     '40a': 'QAYTMASLIGINI', '40b': 'BOY BERAYOTGANIMIZNI'\n"
+        "     '41a': 'AMMO', '41b': 'ZIDLIK'\n"
+        "     '42a': 'TAZOD', '42b': 'TANOSIB'\n"
+        "     '43a': 'B', '43b': 'MUQAYYAD'\n"
+        "     '44a': 'SHUHRATPARASTLIK', '44b': 'YOLG‘ON SAXOVAT'\n\n"
         "MUHIM KO'RSATMALAR:\n"
         "- Jadvaldagi o'qituvchi texnik izohlarini (masalan, '(28 talik katakka sig\\'dirish kerak)', '(: xato)', '(- to\\'g\\'ri)') kalit matnidan tozalab tashla yoki asosiy kalitni qoldir.\n"
-        "- Tutuq belgilarini (apostroflarni) to'g'ri saqla (masalan: o'shanda, ta'did, og'zi).\n"
+        "- Tutuq belgilarini (apostroflarni) to'g'ri saqla (masalan: yolg'on, o'shanda, ta'did, og'zi).\n"
         "- Defisli so'zlarni defisi bilan saqla (masalan: sabab-oqibat).\n"
         "- Alternativ variantlarni slesh bilan saqla (masalan: yor og'zi/labi).\n\n"
-        "Qaytadigan javob aynan toza JSON obyekti bo'lsin:\n"
+        "Qaytadigan javob aynan toza JSON obyekti bo'lsin (1 dan 44 gacha, jami 49 ta kalit):\n"
         "{\n"
-        '  "1": "B",\n'
+        '  "1": "C",\n'
         '  "2": "B",\n'
         '  "35": "D",\n'
-        '  "36": "tiniq",\n'
-        '  "37": ": -",\n'
-        '  "38": "tengdoshlariga (dan)",\n'
-        '  "39": "o\'shanda muharrir edi",\n'
-        '  "40a": "kesim",\n'
-        '  "40b": "kechishini",\n'
-        '  "41a": "chunki",\n'
-        '  "41b": "sabab-oqibat",\n'
-        '  "42a": "ta\'did",\n'
-        '  "42b": "yor og\'zi/labi",\n'
-        '  "43a": "sh",\n'
-        '  "43b": "mutlaq",\n'
-        '  "44a": "qanoat",\n'
-        '  "44b": "isrof"\n'
+        '  "36": "JIDDIY",\n'
+        '  "37": "“ , — , — : , ” .",\n'
+        '  "38": "TANQIDIY",\n'
+        '  "39": "ENAXONNING AKASI",\n'
+        '  "40a": "QAYTMASLIGINI",\n'
+        '  "40b": "BOY BERAYOTGANIMIZNI",\n'
+        '  "41a": "AMMO",\n'
+        '  "41b": "ZIDLIK",\n'
+        '  "42a": "TAZOD",\n'
+        '  "42b": "TANOSIB",\n'
+        '  "43a": "B",\n'
+        '  "43b": "MUQAYYAD",\n'
+        '  "44a": "SHUHRATPARASTLIK",\n'
+        '  "44b": "YOLG‘ON SAXOVAT"\n'
         "}\n\n"
         "DIQQAT: Faqat toza JSON matnini qaytar, hech qanday qo'shimcha so'z yoki sharh yozma!"
     )
@@ -781,6 +782,8 @@ def _sync_extract_keys_gemini(image_bytes: bytes, mime_type: str = "image/jpeg")
                 cleaned = {}
                 for k, v in parsed.items():
                     k_clean = str(k).strip().lower().replace("q", "").replace("-savol", "").replace("savol", "").strip()
+                    if k_clean in ['45', '45a', '45b', '45-savol'] or k_clean.startswith('45'):
+                        continue
                     v_str = str(v).strip()
                     # Apostroflar va tirelarni me'yorga keltirish
                     v_str = re.sub(r"[\u2018\u2019\u02BB\u02BC\u00B4`ʼʻ\‘\’\']", "'", v_str)
@@ -1071,7 +1074,12 @@ async def handle_static_file(request):
         if any(path_name.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.svg', '.webp', '.ico']):
             resp.headers['Cache-Control'] = 'public, max-age=86400'
         elif any(path_name.endswith(ext) for ext in ['.css', '.js', '.ttf', '.woff', '.woff2']):
-            resp.headers['Cache-Control'] = 'public, max-age=86400, stale-while-revalidate=604800'
+            if any(path_name.endswith(n) for n in ['admin_app.js', 'test_app.js', 'dashboard.js', 'app.js', 'test_style.css']):
+                resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+                resp.headers['Pragma'] = 'no-cache'
+                resp.headers['Expires'] = '0'
+            else:
+                resp.headers['Cache-Control'] = 'public, max-age=86400, stale-while-revalidate=604800'
         else:
             resp.headers['Cache-Control'] = 'public, max-age=3600'
         return resp

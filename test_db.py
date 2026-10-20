@@ -2597,7 +2597,79 @@ def _is_minor_typo(s1: str, s2: str) -> bool:
         else:
             i += 1
             j += 1
-    return True
+def is_punctuation_answer(s: Any) -> bool:
+    """Tekshirilayotgan javob tinish belgilari (qo'shtirnoq, tire, vergul, ikki nuqta, nuqta va h.k.) dan iboratligini aniqlash"""
+    if not s:
+        return False
+    cleaned = str(s).strip()
+    if not cleaned:
+        return False
+    non_punct = re.sub(r'[\s"“”«»\u2018\u2019\u02BB\u02BC\u00B4`ʼʻ\‘\’\'\u2212\u2013\u2014\u2012\u2015\uFE63\uFF0D\u00ad\-_.,:;!?( )\[\]{}/\\|]', '', cleaned)
+    return len(non_punct) == 0
+
+
+def normalize_punctuation_seq(s: str) -> str:
+    """Tinish belgilari ketma-ketligini standartlashtirish (qo'shtirnoq, tire, apostrof, probellar)."""
+    if not s:
+        return ""
+    t = re.sub(r'["“”«»]', '"', str(s))
+    t = re.sub(r"[\u2018\u2019\u02BB\u02BC\u00B4`ʼʻ\‘\’\']", "'", t)
+    t = re.sub(r"[\u2212\u2013\u2014\u2012\u2015\uFE63\uFF0D\u00ad]", "-", t)
+    t = re.sub(r"\s+", "", t)
+    return t
+
+
+def check_punctuation_match(u_str: str, c_str: str) -> bool:
+    """
+    Ona tili 37-savol kabi tinish belgilari savollarini to'liq va moslashuvchan tekshirish:
+    Masalan: '“ , — , — : , ” .' kalitiga nisbatan o'quvchi tomonidan yozilgan
+    turli formatdagi javoblarni (probelli, probelsiz, tire va qo'shtirnoq turlari, vergulli yoki vergulsiz)
+    100% to'g'ri deb qabul qiladi.
+    """
+    u_clean = normalize_punctuation_seq(u_str)
+    c_clean = normalize_punctuation_seq(c_str)
+    if not u_clean or not c_clean:
+        return False
+    if u_clean == c_clean:
+        return True
+
+    # 1. Oxiridagi nuqtasiz moslik (nuqta qo'yilgan yoki tushirib qoldirilgan)
+    u_no_dot = u_clean[:-1] if u_clean.endswith(".") else u_clean
+    c_no_dot = c_clean[:-1] if c_clean.endswith(".") else c_clean
+    if u_no_dot == c_no_dot:
+        return True
+
+    # 2. Ketma-ket vergullarni birlashtirish
+    u_no_sep = re.sub(r",+", ",", u_clean).strip(",")
+    c_no_sep = re.sub(r",+", ",", c_clean).strip(",")
+    if u_no_sep == c_no_sep:
+        return True
+
+    # 3. Tinish belgilari orasidagi qo'shimcha vergullarni normallashtirish (masalan: "-:" vs "-,:")
+    u_collapse = re.sub(r"(?<=[^\w\s,]),(?=[^\w\s,])", "", u_clean)
+    c_collapse = re.sub(r"(?<=[^\w\s,]),(?=[^\w\s,])", "", c_clean)
+    if u_collapse == c_collapse:
+        return True
+    if u_collapse.rstrip(".") == c_collapse.rstrip("."):
+        return True
+
+    # 4. Vergulsiz strukturaviy belgilar ketma-ketligi (masalan: ", -, -, :, " vs ", -, - :, ")
+    u_no_comma = u_clean.replace(",", "")
+    c_no_comma = c_clean.replace(",", "")
+    if u_no_comma and u_no_comma == c_no_comma:
+        return True
+    if u_no_comma and u_no_comma.rstrip(".") == c_no_comma.rstrip("."):
+        return True
+
+    # 5. Tire va ikki nuqta o'rin almashuvi yoki variantlari (masalan: ": -" vs ":-" vs "- :" vs "-:")
+    if set(c_no_comma) == {":", "-"} and set(u_no_comma) == {":", "-"}:
+        return True
+
+    # 6. Belgilar to'plami va uzunligi bir xil bo'lsa
+    if set(c_no_comma) == set(u_no_comma) and len(c_no_comma) == len(u_no_comma):
+        return True
+
+    return False
 
 
 def check_answer_match(user_ans: Any, correct_ans: Any) -> Tuple[bool, float, str]:
@@ -2615,6 +2687,11 @@ def check_answer_match(user_ans: Any, correct_ans: Any) -> Tuple[bool, float, st
     c_str = str(correct_ans).strip()
     if not u_str or not c_str:
         return (False, 0.0, "incorrect")
+
+    # 0. Tinish belgilari savoli tekshiruvi (masalan, 37-savol: "“ , — , — : , ” ." yoki ": -")
+    if is_punctuation_answer(c_str) or is_punctuation_answer(u_str):
+        if check_punctuation_match(u_str, c_str):
+            return (True, 1.0, "correct")
 
     # 1. Ona tili matnli solishtirish (tutuq belgilari, defislar, tinish belgilari)
     u_uz = normalize_uzbek_text(u_str)

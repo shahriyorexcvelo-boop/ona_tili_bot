@@ -90,7 +90,7 @@ const AdminApp = {
           }
           const titleInput = document.getElementById('adm-test-title');
           if (titleInput && !titleInput.value) {
-            titleInput.value = `Matematika Blok Test #${data.next_code}`;
+            titleInput.value = `Ona tili Milliy Sertifikat Testi #${data.next_code}`;
           }
         }
       })
@@ -360,16 +360,19 @@ const AdminApp = {
     const part3 = document.getElementById('admin-part-3');
     const part4 = document.getElementById('admin-part-4');
 
-    // 1. 1-35 savollar (A, B, C, D)
+    // 1. 1-35 savollar (1-32: A, B, C, D; 33-35: A, B, C, D, E, F)
     if (part1) {
       let html = '';
       for (let q = 1; q <= 35; q++) {
         const curAns = this.answers[String(q)] ? this.answers[String(q)].ans : '';
+        const isSix = (q >= 33 && q <= 35);
+        const opts = isSix ? ['A', 'B', 'C', 'D', 'E', 'F'] : ['A', 'B', 'C', 'D'];
+        const groupClass = isSix ? 'options-group options-group-6' : 'options-group';
         html += `
           <div class="q-admin-row">
             <span class="q-admin-num">${q}.</span>
-            <div class="options-group" style="flex: 1;">
-              ${['A', 'B', 'C', 'D'].map(opt => `
+            <div class="${groupClass}" style="flex: 1;">
+              ${opts.map(opt => `
                 <button class="option-btn ${opt === curAns ? 'selected' : ''}" id="adm-opt-${q}-${opt}" onclick="AdminApp.selectChoice(${q}, '${opt}')">
                   ${opt}
                 </button>
@@ -454,9 +457,12 @@ const AdminApp = {
 
   selectChoice(qNum, option) {
     const key = String(qNum);
+    if (!this.answers[key]) {
+      this.answers[key] = { ans: '' };
+    }
     this.answers[key].ans = option;
 
-    const opts = ['A', 'B', 'C', 'D'];
+    const opts = (qNum >= 33 && qNum <= 35) ? ['A', 'B', 'C', 'D', 'E', 'F'] : ['A', 'B', 'C', 'D'];
     opts.forEach(opt => {
       const btn = document.getElementById(`adm-opt-${qNum}-${opt}`);
       if (btn) btn.classList.toggle('selected', opt === option);
@@ -538,12 +544,12 @@ const AdminApp = {
 
     if (totalBadge) {
       if (totalUnfilled === 0) {
-        totalBadge.textContent = 'Barchasi to\'ldirildi (51/51)';
+        totalBadge.textContent = 'Barchasi to\'ldirildi (49/49)';
         totalBadge.style.background = '#10B981';
         if (statusIcon) statusIcon.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
         if (statusTitle) statusTitle.textContent = 'Barcha savollar tayyor:';
       } else {
-        totalBadge.textContent = `${totalUnfilled} ta belgilanmagan (${totalFilled}/51)`;
+        totalBadge.textContent = `${totalUnfilled} ta belgilanmagan (${totalFilled}/49)`;
         totalBadge.style.background = '#EF4444';
         if (statusIcon) statusIcon.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
         if (statusTitle) statusTitle.textContent = 'Javoblar to\'ldirilishi:';
@@ -562,10 +568,10 @@ const AdminApp = {
 
     if (openCountEl) {
       if (openUnfilled === 0) {
-        openCountEl.textContent = 'Barchasi kiritildi (16/16)';
+        openCountEl.textContent = 'Barchasi kiritildi (14/14)';
         openCountEl.style.color = '#10B981';
       } else {
-        openCountEl.textContent = `${openUnfilled} ta kiritilmagan (${16 - openUnfilled}/16)`;
+        openCountEl.textContent = `${openUnfilled} ta kiritilmagan (${14 - openUnfilled}/14)`;
         openCountEl.style.color = '#EF4444';
       }
     }
@@ -601,7 +607,7 @@ const AdminApp = {
     const sec4El = document.getElementById('cnt-sec-4');
     if (sec4El) {
       if (sec4Unfilled === 0) {
-        sec4El.textContent = 'Barchasi kiritildi (12/12)';
+        sec4El.textContent = 'Barchasi kiritildi (10/10)';
         sec4El.style.color = '#10B981';
       } else {
         sec4El.textContent = `${sec4Unfilled} ta kiritilmagan`;
@@ -613,7 +619,7 @@ const AdminApp = {
     const dockUnfilled = document.getElementById('admin-dock-unfilled');
     if (dockUnfilled) {
       if (totalUnfilled === 0) {
-        dockUnfilled.textContent = '51/51 to\'liq belgilandi';
+        dockUnfilled.textContent = '49/49 to\'liq belgilandi';
         dockUnfilled.style.color = '#10B981';
       } else {
         dockUnfilled.textContent = `${totalUnfilled} ta javob qoldi (Yopiq: ${closedUnfilled}, Ochiq: ${openUnfilled})`;
@@ -856,10 +862,8 @@ const AdminApp = {
           const normKey = String(k).toLowerCase().trim();
           if (this.answers[normKey]) {
             let cleanVal = String(v).trim();
-            // 36a-44b ochiq savollari uchun sanitarizatsiyani majburiy chaqiramiz:
-            if (/[ab]$/.test(normKey) || (parseInt(normKey) >= 36 && parseInt(normKey) <= 44)) {
-              cleanVal = this.sanitizeMath(cleanVal);
-            }
+            // Apostroflarni me'yorga keltirish
+            cleanVal = cleanVal.replace(/[\u2018\u2019\u02BB\u02BC\u00B4`ʼʻ\‘\’\']/g, "'");
             this.answers[normKey].ans = cleanVal;
             recognizedCount++;
           }
@@ -868,6 +872,19 @@ const AdminApp = {
         // Shaklni qayta chizish va hisobotni yangilash
         this.renderForm();
         this.updateUnfilledStats();
+
+        // Klaviatura yoki input fokusini butunlay yopish
+        if (document.activeElement && typeof document.activeElement.blur === 'function') {
+          try { document.activeElement.blur(); } catch(e) {}
+        }
+
+        // Pastki saqlash tugmasini har qanday holatda ko'rinadigan qilish
+        const dock = document.querySelector('.bottom-submit-dock.admin-compact-dock');
+        if (dock) {
+          dock.style.setProperty('display', 'flex', 'important');
+          dock.style.setProperty('visibility', 'visible', 'important');
+          dock.style.setProperty('opacity', '1', 'important');
+        }
 
         if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
           window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
@@ -890,6 +907,19 @@ const AdminApp = {
     } catch (err) {
       alert('Rasm yuklashda xatolik yuz berdi: ' + err.message);
     } finally {
+      if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        try { document.activeElement.blur(); } catch(e) {}
+      }
+      if (input) {
+        try { input.blur(); } catch(e) {}
+        input.value = '';
+      }
+      const dock = document.querySelector('.bottom-submit-dock.admin-compact-dock');
+      if (dock) {
+        dock.style.setProperty('display', 'flex', 'important');
+        dock.style.setProperty('visibility', 'visible', 'important');
+        dock.style.setProperty('opacity', '1', 'important');
+      }
       if (btn) btn.disabled = false;
       if (btnIcon) {
         btnIcon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>';

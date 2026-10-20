@@ -269,15 +269,18 @@ const TestApp = {
     const part2 = document.getElementById('questions-part-2');
     const part3 = document.getElementById('questions-part-3');
 
-    // 1. 1-35 Variantli Savollar (A, B, C, D)
+    // 1. 1-35 Variantli Savollar (1-32: A, B, C, D; 33-35: A, B, C, D, E, F)
     if (part1) {
       let html1 = '';
       for (let q = 1; q <= 35; q++) {
+        const isSix = (q >= 33 && q <= 35);
+        const opts = isSix ? ['A', 'B', 'C', 'D', 'E', 'F'] : ['A', 'B', 'C', 'D'];
+        const groupClass = isSix ? 'options-group options-group-6' : 'options-group';
         html1 += `
           <div class="question-card" id="qcard-${q}">
             <span class="question-num-tag">${q}-savol</span>
-            <div class="options-group">
-              ${['A', 'B', 'C', 'D'].map(opt => `
+            <div class="${groupClass}">
+              ${opts.map(opt => `
                 <button class="option-btn" id="opt-${q}-${opt}" onclick="TestApp.selectOption(${q}, '${opt}')">
                   ${opt}
                 </button>
@@ -560,7 +563,7 @@ const TestApp = {
 
     // 1-35 variantli savollar tugmalari va kartalarini tozalash
     for (let q = 1; q <= 35; q++) {
-      const opts = ['A', 'B', 'C', 'D'];
+      const opts = (q >= 33 && q <= 35) ? ['A', 'B', 'C', 'D', 'E', 'F'] : ['A', 'B', 'C', 'D'];
       opts.forEach(opt => {
         const btn = document.getElementById(`opt-${q}-${opt}`);
         if (btn) btn.classList.remove('selected');
@@ -607,8 +610,8 @@ const TestApp = {
     const key = String(qNum);
     const prev = this.answers[key];
 
-    // Variant tugmalarini yangilash (1-35 savollar: A, B, C, D)
-    const opts = ['A', 'B', 'C', 'D'];
+    // Variant tugmalarini yangilash (1-32: A-D, 33-35: A-F)
+    const opts = (qNum >= 33 && qNum <= 35) ? ['A', 'B', 'C', 'D', 'E', 'F'] : ['A', 'B', 'C', 'D'];
     opts.forEach(opt => {
       const btn = document.getElementById(`opt-${qNum}-${opt}`);
       if (btn) btn.classList.toggle('selected', opt === option);

@@ -615,21 +615,29 @@ body.dark-mode .ambient-orb-3,
   transition: padding 0.2s ease;
 }
 
-/* Ochiq savollarni yozayotganda pastki dock va tepadagi elementlar klaviatura ustiga chiqib qolmasligi uchun to'liq yashirilishi */
-body.keyboard-open .test-header {
+/* Ochiq savollarni yozayotganda o'quvchi test ekranida pastki dock va tepadagi elementlar klaviatura ustiga chiqib qolmasligi uchun */
+body.keyboard-open .test-header:not(.admin-header) {
   display: none !important;
 }
 
-body.keyboard-open .bottom-submit-dock,
-body:has(input:focus) .bottom-submit-dock,
-body:has(textarea:focus) .bottom-submit-dock {
+body.keyboard-open .bottom-submit-dock:not(.admin-compact-dock),
+body:has(#test-app .open-native-input:focus) .bottom-submit-dock:not(.admin-compact-dock) {
   display: none !important;
 }
 
-body.keyboard-open .test-container,
-body:has(input:focus) .test-container,
-body:has(textarea:focus) .test-container {
-  padding-bottom: 380px !important;
+/* Admin panelda pastki saqlash docki DOIM ko'rinishi shart */
+.bottom-submit-dock.admin-compact-dock {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  z-index: 9999 !important;
+}
+body:has(input:focus) .admin-compact-dock,
+body:has(textarea:focus) .admin-compact-dock,
+body.keyboard-open .admin-compact-dock {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
 }
 
 /* 45-savol: Esse / Yozma ish maxsus stillari */
