@@ -102,14 +102,30 @@ def preload_all_tests_cache() -> int:
         _close_conn(conn)
 
 def invalidate_test_cache(test_id: Optional[int] = None):
-    """Test ma'lumotlari yangilanganda RAM keshni tozalash va qayta yuklash"""
-    global _CACHE_TEST_BOUNDS_TIME
+    """Test ma'lumotlari yangilanganda yoki o'chirilganda RAM keshni tozalash va qayta yuklash"""
+    global _CACHE_TEST_BOUNDS_TIME, _GLOBAL_ALL_TESTS_LIST, _GLOBAL_ACTIVE_TESTS_LIST
     with _RAM_CACHE_LOCK:
         _CACHE_TEST_BOUNDS.clear()
         _CACHE_TEST_BOUNDS_TIME = 0.0
         _USER_SUBMISSIONS_MAP_CACHE.clear()
         _USER_SUBMITTED_IDS_CACHE.clear()
-    preload_all_tests_cache()
+        if test_id is not None:
+            tid = int(test_id)
+            _GLOBAL_TESTS_CACHE.pop(tid, None)
+            codes_to_del = [c for c, id_ in list(_GLOBAL_TESTS_BY_CODE.items()) if id_ == tid]
+            for c in codes_to_del:
+                _GLOBAL_TESTS_BY_CODE.pop(c, None)
+            _GLOBAL_ALL_TESTS_LIST = [t for t in _GLOBAL_ALL_TESTS_LIST if t.get("id") != tid]
+            _GLOBAL_ACTIVE_TESTS_LIST = [t for t in _GLOBAL_ACTIVE_TESTS_LIST if t.get("id") != tid]
+        else:
+            _GLOBAL_TESTS_CACHE.clear()
+            _GLOBAL_TESTS_BY_CODE.clear()
+            _GLOBAL_ALL_TESTS_LIST = []
+            _GLOBAL_ACTIVE_TESTS_LIST = []
+    try:
+        preload_all_tests_cache()
+    except Exception as e:
+        print(f"Error reloading tests cache in invalidate_test_cache: {e}")
 
 def invalidate_user_cache(tg_id: Optional[int] = None):
     """Foydalanuvchi ma'lumotlari yangilanganda RAM keshni tozalash"""
@@ -680,7 +696,13 @@ def set_test_schedule(test_id: int, scheduled_date: str, start_time: str, end_ti
             (scheduled_date, start_time, end_time, test_id)
         )
         conn.commit()
+        invalidate_test_cache(test_id)
         _notify_schedule_changed_internal()
+        try:
+            from core import invalidate_dashboard_cache
+            invalidate_dashboard_cache()
+        except Exception:
+            pass
         return True
     except Exception as e:
         print(f"Error set_test_schedule: {e}")
@@ -721,7 +743,13 @@ def clear_test_schedule(test_id: int) -> bool:
             (test_id,)
         )
         conn.commit()
+        invalidate_test_cache(test_id)
         _notify_schedule_changed_internal()
+        try:
+            from core import invalidate_dashboard_cache
+            invalidate_dashboard_cache()
+        except Exception:
+            pass
         return True
     except Exception as e:
         print(f"Error clear_test_schedule: {e}")
@@ -741,6 +769,12 @@ def set_test_youtube_url(test_id: int, url: str) -> bool:
             (val, test_id)
         )
         conn.commit()
+        invalidate_test_cache(test_id)
+        try:
+            from core import invalidate_dashboard_cache
+            invalidate_dashboard_cache()
+        except Exception:
+            pass
         return True
     except Exception as e:
         print(f"Error set_test_youtube_url: {e}")
@@ -1522,6 +1556,7 @@ def update_test_pdf(test_id: int, pdf_file_id: str, pdf_file_name: str) -> bool:
             (pdf_file_id, pdf_file_name, test_id)
         )
         conn.commit()
+        invalidate_test_cache(test_id)
         return True
     except Exception as e:
         print(f"Error updating test pdf: {e}")
@@ -1533,7 +1568,7 @@ def update_test_pdf(test_id: int, pdf_file_id: str, pdf_file_name: str) -> bool:
 def get_active_tests() -> List[Dict[str, Any]]:
     """Zero-DB-Read: Faol testlarni to'g'ridan-to'g'ri server RAM xotirasidan sub-millisekundda qaytarish."""
     with _RAM_CACHE_LOCK:
-        if _GLOBAL_TESTS_PRELOADED and _GLOBAL_ACTIVE_TESTS_LIST:
+        if _GLOBAL_TESTS_PRELOADED:
             return [dict(t) for t in _GLOBAL_ACTIVE_TESTS_LIST]
 
     preload_all_tests_cache()
@@ -1548,12 +1583,14 @@ def get_test_by_code(test_code: str) -> Optional[Dict[str, Any]]:
     clean_code = str(test_code).upper().strip().replace("#", "")
 
     with _RAM_CACHE_LOCK:
-        if clean_code in _GLOBAL_TESTS_BY_CODE:
-            cached_id = _GLOBAL_TESTS_BY_CODE[clean_code]
-            if cached_id in _GLOBAL_TESTS_CACHE:
-                return dict(_GLOBAL_TESTS_CACHE[cached_id])
+        if _GLOBAL_TESTS_PRELOADED:
+            if clean_code in _GLOBAL_TESTS_BY_CODE:
+                cached_id = _GLOBAL_TESTS_BY_CODE[clean_code]
+                if cached_id in _GLOBAL_TESTS_CACHE:
+                    return dict(_GLOBAL_TESTS_CACHE[cached_id])
+            return None
 
-    # Agar RAM da topilmasa, DB dan yuklab RAM ni yangilaymiz
+    # Agar hali preload bo'lmagan bo'lsa, DB dan yuklab RAM ni yangilaymiz
     conn = get_connection()
     try:
         cur = conn.cursor()
@@ -1577,8 +1614,10 @@ def get_test_by_id(test_id: int) -> Optional[Dict[str, Any]]:
     tid = int(test_id)
 
     with _RAM_CACHE_LOCK:
-        if tid in _GLOBAL_TESTS_CACHE:
-            return dict(_GLOBAL_TESTS_CACHE[tid])
+        if _GLOBAL_TESTS_PRELOADED:
+            if tid in _GLOBAL_TESTS_CACHE:
+                return dict(_GLOBAL_TESTS_CACHE[tid])
+            return None
 
     # Keshda mavjud bo'lmasa, DB dan olib keshlaymiz
     conn = get_connection()
@@ -1603,7 +1642,7 @@ get_test = get_test_by_id
 def get_all_tests() -> List[Dict[str, Any]]:
     """Zero-DB-Read: Barcha testlar ro'yxatini to'g'ridan-to'g'ri server RAM xotirasidan qaytarish."""
     with _RAM_CACHE_LOCK:
-        if _GLOBAL_TESTS_PRELOADED and _GLOBAL_ALL_TESTS_LIST:
+        if _GLOBAL_TESTS_PRELOADED:
             return [dict(t) for t in _GLOBAL_ALL_TESTS_LIST]
 
     preload_all_tests_cache()
@@ -1743,6 +1782,12 @@ def update_test_time_limit(test_id: int, time_limit_min: int) -> bool:
             (time_limit_min, test_id)
         )
         conn.commit()
+        invalidate_test_cache(test_id)
+        try:
+            from core import invalidate_dashboard_cache
+            invalidate_dashboard_cache()
+        except Exception:
+            pass
         return True
     except Exception as e:
         print(f"Error updating test time limit: {e}")
@@ -1816,8 +1861,16 @@ def delete_test(test_id: int) -> bool:
         cur.execute(f"DELETE FROM submissions WHERE test_id = {_ph()}", (test_id,))
         cur.execute(f"DELETE FROM tests WHERE id = {_ph()}", (test_id,))
         conn.commit()
+        invalidate_test_cache(test_id)
+        try:
+            from core import invalidate_dashboard_cache
+            invalidate_dashboard_cache()
+        except Exception:
+            pass
+        print(f"🗑 Test #{test_id} bazadan va RAM keshdan muvaffaqiyatli o'chirildi.")
         return True
-    except Exception:
+    except Exception as e:
+        print(f"❌ Test #{test_id} o'chirishda xatolik: {e}")
         return False
     finally:
         _close_conn(conn)

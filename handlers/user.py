@@ -227,7 +227,7 @@ async def reg_phone(message: Message, state: FSMContext):
 
     await message.answer(
         f"🎉 <b>Tabriklaymiz, {fullname}! Siz muvaffaqiyatli ro'yxatdan o'tdingiz!</b>\n\n"
-        f"Kerakli bo'limni tanlang yoki to'g'ridan-to'g'ri test kodini yuboring 👇",
+        f"Kerakli bo'limni tanlang yoki test topshirish uchun «🔢 Test kodini kiritish» tugmasini bosing 👇",
         reply_markup=main_menu_kb(user_tg_id)
     )
 
@@ -1006,13 +1006,6 @@ async def catch_unregistered_or_menu_text(message: Message, state: FSMContext):
     elif text == "📋 Testlarni boshqarish":
         from .admin import admin_manage_tests_text_handler
         await admin_manage_tests_text_handler(message)
-        return
-
-    # To'g'ridan-to'g'ri test kodi kiritilgan holatni tekshirish
-    code = text.upper().replace("#", "")
-    test = test_db.get_test_by_code(code)
-    if test:
-        await send_test_card(message, test, user_tg_id)
         return
 
     # Noma'lum buyruq yoki xabarlar uchun yo'naltiruvchi javob

@@ -900,8 +900,11 @@ async def admin_delete_test_cb(call: CallbackQuery):
     if not test_db.is_admin(call.from_user.id, ADMIN_ID):
         return
     test_id = int(call.data.split("_")[3])
-    test_db.delete_test(test_id)
-    await call.answer("🗑 Test muvaffaqiyatli o'chirildi!", show_alert=True)
+    ok = test_db.delete_test(test_id)
+    if ok:
+        await call.answer("🗑 Test muvaffaqiyatli o'chirildi!", show_alert=True)
+    else:
+        await call.answer("❌ Testni o'chirishda xatolik yuz berdi!", show_alert=True)
     await admin_manage_tests(call)
 
 # ── TEZKOR FOYDALANUVCHI TASDIQLASH / RAD ETISH HANDLERLARI ──
