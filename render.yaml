@@ -3,7 +3,7 @@ services:
     name: ona-tili-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python3 test_bot.py
+    startCommand: python test_bot.py
     plan: free
     region: frankfurt
     autoDeploy: true
@@ -17,3 +17,13 @@ services:
         value: demo_rashonatili_bot
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: PORT
+        value: "8082"
+      - key: PG_POOL_MINCONN
+        value: "1"
+      - key: PG_POOL_MAXCONN
+        value: "25"
+      - key: WEBAPP_URL
+        value: https://ona-tili-bot.onrender.com
+      - key: DATABASE_URL
+        value: postgresql://postgres.mvijmbrbjumpacavmbpe:tysXoj-wochep-typvu4@aws-0-ap-south-1.pooler.supabase.com:6543/postgres
