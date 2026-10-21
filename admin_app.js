@@ -328,10 +328,6 @@ const AdminApp = {
   clearAll() {
     this.initAnswers();
     this.renderForm();
-    const inp45 = document.getElementById('input-45');
-    if (inp45) inp45.value = '';
-    const b45 = document.getElementById('box-45');
-    if (b45) b45.classList.remove('filled');
     this.updateUnfilledStats();
     if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
       try { window.Telegram.WebApp.HapticFeedback.notificationOccurred('warning'); } catch(e) {}
@@ -356,8 +352,6 @@ const AdminApp = {
       this.answers[`${q}a`] = { ans: '' };
       this.answers[`${q}b`] = { ans: '' };
     }
-    // 45 Esse
-    this.answers['45'] = { ans: '' };
   },
 
   renderForm() {
@@ -673,11 +667,6 @@ const AdminApp = {
           this.answers[key].ans = input.value.trim();
         }
       }
-    }
-    const input45 = document.getElementById('input-45');
-    if (input45 && input45.value !== undefined) {
-      if (!this.answers['45']) this.answers['45'] = { ans: '' };
-      this.answers['45'].ans = input45.value.trim();
     }
 
     const { totalUnfilled, closedUnfilled, openUnfilled } = this.updateUnfilledStats();
