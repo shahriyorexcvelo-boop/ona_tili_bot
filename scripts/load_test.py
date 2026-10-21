@@ -2,14 +2,14 @@
 Load Testing Script for Ona Tili Bot & Mini App
 ===============================================
 Yuklama sinovi:
-- Bosqich 1: 100 ta virtual foydalanuvchi bir tekisda kiradi (Profil, Faol testlar).
+- Bosqich 1: 100 ta virtual foydalanuvchi bir tekisda kiradi (Profil, Faol testlar, Testni ochish).
 - Bosqich 2: 30 ta foydalanuvchi bir vaqtda testni ochadi, autosave qiladi va topshiradi.
 
-Natijalar:
-- O'rtacha, p95 va p99 kechikishlar (latency)
-- Xatolar soni va foizi (Qabul mezoni: p95 < 2.0s, xato < 1%)
-- HTTP 429 (Rate Limit) va HTTP 503 (Pool Band) soni
-- Server xotirasi (RSS)
+Xavfsizlik:
+- Faqat localhost / 127.0.0.1 ga ruxsat beriladi.
+- Boshqa URL uchun --allow-prod talab qilinadi.
+- Production PostgreSQL ga to'g'ridan-to'g'ri ulanmaydi (faqat lokal SQLite).
+- Soxta ID lar 900000000 dan boshlanadi.
 """
 from __future__ import annotations
 import os
@@ -24,7 +24,8 @@ import time
 import math
 import asyncio
 import argparse
-from typing import List, Dict, Any
+import urllib.parse
+from typing import List, Dict, Any, Optional
 
 try:
     import aiohttp
@@ -59,15 +60,24 @@ class LoadTestRunner:
         self.is_fast = is_fast
         self.latencies: List[float] = []
         self.status_counts: Dict[int, int] = {}
-        self.error_messages: List[str] = []
+        self.first_error_per_endpoint: Dict[str, str] = {}
+        self.endpoint_latencies: Dict[str, List[float]] = {
+            "profile": [],
+            "active_tests": [],
+            "get_draft": [],
+            "autosave": [],
+            "submit": []
+        }
         self.lock = asyncio.Lock()
 
-    async def _record(self, status: int, latency: float, error: str = ""):
+    async def _record(self, endpoint_name: str, status: int, latency: float, error_body: str = ""):
         async with self.lock:
             self.latencies.append(latency)
+            self.endpoint_latencies.setdefault(endpoint_name, []).append(latency)
             self.status_counts[status] = self.status_counts.get(status, 0) + 1
-            if error:
-                self.error_messages.append(error)
+            if status >= 400 and endpoint_name not in self.first_error_per_endpoint:
+                clean_err = error_body.strip().replace("\n", " ")[:200]
+                self.first_error_per_endpoint[endpoint_name] = f"HTTP {status}: {clean_err}"
 
     async def simulate_user_flow(self, session: aiohttp.ClientSession, user_id: int, test_id: int):
         init_data = f"user=%7B%22id%22%3A{user_id}%2C%22first_name%22%3A%22VirtualUser{user_id}%22%7D"
@@ -80,29 +90,29 @@ class LoadTestRunner:
         # 1. Profilni yuklash
         t0 = time.monotonic()
         try:
-            async with session.get(f"{self.base_url}/api/app/profile?tg_id={user_id}", headers=headers) as resp:
-                await resp.read()
-                await self._record(resp.status, time.monotonic() - t0)
+            async with session.get(f"{self.base_url}/api/app/profile?tg_id={user_id}&init_data={urllib.parse.quote(init_data)}", headers=headers) as resp:
+                body = await resp.text()
+                await self._record("profile", resp.status, time.monotonic() - t0, body)
         except Exception as e:
-            await self._record(599, time.monotonic() - t0, f"Profile error: {e}")
+            await self._record("profile", 599, time.monotonic() - t0, str(e))
 
         # 2. Faol testlar ro'yxatini olish
         t0 = time.monotonic()
         try:
-            async with session.get(f"{self.base_url}/api/app/active-tests?tg_id={user_id}", headers=headers) as resp:
-                await resp.read()
-                await self._record(resp.status, time.monotonic() - t0)
+            async with session.get(f"{self.base_url}/api/app/active-tests?tg_id={user_id}&init_data={urllib.parse.quote(init_data)}", headers=headers) as resp:
+                body = await resp.text()
+                await self._record("active_tests", resp.status, time.monotonic() - t0, body)
         except Exception as e:
-            await self._record(599, time.monotonic() - t0, f"Active tests error: {e}")
+            await self._record("active_tests", 599, time.monotonic() - t0, str(e))
 
         # 3. Testni ochish (Savollar / Qoralama yuklash)
         t0 = time.monotonic()
         try:
-            async with session.get(f"{self.base_url}/api/app/get-draft?test_id={test_id}&user_tg_id={user_id}", headers=headers) as resp:
-                await resp.read()
-                await self._record(resp.status, time.monotonic() - t0)
+            async with session.get(f"{self.base_url}/api/app/get-draft?test_id={test_id}&user_tg_id={user_id}&init_data={urllib.parse.quote(init_data)}", headers=headers) as resp:
+                body = await resp.text()
+                await self._record("get_draft", resp.status, time.monotonic() - t0, body)
         except Exception as e:
-            await self._record(599, time.monotonic() - t0, f"Get draft error: {e}")
+            await self._record("get_draft", 599, time.monotonic() - t0, str(e))
 
         # 4. Autosave javoblarini saqlash
         t0 = time.monotonic()
@@ -123,10 +133,10 @@ class LoadTestRunner:
                     "init_data": init_data
                 }
             ) as resp:
-                await resp.read()
-                await self._record(resp.status, time.monotonic() - t0)
+                body = await resp.text()
+                await self._record("autosave", resp.status, time.monotonic() - t0, body)
         except Exception as e:
-            await self._record(599, time.monotonic() - t0, f"Autosave error: {e}")
+            await self._record("autosave", 599, time.monotonic() - t0, str(e))
 
         # 5. Testni topshirish (Submit)
         t0 = time.monotonic()
@@ -142,10 +152,40 @@ class LoadTestRunner:
                     "init_data": init_data
                 }
             ) as resp:
-                await resp.read()
-                await self._record(resp.status, time.monotonic() - t0)
+                body = await resp.text()
+                await self._record("submit", resp.status, time.monotonic() - t0, body)
         except Exception as e:
-            await self._record(599, time.monotonic() - t0, f"Submit error: {e}")
+            await self._record("submit", 599, time.monotonic() - t0, str(e))
+
+    def seed_local_sqlite(self, num_phase1: int, num_phase2: int):
+        """Faqat lokal SQLite da virtual foydalanuvchilar va test tayyorlash."""
+        db_url = os.getenv("DATABASE_URL", "").strip()
+        if db_url and ("postgres" in db_url or "supabase" in db_url or "neon" in db_url):
+            print("⚠️ Production DATABASE_URL aniqlandi: load_test bazaga ulanmadi.")
+            return
+
+        os.environ["DATABASE_URL"] = ""
+        try:
+            import test_db
+            conn = test_db.get_connection()
+            try:
+                cur = conn.cursor()
+                now_ts = int(time.time())
+                all_uids = [900000000 + i for i in range(1, num_phase1 + 1)] + [900010000 + j for j in range(1, num_phase2 + 1)]
+                for uid in all_uids:
+                    cur.execute(
+                        f"INSERT INTO users (tg_id, fullname, phone, username, status, registered_at) "
+                        f"VALUES ({test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}) "
+                        f"ON CONFLICT (tg_id) DO UPDATE SET status = 'approved'",
+                        (uid, f"Virtual Student {uid}", "+998901234567", f"vuser_{uid}", "approved", now_ts)
+                    )
+                cur.execute("DELETE FROM submissions WHERE user_tg_id >= 900000000 AND user_tg_id <= 900020000")
+                conn.commit()
+                print(f"✅ Lokal SQLite: {len(all_uids)} ta test foydalanuvchisi tayyorlandi.")
+            finally:
+                test_db._close_conn(conn)
+        except Exception as e:
+            print(f"Lokal SQLite seeding ogohlantirish: {e}")
 
     async def run(self, num_phase1: int = 100, num_phase2: int = 30):
         print(f"\n🚀 YUKLAMA SINOVI BOSHLANDI: {self.base_url}")
@@ -155,6 +195,9 @@ class LoadTestRunner:
 
         initial_rss = get_current_rss_mb()
         print(f"Boshlang'ich RSS xotira: {initial_rss:.1f} MB")
+
+        # Lokal SQLite ga tayyorgarlik
+        self.seed_local_sqlite(num_phase1, num_phase2)
 
         timeout = aiohttp.ClientTimeout(total=15)
         conn = aiohttp.TCPConnector(limit=50, limit_per_host=40, ssl=False)
@@ -171,28 +214,6 @@ class LoadTestRunner:
             except Exception:
                 pass
 
-            # Virtual foydalanuvchilarni tasdiqlangan qilib tayyorlash
-            all_uids = [900000000 + i for i in range(1, num_phase1 + 1)] + [900010000 + j for j in range(1, num_phase2 + 1)]
-            try:
-                import test_db
-                conn = test_db.get_connection()
-                try:
-                    cur = conn.cursor()
-                    now_ts = int(time.time())
-                    for uid in all_uids:
-                        cur.execute(
-                            f"INSERT INTO users (tg_id, fullname, phone, username, status, registered_at) "
-                            f"VALUES ({test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}) "
-                            f"ON CONFLICT (tg_id) DO UPDATE SET status = 'approved'",
-                            (uid, f"Virtual Student {uid}", "+998901234567", f"vuser_{uid}", "approved", now_ts)
-                        )
-                    cur.execute("DELETE FROM submissions WHERE user_tg_id >= 900000000 AND user_tg_id <= 900020000")
-                    conn.commit()
-                    print(f"✅ {len(all_uids)} ta virtual test foydalanuvchisi bazada tayyorlandi.")
-                finally:
-                    test_db._close_conn(conn)
-            except Exception as e:
-                print(f"⚠️ Foydalanuvchilarni tayyorlashda ogohlantirish (davom etiladi): {e}")
             # 1-Bosqich: Foydalanuvchilarning bir tekisda kirishi
             print(f"\n--- 1-BOSQICH: {num_phase1} virtual foydalanuvchi ---")
             delay_between = self.duration_sec / max(1, num_phase1)
@@ -233,55 +254,88 @@ class LoadTestRunner:
         p99 = sorted_lat[min(int(math.floor(total_reqs * 0.99)), total_reqs - 1)]
         max_lat = sorted_lat[-1]
 
-        # Status hisoblari
-        count_200 = sum(v for k, v in self.status_counts.items() if 200 <= k < 300)
-        count_429 = self.status_counts.get(429, 0)
-        count_503 = self.status_counts.get(503, 0)
-        count_errors = sum(v for k, v in self.status_counts.items() if k >= 500 or k == 599)
-        error_rate = (count_errors / total_reqs) * 100.0
+        # Status hisoblari (BOSQICH 7.2 talabi)
+        c_200 = sum(v for k, v in self.status_counts.items() if 200 <= k < 300)
+        c_401 = self.status_counts.get(401, 0)
+        c_403 = self.status_counts.get(403, 0)
+        c_404 = self.status_counts.get(404, 0)
+        c_429 = self.status_counts.get(429, 0)
+        c_500 = self.status_counts.get(500, 0)
+        c_502 = self.status_counts.get(502, 0)
+        c_503 = self.status_counts.get(503, 0)
+        c_other_5xx = sum(v for k, v in self.status_counts.items() if k >= 500 and k not in (500, 502, 503))
+        total_errors = sum(v for k, v in self.status_counts.items() if k >= 400)
+        total_5xx = sum(v for k, v in self.status_counts.items() if k >= 500)
+        err_rate = (total_5xx / total_reqs) * 100.0
 
         print("\n" + "=" * 60)
         print("               YUKLAMA SINOVI HISOBOTI")
         print("=" * 60)
         print(f"Jami so'rovlar soni:       {total_reqs}")
-        print(f"Muvaffaqiyatli (2xx):      {count_200} ({count_200 / total_reqs * 100:.1f}%)")
-        print(f"Rate limited (429):        {count_429}")
-        print(f"Pool band (503):           {count_503}")
-        print(f"Boshqa xatolar (5xx):      {count_errors}")
-        print(f"Xatolik foizi:             {error_rate:.2f}%")
+        print(f"Muvaffaqiyatli (2xx):      {c_200} ({c_200 / total_reqs * 100:.1f}%)")
         print("-" * 60)
-        print(f"O'rtacha kechikish (Avg):  {avg_lat * 1000:.1f} ms")
-        print(f"Median kechikish (p50):    {p50 * 1000:.1f} ms")
-        print(f"95-persentil (p95):        {p95 * 1000:.1f} ms ({p95:.3f} s)")
-        print(f"99-persentil (p99):        {p99 * 1000:.1f} ms ({p99:.3f} s)")
-        print(f"Maksimal kechikish (Max):  {max_lat * 1000:.1f} ms")
+        print("HTTP Status kodlari bo'yicha hisob:")
+        print(f"  200 OK:                  {c_200}")
+        print(f"  401 Unauthorized:        {c_401}")
+        print(f"  403 Forbidden:           {c_403}")
+        print(f"  404 Not Found:           {c_404}")
+        print(f"  429 Too Many Requests:   {c_429}")
+        print(f"  500 Internal Error:      {c_500}")
+        print(f"  502 Bad Gateway:         {c_502}")
+        print(f"  503 Service Unavailable: {c_503}")
+        if c_other_5xx:
+            print(f"  5xx boshqa xatolar:      {c_other_5xx}")
+        print(f"5xx Xatolik foizi:         {err_rate:.2f}%")
+        print("-" * 60)
+        print("Kechikishlar (Latency):")
+        print(f"  O'rtacha (Avg):          {avg_lat * 1000:.1f} ms")
+        print(f"  Median (p50):            {p50 * 1000:.1f} ms")
+        print(f"  95-persentil (p95):      {p95 * 1000:.1f} ms ({p95:.3f} s)")
+        print(f"  99-persentil (p99):      {p99 * 1000:.1f} ms ({p99:.3f} s)")
+        print(f"  Maksimal (Max):          {max_lat * 1000:.1f} ms")
         print("-" * 60)
         print(f"Xotira (RSS):              {init_rss:.1f} MB -> {final_rss:.1f} MB (Farq: {final_rss - init_rss:+.1f} MB)")
+
+        if self.first_error_per_endpoint:
+            print("-" * 60)
+            print("Har bir endpointdagi dastlabki xato javobi (200 belgigacha):")
+            for ep, err_text in self.first_error_per_endpoint.items():
+                print(f"  [{ep}]: {err_text}")
+
         print("=" * 60)
 
-        # Qabul mezonlari tekshiruvi: p95 < 2.0s va xatolik < 1%
         passed_p95 = p95 < 2.0
-        passed_errors = error_rate < 1.0
+        passed_errors = err_rate < 1.0
 
         if passed_p95 and passed_errors:
-            print("🎉 QABUL MEZONLARI BAJARILDI (p95 < 2s, xatolar < 1%)!")
+            print("🎉 QABUL MEZONLARI BAJARILDI (p95 < 2s, 5xx xatolar < 1%)!")
         else:
             print("⚠️ QABUL MEZONLARI BAJARILMADI:")
             if not passed_p95:
-                print(f"  - p95 kechikish {p95:.2f}s > 2.0s")
+                print(f"  - p95 kechikish {p95:.2f}s >= 2.0s")
             if not passed_errors:
-                print(f"  - Xatolik darajasi {error_rate:.2f}% >= 1.0%")
+                print(f"  - 5xx Xatolik darajasi {err_rate:.2f}% >= 1.0%")
 
         print("=" * 60 + "\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ona Tili Bot Yuklama Sinovi")
-    parser.add_argument("--url", default="http://127.0.0.1:8082", help="Server URL manzili")
+    parser.add_argument("--url", default="http://127.0.0.1:8082", help="Server URL manzili (default: http://127.0.0.1:8082)")
     parser.add_argument("--fast", action="store_true", help="Tezkor simulyatsiya rejimi")
     parser.add_argument("--users", type=int, default=100, help="1-bosqich foydalanuvchilar soni")
     parser.add_argument("--burst", type=int, default=30, help="2-bosqich parallel foydalanuvchilar soni")
+    parser.add_argument("--allow-prod", action="store_true", help="Production/tashqi serverga yuklama sinoviga ruxsat berish (standart: rad etiladi)")
     args = parser.parse_args()
+
+    # Xavfsizlik tekshiruvi: faqat localhost yoki 127.0.0.1 ga ruxsat
+    parsed_url = urllib.parse.urlparse(args.url)
+    hostname = (parsed_url.hostname or "").lower()
+    if hostname not in ("localhost", "127.0.0.1", "::1") and not args.allow_prod:
+        print(f"\n❌ XATOLIK: '{args.url}' tashqi server manzili!")
+        print("Xavfsizlik qoidasi bo'yicha faqat localhost yoki 127.0.0.1 ga ruxsat berilgan.")
+        print("Agar ataylab tashqi serverga yubormoqchi bo'lsangiz, --allow-prod bayrog'ini ishlating.\n")
+        sys.exit(1)
 
     runner = LoadTestRunner(base_url=args.url, is_fast=args.fast)
     asyncio.run(runner.run(num_phase1=args.users, num_phase2=args.burst))

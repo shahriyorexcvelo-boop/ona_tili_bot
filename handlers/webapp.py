@@ -45,6 +45,28 @@ from .common import (
 _IN_FLIGHT_SUBMISSIONS: set[tuple[int, int]] = set()
 
 
+def _get_authenticated_user_id(request: web.Request, data: Optional[dict] = None) -> Optional[int]:
+    """
+    Faqat tasdiqlangan Telegram WebApp initData orqali foydalanuvchi tg_id sini olish.
+    Soxtalashtirilgan ?tg_id= query yoki body dagi tg_id lari qat'iyan rad etiladi.
+    """
+    init_data = (
+        request.headers.get("X-Telegram-Init-Data")
+        or (data.get("init_data") if isinstance(data, dict) else "")
+        or request.rel_url.query.get("init_data", "")
+        or request.rel_url.query.get("tgWebAppData", "")
+    )
+    if not init_data:
+        return None
+    is_valid, user_dict = verify_telegram_webapp_data(init_data, BOT_TOKEN)
+    if is_valid and user_dict and user_dict.get("id"):
+        try:
+            return int(user_dict["id"])
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 async def handle_submit_test_api(request):
     """
     Instant Non-Blocking Submission:
@@ -54,27 +76,16 @@ async def handle_submit_test_api(request):
     try:
         data = await request.json()
         test_id = int(data.get("test_id", 1))
-        user_tg_id = data.get("user_tg_id")
 
-        # 1. Tezkor crypto initData tekshiruvi (Zero-DB crypto in 0.05ms)
-        if not user_tg_id:
-            init_data = data.get("init_data") or request.headers.get("X-Telegram-Init-Data", "")
-            if init_data:
-                _, u_dict = verify_telegram_webapp_data(init_data, BOT_TOKEN)
-                if u_dict and u_dict.get("id"):
-                    user_tg_id = int(u_dict["id"])
-            if not user_tg_id and request.rel_url.query.get("tg_id"):
-                try:
-                    user_tg_id = int(request.rel_url.query.get("tg_id", 0))
-                except Exception:
-                    pass
-        user_answers = data.get("answers", {})
-
+        # 1. Faqat tasdiqlangan initData orqali xavfsiz autentifikatsiya
+        user_tg_id = _get_authenticated_user_id(request, data)
         if not user_tg_id or int(user_tg_id) <= 0:
             return web.json_response({
                 "success": False,
-                "message": f"⚠️ Web orqali ishlash mumkin emas! Testni faqat rasmiy Telegram botimiz (@{CACHED_BOT_USERNAME}) va Mini ilova orqali topshirish mumkin."
-            }, status=403)
+                "message": "Autentifikatsiya xatosi: Telegram WebApp initData noto'g'ri yoki taqdim etilmagan"
+            }, status=401)
+
+        user_answers = data.get("answers", {})
 
         # 2. In-flight Dublikat himoyasi (RAM lock)
         sub_key = (int(user_tg_id), int(test_id))
@@ -369,10 +380,11 @@ async def handle_admin_test_pdf_report(request):
         if not test_id:
             return web.json_response({"success": False, "message": "Test ID ko'rsatilmadi"}, status=400)
 
-        # Admin tekshiruvi (query, header yoki admin ID)
-        tg_id = int(request.rel_url.query.get('admin_id', 0) or request.rel_url.query.get('tg_id', 0))
-        secret_key = str(request.rel_url.query.get('secret_key', '')).strip()
-        is_auth = (tg_id and (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID))) or (secret_key == "rash_admin_secret_2026") or (tg_id == ADMIN_ID)
+        # Admin tekshiruvi (tasdiqlangan initData orqali)
+        auth_uid = _get_authenticated_user_id(request)
+        is_admin_user = bool(auth_uid and (await test_db.db(test_db.is_admin, auth_uid, ADMIN_ID)))
+        if not is_admin_user:
+            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=401)
         
         # Test mavjudligini tekshirish
         test = await test_db.db(test_db.get_test_by_id, test_id)
@@ -1248,32 +1260,16 @@ async def handle_app_profile(request):
     try:
         bot_user = CACHED_BOT_USERNAME
 
-        tg_id = 0
-        try:
-            tg_id = int(request.rel_url.query.get('tg_id', 0))
-        except (ValueError, TypeError):
-            tg_id = 0
-
-        # Agar tg_id query orqali kelmagan bo'lsa, Telegram init_data dan olishga harakat qilamiz
+        tg_id = _get_authenticated_user_id(request)
         if not tg_id or tg_id <= 0:
-            init_data = (
-                request.headers.get("X-Telegram-Init-Data") or 
-                request.rel_url.query.get("init_data") or 
-                request.rel_url.query.get("tgWebAppData") or ""
-            )
-            if init_data:
-                try:
-                    parsed = dict(urllib.parse.parse_qsl(init_data))
-                    if "user" in parsed:
-                        u_dict = json.loads(parsed["user"])
-                        if u_dict and u_dict.get("id"):
-                            tg_id = int(u_dict["id"])
-                except Exception as ex:
-                    log.warning(f"handle_app_profile init_data parse xatolik: {ex}")
+            return web.json_response({
+                "success": False,
+                "message": "Autentifikatsiya xatosi: Telegram WebApp initData noto'g'ri yoki taqdim etilmagan"
+            }, status=401)
 
         # Agar foydalanuvchi admin bo'lsa va hali bazada yo'q bo'lsa, avtomatik yaratamiz
-        is_admin_user = await test_db.db(test_db.is_admin, tg_id or 0, ADMIN_ID)
-        if is_admin_user and tg_id and tg_id > 0:
+        is_admin_user = await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)
+        if is_admin_user:
             existing_user = await test_db.db(test_db.get_user, tg_id)
             if not existing_user:
                 await test_db.db(
@@ -1578,19 +1574,7 @@ def _fetch_active_tests_payload_sync(tg_id: int):
 async def handle_app_active_tests(request):
     """Faol testlar ro'yxati (user uchun topshirilgan-topshirilmaganligini ham qaytaradi)."""
     try:
-        tg_id = int(request.rel_url.query.get('tg_id', 0))
-        if not tg_id:
-            init_data = request.rel_url.query.get('init_data', '') or request.headers.get('X-Telegram-Init-Data', '')
-            if init_data:
-                import urllib.parse, json
-                try:
-                    parsed = dict(urllib.parse.parse_qsl(init_data))
-                    if 'user' in parsed:
-                        u_dict = json.loads(parsed['user'])
-                        if u_dict and u_dict.get('id'):
-                            tg_id = int(u_dict['id'])
-                except Exception:
-                    pass
+        tg_id = _get_authenticated_user_id(request) or 0
 
         if tg_id and not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
             u_check = await test_db.db(test_db.get_user, tg_id)
@@ -1616,9 +1600,9 @@ async def handle_app_active_tests(request):
 async def handle_app_my_results(request):
     """Foydalanuvchining o'z test natijalari tarixi."""
     try:
-        tg_id = int(request.rel_url.query.get('tg_id', 0))
+        tg_id = _get_authenticated_user_id(request)
         if not tg_id:
-            return web.json_response({"success": True, "results": []})
+            return web.json_response({"success": False, "message": "Autentifikatsiya talab qilinadi"}, status=401)
         submissions = await test_db.db(test_db.get_user_submissions, tg_id)
         return web.json_response({"success": True, "results": submissions})
     except Exception as e:
@@ -1628,21 +1612,9 @@ async def handle_app_my_results(request):
 async def handle_app_users(request):
     """Admin uchun barcha foydalanuvchilar ro'yxati va statistika."""
     try:
-        tg_id = int(request.rel_url.query.get('tg_id', 0))
+        tg_id = _get_authenticated_user_id(request)
         if not tg_id or not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
-            init_data = request.rel_url.query.get('init_data', '') or request.headers.get('X-Telegram-Init-Data', '')
-            import urllib.parse, json
-            try:
-                parsed = dict(urllib.parse.parse_qsl(init_data))
-                if 'user' in parsed:
-                    u_dict = json.loads(parsed['user'])
-                    if u_dict and u_dict.get('id'):
-                        tg_id = int(u_dict['id'])
-            except Exception:
-                pass
-
-        if not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
-            return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
+            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=401)
 
         users = await test_db.db(test_db.get_all_users)
         counts = await test_db.db(test_db.get_users_count)
@@ -1858,17 +1830,13 @@ async def handle_app_autosave_answer(request):
     try:
         data = await request.json()
         test_id = int(data.get("test_id", 0))
-        user_tg_id = data.get("user_tg_id")
+        user_tg_id = _get_authenticated_user_id(request, data)
 
         if not user_tg_id:
-            init_data = data.get("init_data") or request.headers.get("X-Telegram-Init-Data", "")
-            if init_data:
-                _, u_dict = verify_telegram_webapp_data(init_data, BOT_TOKEN)
-                if u_dict and u_dict.get("id"):
-                    user_tg_id = int(u_dict["id"])
+            return web.json_response({"success": False, "message": "Autentifikatsiya talab qilinadi"}, status=401)
 
-        if not user_tg_id or not test_id:
-            return web.json_response({"success": False, "message": "test_id yoki user_tg_id yetishmaydi"}, status=400)
+        if not test_id:
+            return web.json_response({"success": False, "message": "test_id yetishmaydi"}, status=400)
 
         user_tg_id = int(user_tg_id)
 
@@ -1897,17 +1865,13 @@ async def handle_app_get_draft(request):
     """
     try:
         test_id = int(request.rel_url.query.get("test_id", 0))
-        user_tg_id = request.rel_url.query.get("user_tg_id")
+        user_tg_id = _get_authenticated_user_id(request)
 
         if not user_tg_id:
-            init_data = request.headers.get("X-Telegram-Init-Data", "")
-            if init_data:
-                _, u_dict = verify_telegram_webapp_data(init_data, BOT_TOKEN)
-                if u_dict and u_dict.get("id"):
-                    user_tg_id = int(u_dict["id"])
+            return web.json_response({"success": False, "answers": {}, "message": "Autentifikatsiya talab qilinadi"}, status=401)
 
-        if not user_tg_id or not test_id:
-            return web.json_response({"success": False, "answers": {}}, status=400)
+        if not test_id:
+            return web.json_response({"success": False, "answers": {}, "message": "test_id yetishmaydi"}, status=400)
 
         user_tg_id = int(user_tg_id)
         drafts = await test_db.db(test_db.get_answer_drafts, user_tg_id, test_id)
@@ -1920,22 +1884,11 @@ async def handle_app_broadcast(request):
     """Admin tomonidan barcha o'quvchilarga xabar yuborish (Mini App orqali)."""
     try:
         data = await request.json()
-        admin_id = int(data.get('admin_id', 0))
+        admin_id = _get_authenticated_user_id(request, data)
         message_text = str(data.get('message', '')).strip()
 
         if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
-            init_data = data.get('init_data', '') or request.headers.get('X-Telegram-Init-Data', '')
-            import urllib.parse, json
-            try:
-                parsed = dict(urllib.parse.parse_qsl(init_data))
-                if 'user' in parsed:
-                    u_dict = json.loads(parsed['user'])
-                    if u_dict and u_dict.get('id'):
-                        admin_id = int(u_dict['id'])
-            except Exception:
-                pass
-
-        if not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
+            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=401)
             return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
 
         if not message_text:
@@ -2767,12 +2720,9 @@ async def handle_clean_blocked_users(request):
             data = await request.json()
         except Exception:
             pass
-        admin_id = int(data.get('admin_id', 0) or request.rel_url.query.get('admin_id', 0))
-        secret_key = str(data.get('secret_key', '') or request.rel_url.query.get('secret_key', '')).strip()
-
-        is_auth = (admin_id and (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID))) or (secret_key == "rash_admin_secret_2026") or (admin_id == ADMIN_ID)
-        if not is_auth:
-            return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
+        admin_id = _get_authenticated_user_id(request, data)
+        if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
+            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=401)
 
         result = await clean_blocked_users_from_db(initiator_id=admin_id or ADMIN_ID)
         return web.json_response(result)
@@ -2797,12 +2747,9 @@ async def handle_admin_toggle_registration(request):
             data = await request.json()
         except Exception:
             pass
-        admin_id = int(data.get('admin_id', 0) or request.rel_url.query.get('admin_id', 0))
-        secret_key = str(data.get('secret_key', '') or request.rel_url.query.get('secret_key', '')).strip()
-
-        is_auth = (admin_id and (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID))) or (secret_key == "rash_admin_secret_2026") or (admin_id == ADMIN_ID)
-        if not is_auth:
-            return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
+        admin_id = _get_authenticated_user_id(request, data)
+        if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
+            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=401)
 
         action = str(data.get("action") or request.rel_url.query.get("action", "")).strip().lower()
         if action == "open":
@@ -2826,9 +2773,11 @@ async def handle_admin_toggle_registration(request):
 async def handle_app_check_membership(request):
     """Guruh yoki kanal a'zoligini 1 soatlik RAM kesh bilan tekshirish (Zero-Telegram-API flood)"""
     try:
-        tg_id = int(request.rel_url.query.get('tg_id', 0))
+        tg_id = _get_authenticated_user_id(request)
+        if not tg_id:
+            return web.json_response({"success": False, "message": "Autentifikatsiya talab qilinadi"}, status=401)
         chat_id = request.rel_url.query.get('chat_id', '') or os.getenv('REQUIRED_CHAT_ID', '')
-        if not tg_id or not chat_id:
+        if not chat_id:
             return web.json_response({"success": True, "is_member": True})
 
         is_member = await check_user_membership(bot, tg_id, chat_id)

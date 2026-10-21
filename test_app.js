@@ -105,7 +105,10 @@ const TestApp = {
 
     // 5. Allaqachon topshirganlikni va 45 daqiqalik cheklovni tekshirish
     if (this.userTgId) {
-      fetch('/api/app/active-tests?tg_id=' + this.userTgId)
+      var initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
+      fetch('/api/app/active-tests?init_data=' + encodeURIComponent(initData), {
+        headers: { 'X-Telegram-Init-Data': initData }
+      })
         .then(function(res) { return res.json(); })
         .then(function(d) {
           if (d && d.tests) {
@@ -526,7 +529,7 @@ const TestApp = {
   fetchDraftFromBackend() {
     if (!this.testId || !this.userTgId) return;
     const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
-    fetch(`/api/app/get-draft?test_id=${this.testId}&user_tg_id=${this.userTgId}`, {
+    fetch(`/api/app/get-draft?test_id=${this.testId}&init_data=${encodeURIComponent(initData)}`, {
       headers: {
         'X-Telegram-Init-Data': initData,
         'X-Telegram-User-Id': String(this.userTgId || '')

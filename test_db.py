@@ -3149,6 +3149,10 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
     if not user_tg_id or int(user_tg_id) <= 0:
         raise ValueError("⚠️ Web orqali ishlash mumkin emas! Testni faqat rasmiy Telegram botimiz (@bm_rashtest_bot) va Mini ilova orqali topshirish mumkin.")
 
+    user = get_user(user_tg_id) if user_tg_id else None
+    fullname = user.get("fullname", "Foydalanuvchi") if isinstance(user, dict) else "Foydalanuvchi"
+    phone = user.get("phone", "-") if isinstance(user, dict) else "-"
+
     existing = get_user_submission_for_test(test_id, user_tg_id)
     if existing:
         if is_admin(user_tg_id, ADMIN_ID):
@@ -3163,10 +3167,6 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
                 _close_conn(conn_del)
         else:
             raise ValueError("Siz ushbu testni allaqachon topshirgansiz! Qayta topshirish taqiqlanadi.")
-
-    user = get_user(user_tg_id) if user_tg_id else None
-    fullname = user["fullname"] if user else "Foydalanuvchi"
-    phone = user["phone"] if user else "-"
 
     correct_answers_raw = json.loads(test["answers_json"])
 

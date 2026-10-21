@@ -75,7 +75,9 @@ async def main():
     # Lokal ishga tushirilganda (RENDER_EXTERNAL_URL va RENDER env yo'q bo'lsa) webhook O'RNATILMASIN va O'CHIRILMASIN
     is_render = bool(os.getenv("RENDER_EXTERNAL_URL") or os.getenv("RENDER") == "true" or os.getenv("RENDER_SERVICE_ID"))
     USE_WEBHOOK = os.getenv("USE_WEBHOOK", "1" if is_render else "0").strip().lower() in ("1", "true", "yes")
-    WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "onatili_sec_token_2026").strip()
+    WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
+    if use_webhook_mode and not WEBHOOK_SECRET:
+        log.error("❌ XATOLIK: WEBHOOK_SECRET muhit o'zgaruvchisi (env) o'rnatilmagan! Standart xavfli token ishlatilmaydi.")
     WEBHOOK_PATH = "/tg-webhook"
 
     active_url = get_webapp_url()
@@ -89,7 +91,7 @@ async def main():
         SimpleRequestHandler(
             dispatcher=dp,
             bot=bot,
-            secret_token=WEBHOOK_SECRET,
+            secret_token=WEBHOOK_SECRET or None,
             handle_in_background=True
         ).register(app, path=WEBHOOK_PATH)
         setup_application(app, dp, bot=bot)
@@ -160,7 +162,7 @@ async def main():
             try:
                 await bot.set_webhook(
                     url=webhook_url,
-                    secret_token=WEBHOOK_SECRET,
+                    secret_token=WEBHOOK_SECRET or None,
                     allowed_updates=dp.resolve_used_update_types(),
                     drop_pending_updates=False
                 )
