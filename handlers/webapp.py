@@ -18,6 +18,7 @@ import html
 from aiohttp import web
 from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile
+from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError
 
 import test_db
 import rasch_engine
@@ -25,7 +26,7 @@ from core import (
     UZB_TZ, format_uzb_time, TG_ICONS, tg_e,
     _dashboard_overview_cache, _dashboard_users_cache, _dashboard_tests_cache, invalidate_dashboard_cache,
     get_test_schedule_status, get_test_min_submit_info,
-    BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, CACHED_BOT_USERNAME, log, bot,
+    BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, CACHED_BOT_USERNAME, log, bot, main_menu_kb,
     GLOBAL_RATE_LIMITER, SUBMIT_CONCURRENCY_SEMAPHORE, COMPARE_CONCURRENCY_SEMAPHORE,
     verify_telegram_webapp_data, check_user_membership, set_cached_membership,
     is_user_gone_error
@@ -36,7 +37,7 @@ from services import (
     process_pdf_watermark_async, HEAVY_TASKS_SEMAPHORE
 )
 from .common import (
-    get_all_admin_ids, send_test_card_to_user_chat,
+    get_all_admin_ids, send_test_card_to_user_chat, validate_fullname,
     clean_blocked_users_from_db, get_inactive_target_users,
     send_inactive_warning_messages, notify_admins_test_results_published
 )
@@ -57,6 +58,17 @@ def _get_authenticated_user_id(request: web.Request, data: Optional[dict] = None
         or request.rel_url.query.get("tgWebAppData", "")
     )
     if not init_data:
+        if os.getenv("ALLOW_INSECURE_AUTH") == "1":
+            q_tg_id = (
+                request.rel_url.query.get("tg_id")
+                or request.rel_url.query.get("admin_id")
+                or (data.get("tg_id") or data.get("admin_id") if isinstance(data, dict) else None)
+            )
+            if q_tg_id:
+                try:
+                    return int(q_tg_id)
+                except (ValueError, TypeError):
+                    pass
         return None
     is_valid, user_dict = verify_telegram_webapp_data(init_data, BOT_TOKEN)
     if is_valid and user_dict and user_dict.get("id"):
@@ -1574,11 +1586,23 @@ def _fetch_active_tests_payload_sync(tg_id: int):
 async def handle_app_active_tests(request):
     """Faol testlar ro'yxati (user uchun topshirilgan-topshirilmaganligini ham qaytaradi)."""
     try:
-        tg_id = _get_authenticated_user_id(request) or 0
+        tg_id = _get_authenticated_user_id(request)
+        if not tg_id:
+            return web.json_response({
+                "success": False,
+                "message": "Autentifikatsiya xatosi: Telegram WebApp orqali kiring",
+                "status": "unauthorized"
+            }, status=401)
 
-        if tg_id and not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
+        if not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
             u_check = await test_db.db(test_db.get_user, tg_id)
-            if u_check and u_check.get("status") in ["pending", "rejected", "deleted"]:
+            if not u_check:
+                return web.json_response({
+                    "success": False,
+                    "message": "⚠️ Iltimos, avval Telegram botimizda ro'yxatdan o'ting!",
+                    "status": "not_registered"
+                }, status=403)
+            if u_check.get("status") in ["pending", "rejected", "deleted"]:
                 return web.json_response({
                     "success": False,
                     "message": "⛔️ Profilingizga ruxsat berilmagan yoki arizangiz ko'rib chiqilmoqda.",
@@ -1603,6 +1627,14 @@ async def handle_app_my_results(request):
         tg_id = _get_authenticated_user_id(request)
         if not tg_id:
             return web.json_response({"success": False, "message": "Autentifikatsiya talab qilinadi"}, status=401)
+        if tg_id and not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
+            u_check = await test_db.db(test_db.get_user, tg_id)
+            if not u_check:
+                return web.json_response({
+                    "success": False,
+                    "message": "⚠️ Iltimos, avval Telegram botimizda ro'yxatdan o'ting!",
+                    "status": "not_registered"
+                }, status=403)
         submissions = await test_db.db(test_db.get_user_submissions, tg_id)
         return web.json_response({"success": True, "results": submissions})
     except Exception as e:
@@ -1839,6 +1871,14 @@ async def handle_app_autosave_answer(request):
             return web.json_response({"success": False, "message": "test_id yetishmaydi"}, status=400)
 
         user_tg_id = int(user_tg_id)
+        if not (await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)):
+            u_check = await test_db.db(test_db.get_user, user_tg_id)
+            if not u_check:
+                return web.json_response({
+                    "success": False,
+                    "message": "⚠️ Iltimos, avval Telegram botimizda ro'yxatdan o'ting!",
+                    "status": "not_registered"
+                }, status=403)
 
         # Butun javoblar to'plami yuborilgan bo'lsa
         bulk_answers = data.get("answers")
@@ -1874,6 +1914,14 @@ async def handle_app_get_draft(request):
             return web.json_response({"success": False, "answers": {}, "message": "test_id yetishmaydi"}, status=400)
 
         user_tg_id = int(user_tg_id)
+        if not (await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)):
+            u_check = await test_db.db(test_db.get_user, user_tg_id)
+            if not u_check:
+                return web.json_response({
+                    "success": False,
+                    "message": "⚠️ Iltimos, avval Telegram botimizda ro'yxatdan o'ting!",
+                    "status": "not_registered"
+                }, status=403)
         drafts = await test_db.db(test_db.get_answer_drafts, user_tg_id, test_id)
         return web.json_response({"success": True, "test_id": test_id, "answers": drafts})
     except Exception as e:
@@ -1908,46 +1956,25 @@ async def handle_app_broadcast(request):
         return web.json_response({"success": False, "message": str(e)}, status=400)
 
 async def handle_app_broadcast_delete(request):
-    """Admin tomonidan yuborilgan xabarni o'chirish yoki so'nggi xabarlarni tozalash (Mini App API)."""
+    """Admin tomonidan yuborilgan xabarni partiya (batch_id) bo'yicha o'chirish (Mini App API)."""
     try:
         data = await request.json()
-        admin_id = int(data.get('admin_id', 0))
+        admin_id = _get_authenticated_user_id(request, data)
         batch_id = str(data.get('batch_id', '')).strip()
-        clean_count = int(data.get('clean_count', 0))
 
         if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
-            init_data = data.get('init_data', '') or request.headers.get('X-Telegram-Init-Data', '')
-            import urllib.parse, json
-            try:
-                parsed = dict(urllib.parse.parse_qsl(init_data))
-                if 'user' in parsed:
-                    u_dict = json.loads(parsed['user'])
-                    if u_dict and u_dict.get('id'):
-                        admin_id = int(u_dict['id'])
-            except Exception:
-                pass
+            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=403)
 
-        if not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
-            return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
+        if not batch_id:
+            return web.json_response({"success": False, "message": "batch_id ko'rsatilmadi"}, status=400)
 
-        if batch_id:
-            deleted, fail = await delete_broadcast_batch_from_users(batch_id)
-            return web.json_response({
-                "success": True,
-                "deleted": deleted,
-                "fail": fail,
-                "message": f"Xabar {deleted} nafar o'quvchi chatidan o'chirildi!"
-            })
-        elif clean_count > 0:
-            deleted, users = await delete_recent_bot_messages_from_all_users(count=clean_count)
-            return web.json_response({
-                "success": True,
-                "deleted": deleted,
-                "users": users,
-                "message": f"{users} nafar o'quvchidan {deleted} ta so'nggi bot xabari tozalandi!"
-            })
-        else:
-            return web.json_response({"success": False, "message": "O'chirish parametri ko'rsatilmadi"}, status=400)
+        deleted, fail = await delete_broadcast_batch_from_users(batch_id)
+        return web.json_response({
+            "success": True,
+            "deleted": deleted,
+            "fail": fail,
+            "message": f"Xabar {deleted} nafar o'quvchi chatidan o'chirildi!"
+        })
     except Exception as e:
         log.error(f"App Broadcast Delete Error: {e}", exc_info=True)
         return web.json_response({"success": False, "message": str(e)}, status=400)
@@ -2026,12 +2053,27 @@ async def handle_app_trigger_solve(request):
         if not tg_id:
             return web.json_response({"ok": False, "error": "Foydalanuvchi ID si topilmadi"}, status=400)
 
+        if not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
+            u_check = await test_db.db(test_db.get_user, tg_id)
+            if not u_check:
+                return web.json_response({
+                    "ok": False,
+                    "error": "⚠️ Iltimos, avval Telegram botimizda ro'yxatdan o'ting!",
+                    "status": "not_registered"
+                }, status=403)
+            if u_check.get("status") in ["pending", "rejected", "deleted"]:
+                return web.json_response({
+                    "ok": False,
+                    "error": "⛔️ Profilingizga ruxsat berilmagan yoki arizangiz ko'rib chiqilmoqda.",
+                    "status": u_check.get("status")
+                }, status=403)
+
         test = None
         if test_code:
             code_clean = test_code.upper().replace("#", "")
-            test = test_db.get_test_by_code(code_clean)
+            test = await test_db.db(test_db.get_test_by_code, code_clean)
         if not test and test_id_str and test_id_str.isdigit():
-            test = test_db.get_test_by_id(int(test_id_str))
+            test = await test_db.db(test_db.get_test_by_id, int(test_id_str))
 
         if not test:
             return web.json_response({"ok": False, "error": "Test topilmadi"}, status=404)
@@ -2546,6 +2588,10 @@ async def handle_dashboard_broadcast(request):
     """Dashboard orqali barcha yoki maqsadli o'quvchilarga Telegram xabarnoma yuborish."""
     try:
         data = await request.json()
+        admin_id = _get_authenticated_user_id(request, data)
+        if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
+            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=403)
+
         target = str(data.get('target', 'all')).strip().lower()
         test_id = int(data.get('test_id', 0) or 0)
         message_text = str(data.get('message', '')).strip()
@@ -2556,8 +2602,36 @@ async def handle_dashboard_broadcast(request):
         if not message_text and not photo_url:
             return web.json_response({"success": False, "message": "Xabar matni yoki rasm havolasi kiritilishi shart!"}, status=400)
 
-        # 1. Auditoriyani aniqlash
+        # Xavfsizlik: photo_url faqat https:// bo'lishi shart
+        if photo_url:
+            if not photo_url.startswith("https://"):
+                return web.json_response({
+                    "success": False,
+                    "message": "photo_url faqat https:// bilan boshlanishi shart!"
+                }, status=400)
+
+        # Xavfsizlik: button_url faqat https:// va ruxsat berilgan domenlar bo'lishi shart
+        if btn_url:
+            if not btn_url.startswith("https://"):
+                return web.json_response({
+                    "success": False,
+                    "message": "button_url faqat https:// bilan boshlanishi shart!"
+                }, status=400)
+            import urllib.parse
+            parsed_btn = urllib.parse.urlparse(btn_url)
+            btn_domain = parsed_btn.netloc.lower().split(":")[0]
+            env_domains = os.getenv("ALLOWED_BUTTON_DOMAINS", "t.me,telegram.me,youtube.com,youtu.be,onrender.com,github.com")
+            allowed_domains = [d.strip().lower() for d in env_domains.split(",") if d.strip()]
+            is_domain_allowed = any(btn_domain == d or btn_domain.endswith("." + d) for d in allowed_domains)
+            if not is_domain_allowed:
+                return web.json_response({
+                    "success": False,
+                    "message": f"button_url domeni ruxsat etilmagan! Ruxsat etilgan domenlar: {', '.join(allowed_domains)}"
+                }, status=400)
+
+        # 1. Auditoriyani aniqlash (blocked_bot foydalanuvchilar o'tkazib yuboriladi)
         all_users = await test_db.db(test_db.get_all_users)
+        all_users = [u for u in all_users if u.get('status') != 'blocked_bot']
         target_users = []
         if target == 'all':
             target_users = all_users
@@ -2581,10 +2655,12 @@ async def handle_dashboard_broadcast(request):
         await test_db.db(
             test_db.create_broadcast_batch,
             batch_id=batch_id,
-            sender_tg_id=ADMIN_ID,
+            sender_tg_id=admin_id,
             message_text=summary_text,
             photo_id=photo_url[:200]
         )
+
+        already_sent_ids = await test_db.db(test_db.get_broadcast_sent_chat_ids, batch_id)
 
         # 3. Inline klaviatura (agar tugma kiritilgan bo'lsa)
         reply_markup = None
@@ -2595,55 +2671,85 @@ async def handle_dashboard_broadcast(request):
 
         sent_count = 0
         fail_count = 0
-        deleted_count = 0
+        blocked_count = 0
+        pending_records = []
+
+        async def _flush_dash_records():
+            if pending_records:
+                await test_db.db(test_db.record_broadcast_messages_batch, list(pending_records))
+                pending_records.clear()
 
         for u in target_users:
             uid = u.get('tg_id')
-            if not uid:
+            if not uid or uid in already_sent_ids:
                 continue
             fname = u.get('fullname') or "Foydalanuvchi"
-            # {fullname} shablonini o'quvchi ismi bilan almashtirish
             user_msg = message_text.replace("{fullname}", fname).replace("{ism}", fname)
 
-            try:
-                sent_msg = None
-                if photo_url:
-                    sent_msg = await bot.send_photo(
-                        chat_id=uid,
-                        photo=photo_url,
-                        caption=user_msg,
-                        parse_mode=ParseMode.HTML,
-                        reply_markup=reply_markup
-                    )
-                else:
-                    sent_msg = await bot.send_message(
-                        chat_id=uid,
-                        text=user_msg,
-                        parse_mode=ParseMode.HTML,
-                        reply_markup=reply_markup,
-                        disable_web_page_preview=False
-                    )
+            user_sent_any = False
+            user_failed = False
 
-                if sent_msg and hasattr(sent_msg, 'message_id'):
-                    await test_db.db(test_db.record_broadcast_message, batch_id, uid, sent_msg.message_id)
-                sent_count += 1
-                await asyncio.sleep(0.04)
-            except Exception as e:
-                if is_user_gone_error(e):
-                    await test_db.db(test_db.delete_user, uid, is_self_delete=True)
-                    deleted_count += 1
-                else:
+            MAX_RETRIES = 3
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    sent_msg = None
+                    if photo_url:
+                        sent_msg = await bot.send_photo(
+                            chat_id=uid,
+                            photo=photo_url,
+                            caption=user_msg,
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=reply_markup
+                        )
+                    else:
+                        sent_msg = await bot.send_message(
+                            chat_id=uid,
+                            text=user_msg,
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=reply_markup,
+                            disable_web_page_preview=False
+                        )
+
+                    if sent_msg and hasattr(sent_msg, 'message_id'):
+                        pending_records.append((batch_id, uid, sent_msg.message_id))
+                        user_sent_any = True
+                    break
+                except TelegramRetryAfter as e:
+                    wait_sec = min(max(float(e.retry_after), 1.0), 30.0)
+                    log.warning(f"Dashboard Broadcast Flood control (Retry-After: {wait_sec}s) user {uid}")
+                    await asyncio.sleep(wait_sec)
+                    if attempt == MAX_RETRIES:
+                        user_failed = True
+                        fail_count += 1
+                except Exception as e:
+                    user_failed = True
                     fail_count += 1
+                    if is_user_gone_error(e):
+                        await test_db.db(test_db.mark_user_blocked_bot, uid)
+                        blocked_count += 1
+                    break
 
-        await test_db.db(test_db.update_broadcast_sent_count, batch_id, sent_count)
+            if user_sent_any and not user_failed:
+                sent_count += 1
+                already_sent_ids.add(uid)
 
-        del_note = f" ({deleted_count} ta botni bloklagan akkaunt tozalandi)" if deleted_count else ""
+            if len(pending_records) >= 50:
+                await _flush_dash_records()
+
+            await asyncio.sleep(0.04)
+
+        await _flush_dash_records()
+
+        await test_db.db(test_db.update_broadcast_sent_count, batch_id, len(already_sent_ids))
+        await test_db.db(test_db.update_broadcast_status, batch_id, "done")
+
+        del_note = f" ({blocked_count} ta botni bloklagan akkaunt status='blocked_bot' qilindi)" if blocked_count else ""
         return web.json_response({
             "success": True,
             "batch_id": batch_id,
             "sent_count": sent_count,
             "fail_count": fail_count,
-            "deleted_count": deleted_count,
+            "blocked_count": blocked_count,
             "target": target,
             "message": f"Xabarnoma {sent_count} nafar o'quvchiga muvaffaqiyatli yetkazildi!{del_note}"
         })
@@ -2655,6 +2761,10 @@ async def handle_dashboard_broadcast(request):
 async def handle_dashboard_broadcast_history(request):
     """Dashboard uchun so'nggi xabarnomalar tarixi."""
     try:
+        admin_id = _get_authenticated_user_id(request)
+        if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
+            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=403)
+
         limit = int(request.rel_url.query.get('limit', 25))
         history = await test_db.db(test_db.get_recent_broadcasts, limit)
         for h in history:
@@ -2669,6 +2779,10 @@ async def handle_dashboard_broadcast_delete(request):
     """Yuborilgan xabarnomani barcha o'quvchilar chatidan o'chirish."""
     try:
         data = await request.json()
+        admin_id = _get_authenticated_user_id(request, data)
+        if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
+            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=403)
+
         batch_id = str(data.get('batch_id', '')).strip()
         if not batch_id:
             return web.json_response({"success": False, "error": "batch_id ko'rsatilmadi"}, status=400)

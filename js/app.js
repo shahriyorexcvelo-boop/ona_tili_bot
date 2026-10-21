@@ -78,7 +78,12 @@ function initApp() {
     state.tgUser = tgU || { id: effectiveId, first_name: 'Foydalanuvchi', last_name: '', username: '' };
     try {
       var savedUser = localStorage.getItem(LS_USER);
-      if (savedUser && !isPreview && !state.userInfo) state.userInfo = JSON.parse(savedUser);
+      if (savedUser && !isPreview && !state.userInfo) {
+        var parsed = JSON.parse(savedUser);
+        if (effectiveId && parsed && parsed.tg_id === effectiveId && parsed.status !== 'not_registered') {
+          state.userInfo = parsed;
+        }
+      }
     } catch (e) {}
   } catch (err) {
     console.error('initApp error:', err);
@@ -255,7 +260,9 @@ async function launchApp() {
   var splashScreen = document.getElementById('splash-screen');
   if (!splashScreen && !localStorage.getItem('onboarding_nav_tour_seen')) {
     setTimeout(function() {
-      openOnboardingModal();
+      if (!checkRegistrationStatus()) {
+        openOnboardingModal();
+      }
     }, 600);
   }
 
@@ -364,7 +371,11 @@ async function loadUserProfile() {
       } else {
         state.isAdmin = Boolean(data.is_admin);
       }
-      localStorage.setItem(LS_USER, JSON.stringify(data.user));
+      if (data.user.status === 'not_registered' || !data.user.is_registered) {
+        localStorage.removeItem(LS_USER);
+      } else {
+        localStorage.setItem(LS_USER, JSON.stringify(data.user));
+      }
       if (urlParams.get('preview') === 'user' || urlParams.get('mode') === 'user') {
         state.isAdmin = false;
       }
@@ -374,7 +385,7 @@ async function loadUserProfile() {
       if (banner) banner.style.display = state.isSimulatedUser ? 'flex' : 'none';
 
       // Ro'yxatdan o'tgan bo'lsa yoki admin bo'lsa, modalni yopamiz
-      var isReg = (state.isAdmin || data.user.is_registered === true || data.user.status === 'approved' || data.user.status === 'pending');
+      var isReg = (state.isAdmin || ((data.user.is_registered === true || data.user.status === 'approved' || data.user.status === 'pending') && data.user.status !== 'not_registered'));
       if (isReg) {
         var unregModal = document.getElementById('unregistered-modal');
         if (unregModal) unregModal.style.display = 'none';
@@ -527,6 +538,10 @@ function switchHomeSubtab(subtab) {
 }
 
 function openTestSolving(testId) {
+  if (checkRegistrationStatus()) {
+    showToast("⚠️ Iltimos, avval botda ro'yxatdan o'ting!");
+    return;
+  }
   var tgId = (state.tgUser && state.tgUser.id) || 0;
   window.location.href = '/index.html?test_id=' + testId + '&tg_id=' + tgId;
 }
@@ -540,6 +555,10 @@ function returnToTelegramChat() {
 }
 
 function startTestInBot(testCode, testId) {
+  if (checkRegistrationStatus()) {
+    showToast("⚠️ Iltimos, avval botda ro'yxatdan o'ting!");
+    return;
+  }
   var tgId = (state.tgUser && state.tgUser.id) || 0;
   if (!tgId && window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) {
     tgId = window.Telegram.WebApp.initDataUnsafe.user.id;
@@ -2638,7 +2657,7 @@ function checkRegistrationStatus() {
 
   // 3. Botda ro'yxatdan o'tganligini tekshirish
   var u = state.userInfo;
-  var isRegistered = (u.is_registered === true || u.status === 'approved' || u.status === 'pending');
+  var isRegistered = (u.is_registered === true || u.status === 'approved' || u.status === 'pending') && u.status !== 'not_registered';
   var isUnreg = !isRegistered;
   if (modal) {
     modal.style.display = isUnreg ? 'flex' : 'none';

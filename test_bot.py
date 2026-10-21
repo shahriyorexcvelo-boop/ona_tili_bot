@@ -8,6 +8,7 @@ Barcha muhim sozlamalar environment variable orqali o'rnatiladi.
 from __future__ import annotations
 import asyncio
 import os
+import secrets
 import sys
 
 from aiohttp import web
@@ -58,7 +59,15 @@ async def tests_cache_refresher():
 
 # ── ASOSIY ISHGA TUSHIRISH (MAIN) ─────────────────────
 async def main():
-    global WEBAPP_URL
+    _tunnel_task = None
+    _sched_task = None
+    _cache_refresher_task = None
+    _supabase_keepalive_task = None
+    _lag_monitor_task = None
+    _rss_monitor_task = None
+    runner = None
+    use_webhook_mode = False
+    is_render = False
 
     # 1. Baza jadvallarini serverdan oldin yaratish/tekshirish va Global Memory Cache ni to'ldirish
     try:
@@ -83,7 +92,8 @@ async def main():
     use_webhook_mode = bool(is_render and USE_WEBHOOK and is_valid_https)
 
     if use_webhook_mode and not WEBHOOK_SECRET:
-        log.error("❌ XATOLIK: WEBHOOK_SECRET muhit o'zgaruvchisi (env) o'rnatilmagan! Standart xavfli token ishlatilmaydi.")
+        WEBHOOK_SECRET = secrets.token_urlsafe(32)
+        log.error("❌ XATOLIK: WEBHOOK_SECRET muhit o'zgaruvchisi (env) o'rnatilmagan! Avtomatik xavfsiz tasodifiy token yaratildi.")
 
     app = await create_web_app()
 
@@ -92,7 +102,7 @@ async def main():
         SimpleRequestHandler(
             dispatcher=dp,
             bot=bot,
-            secret_token=WEBHOOK_SECRET or None,
+            secret_token=WEBHOOK_SECRET,
             handle_in_background=True
         ).register(app, path=WEBHOOK_PATH)
         setup_application(app, dp, bot=bot)
@@ -163,7 +173,7 @@ async def main():
             try:
                 await bot.set_webhook(
                     url=webhook_url,
-                    secret_token=WEBHOOK_SECRET or None,
+                    secret_token=WEBHOOK_SECRET,
                     allowed_updates=dp.resolve_used_update_types(),
                     drop_pending_updates=False
                 )

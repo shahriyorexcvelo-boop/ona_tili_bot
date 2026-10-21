@@ -109,8 +109,21 @@ const TestApp = {
       fetch('/api/app/active-tests?init_data=' + encodeURIComponent(initData), {
         headers: { 'X-Telegram-Init-Data': initData }
       })
-        .then(function(res) { return res.json(); })
+        .then(function(res) {
+          if (res.status === 403 || res.status === 401) {
+            return res.json().then(function(d) {
+              TestApp.showRegistrationRequiredModal(d && d.message ? d.message : "⚠️ Iltimos, avval botda ro'yxatdan o'ting!");
+              return null;
+            });
+          }
+          return res.json();
+        })
         .then(function(d) {
+          if (!d) return;
+          if (d.status === 'not_registered' || d.status === 'pending' || d.status === 'rejected' || !d.success) {
+            TestApp.showRegistrationRequiredModal(d.message || "⚠️ Iltimos, avval botda ro'yxatdan o'ting!");
+            return;
+          }
           if (d && d.tests) {
             TestApp.isAdmin = Boolean(d.is_admin);
             var cur = d.tests.find(function(t) { return Number(t.id) === Number(TestApp.testId); });
@@ -1339,6 +1352,37 @@ const TestApp = {
       window.Telegram.WebApp.close();
     } else {
       window.location.reload();
+    }
+  },
+
+  showRegistrationRequiredModal(msg) {
+    const submitBtn = document.getElementById('btn-submit-test');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.style.opacity = '0.5';
+      submitBtn.style.cursor = 'not-allowed';
+      submitBtn.textContent = "Ro'yxatdan o'tmagan";
+    }
+    const modal = document.getElementById('unregistered-modal');
+    if (modal) {
+      if (msg) {
+        const p = modal.querySelector('p');
+        if (p) p.textContent = msg;
+      }
+      modal.style.display = 'flex';
+    } else {
+      alert(msg || "Iltimos, avval botda ro'yxatdan o'ting!");
+      this.closeWebApp();
+    }
+  },
+
+  goToBotRegister() {
+    if (window.Telegram && window.Telegram.WebApp) {
+      try {
+        window.Telegram.WebApp.close();
+      } catch(e) {}
+    } else {
+      window.location.href = 'https://t.me/bm_rashtest_bot?start=start';
     }
   }
 };

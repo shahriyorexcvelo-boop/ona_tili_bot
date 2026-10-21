@@ -562,6 +562,7 @@ def _init_sqlite_tables_on_conn(conn):
         photo_id TEXT DEFAULT '',
         total_sent INTEGER DEFAULT 0,
         is_deleted INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'running',
         created_at INTEGER NOT NULL
     )
     """)
@@ -629,6 +630,12 @@ def _init_sqlite_tables_on_conn(conn):
             conn.commit()
         except Exception:
             pass
+
+    try:
+        cur.execute("ALTER TABLE broadcast_history ADD COLUMN status TEXT DEFAULT 'running'")
+        conn.commit()
+    except Exception:
+        pass
 
     conn.commit()
 
@@ -740,6 +747,7 @@ def init_db():
                 photo_id TEXT DEFAULT '',
                 total_sent INTEGER DEFAULT 0,
                 is_deleted INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'running',
                 created_at BIGINT NOT NULL
             )
             """)
@@ -1066,39 +1074,112 @@ def set_registration_open(enabled: bool):
 
 
 def get_broadcast_users() -> List[Dict[str, Any]]:
-    """Xabar tarqatish uchun faol foydalanuvchilar ro'yxati (faqat tasdiqlanganlar)."""
+    """Xabar tarqatish uchun faol foydalanuvchilar ro'yxati (faqat tasdiqlanganlar, blocked_bot larsiz)."""
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT tg_id, fullname, status FROM users WHERE status = 'approved'")
+        cur.execute("SELECT tg_id, fullname, status FROM users WHERE status = 'approved' AND status != 'blocked_bot'")
         rows = cur.fetchall()
         return [_row_to_dict(r) for r in rows if r]
     finally:
         _close_conn(conn)
 
 
+def mark_user_blocked_bot(tg_id: int) -> bool:
+    """Foydalanuvchi botni bloklaganda ma'lumotlarini o'chirmasdan status='blocked_bot' qilib belgilash."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        sql = f"UPDATE users SET status = 'blocked_bot' WHERE tg_id = {_ph()}"
+        cur.execute(sql, (tg_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error mark_user_blocked_bot: {e}")
+        return False
+    finally:
+        _close_conn(conn)
+
+
 def create_broadcast_batch(batch_id: str, sender_tg_id: int = 0, message_text: str = "", photo_id: str = "") -> bool:
-    """Yangi broadcast partiyasini yaratish."""
+    """Yangi broadcast partiyasini yaratish (boshlang'ich holati 'running')."""
     conn = get_connection()
     try:
         cur = conn.cursor()
         now = int(time.time())
         sql = f"""
-        INSERT INTO broadcast_history (batch_id, sender_tg_id, message_text, photo_id, total_sent, is_deleted, created_at)
-        VALUES ({_ph()}, {_ph()}, {_ph()}, {_ph()}, 0, 0, {_ph()})
+        INSERT INTO broadcast_history (batch_id, sender_tg_id, message_text, photo_id, total_sent, is_deleted, status, created_at)
+        VALUES ({_ph()}, {_ph()}, {_ph()}, {_ph()}, 0, 0, 'running', {_ph()})
         """
         cur.execute(sql, (batch_id, sender_tg_id, str(message_text)[:1000], str(photo_id or ''), now))
         conn.commit()
         return True
     except Exception as e:
-        print(f"Error create_broadcast_batch: {e}")
+        # Agar status ustuni hali bo'lmasa, status siz fallback qilib yozish
+        try:
+            sql_fallback = f"""
+            INSERT INTO broadcast_history (batch_id, sender_tg_id, message_text, photo_id, total_sent, is_deleted, created_at)
+            VALUES ({_ph()}, {_ph()}, {_ph()}, {_ph()}, 0, 0, {_ph()})
+            """
+            cur.execute(sql_fallback, (batch_id, sender_tg_id, str(message_text)[:1000], str(photo_id or ''), now))
+            conn.commit()
+            return True
+        except Exception as e2:
+            print(f"Error create_broadcast_batch: {e2}")
+            return False
+    finally:
+        _close_conn(conn)
+
+
+def update_broadcast_status(batch_id: str, status: str) -> bool:
+    """Partiya holatini yangilash ('running', 'done', 'failed', 'stopped')."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        sql = f"UPDATE broadcast_history SET status = {_ph()} WHERE batch_id = {_ph()}"
+        cur.execute(sql, (status, batch_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error update_broadcast_status: {e}")
         return False
+    finally:
+        _close_conn(conn)
+
+
+def get_broadcast_sent_chat_ids(batch_id: str) -> set[int]:
+    """Partiya bo'yicha allaqachon xabar yetkazilgan chat_id lar to'plami."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        sql = f"SELECT chat_id FROM broadcast_messages WHERE batch_id = {_ph()}"
+        cur.execute(sql, (batch_id,))
+        rows = cur.fetchall()
+        result = set()
+        for r in rows:
+            if isinstance(r, dict):
+                result.add(int(r.get("chat_id")))
+            elif hasattr(r, "keys"):
+                result.add(int(r["chat_id"]))
+            else:
+                result.add(int(r[0]))
+        return result
     finally:
         _close_conn(conn)
 
 
 def record_broadcast_message(batch_id: str, chat_id: int, message_id: int) -> bool:
     """Har bir yuborilgan xabar ID sini saqlash (keyinchalik o'chirish uchun)."""
+    return record_broadcast_messages_batch([(batch_id, chat_id, message_id)])
+
+
+def record_broadcast_messages_batch(records: List[tuple[str, int, int]]) -> bool:
+    """
+    To'plangan xabarlar ID sini bitta tranzaksiyada ommaviy yozish (executemany).
+    records: [(batch_id, chat_id, message_id), ...]
+    """
+    if not records:
+        return True
     conn = get_connection()
     try:
         cur = conn.cursor()
@@ -1107,11 +1188,12 @@ def record_broadcast_message(batch_id: str, chat_id: int, message_id: int) -> bo
         INSERT INTO broadcast_messages (batch_id, chat_id, message_id, status, created_at)
         VALUES ({_ph()}, {_ph()}, {_ph()}, 'sent', {_ph()})
         """
-        cur.execute(sql, (batch_id, chat_id, message_id, now))
+        rows = [(r[0], r[1], r[2], now) for r in records]
+        cur.executemany(sql, rows)
         conn.commit()
         return True
     except Exception as e:
-        print(f"Error record_broadcast_message: {e}")
+        print(f"Error record_broadcast_messages_batch: {e}")
         return False
     finally:
         _close_conn(conn)

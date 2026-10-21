@@ -38,7 +38,6 @@ from core import (
 from services import (
     MAINT_START_TEXT, MAINT_END_TEXT,
     send_broadcast_to_users, delete_broadcast_batch_from_users,
-    delete_recent_bot_messages_from_all_users,
     process_pdf_watermark_async, HEAVY_TASKS_SEMAPHORE
 )
 from .common import (
@@ -1566,7 +1565,6 @@ async def admin_broadcast_menu_cb(call: CallbackQuery, state: FSMContext):
         ],
         [InlineKeyboardButton(text="✍️ 3. O'zingiz erkin xabar yozish", callback_data="adm_bc_custom_input")],
         [InlineKeyboardButton(text="🗑 4. Yuborilgan xabarlarni o'chirish (Tarix)", callback_data="adm_bc_history_menu")],
-        [InlineKeyboardButton(text="🧹 5. Oldingi xabarlarni barchadan tozalash", callback_data="adm_bc_clean_past_prompt")],
         [InlineKeyboardButton(text="⬅️ Admin panelga qaytish", callback_data="admin_back_to_menu")]
     ])
     try:
@@ -1954,99 +1952,11 @@ async def adm_bc_history_menu_cb(call: CallbackQuery):
                 callback_data=f"adm_bc_del_{b['batch_id']}"
             )])
 
-    buttons.append([InlineKeyboardButton(text="🧹 Oldingi xabarlarni barchadan tozalash", callback_data="adm_bc_clean_past_prompt")])
     buttons.append([InlineKeyboardButton(text="⬅️ Xabar yuborish bo'limiga", callback_data="admin_broadcast_menu")])
 
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await call.answer()
 
-
-@admin_router.callback_query(F.data == "adm_bc_clean_past_prompt")
-async def adm_bc_clean_past_prompt_cb(call: CallbackQuery):
-    """Oldingi xabarlarni barcha o'quvchilar chatidan tozalash taklifi."""
-    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
-        return
-    text = (
-        "🧹 <b>OLDINGI XABARLARNI TOZALASH (DEEP CLEAN)</b>\n\n"
-        "Ushbu funksiya tarixda saqlanmagan yoki avvalroq yuborilgan xabarlarni barcha o'quvchilar chatidan o'chirish uchun mo'ljallangan.\n\n"
-        "Bot barcha o'quvchilar chatidagi so'nggi xabarlarni tezkor parallel tekshirib tozalab chiqadi.\n\n"
-        "<b>Nechta so'nggi bot xabarini o'chirmoqchisiz?</b>"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🗑 1 ta so'nggi xabarni o'chirish", callback_data="adm_bc_clean_1"),
-            InlineKeyboardButton(text="🗑 2 ta so'nggi xabarni o'chirish", callback_data="adm_bc_clean_2")
-        ],
-        [
-            InlineKeyboardButton(text="🗑 3 ta so'nggi xabarni o'chirish", callback_data="adm_bc_clean_3"),
-            InlineKeyboardButton(text="🗑 5 ta so'nggi xabarni o'chirish", callback_data="adm_bc_clean_5")
-        ],
-        [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="admin_broadcast_menu")]
-    ])
-    await call.message.edit_text(text, reply_markup=kb)
-    await call.answer()
-
-
-@admin_router.callback_query(F.data.startswith("adm_bc_clean_"))
-async def adm_bc_clean_action_cb(call: CallbackQuery):
-    """Barcha o'quvchilardan so'nggi N ta xabarni o'chirish amali."""
-    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
-        return
-    try:
-        count = int(call.data.replace("adm_bc_clean_", "").strip())
-    except Exception:
-        count = 1
-
-    await call.answer(f"⏳ So'nggi {count} ta xabarni tozalash boshlandi...", show_alert=False)
-
-    try:
-        await call.message.edit_text(
-            f"⏳ <b>Tozalash boshlandi...</b>\n\n"
-            f"O'quvchilar chatidagi so'nggi {count} ta bot xabari o'chirilmoqda...\n"
-            f"<i>Iltimos, kuting...</i>"
-        )
-    except Exception:
-        pass
-
-    last_update = [0.0]
-    async def on_progress(done_users, total_users, del_count):
-        now = time.time()
-        if now - last_update[0] >= 1.0:
-            last_update[0] = now
-            try:
-                await call.message.edit_text(
-                    f"⏳ <b>Tozalanmoqda...</b>\n\n"
-                    f"👥 <b>Jarayon:</b> {done_users} / {total_users} o'quvchi\n"
-                    f"🗑 <b>O'chirildi:</b> {del_count} ta xabar\n\n"
-                    f"<i>Iltimos, kuting...</i>"
-                )
-            except Exception:
-                pass
-
-    try:
-        deleted_total, checked_users = await asyncio.wait_for(
-            delete_recent_bot_messages_from_all_users(count=count, progress_callback=on_progress),
-            timeout=25.0
-        )
-    except asyncio.TimeoutError:
-        log.warning("delete_recent_bot_messages_from_all_users timeout reached")
-        deleted_total = 0
-        checked_users = len((await test_db.db(test_db.get_broadcast_users)))
-
-    res_text = (
-        f"🧹 <b>TOZALASH MUVAFFAQIYATLI YAKUNLANDI!</b>\n\n"
-        f"👥 <b>Tekshirilgan o'quvchilar:</b> {checked_users} nafar\n"
-        f"🗑 <b>O'chirilgan jami bot xabarlari:</b> {deleted_total} ta\n\n"
-        f"<i>O'quvchilar chatidagi so'nggi bot xabarlari tozalandi.</i>"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Xabar yuborish bo'limiga", callback_data="admin_broadcast_menu")],
-        [InlineKeyboardButton(text="🔙 Admin panelga", callback_data="admin_back_to_menu")]
-    ])
-    try:
-        await call.message.edit_text(res_text, reply_markup=kb)
-    except Exception:
-        await call.message.answer(res_text, reply_markup=kb)
 
 # 5. Natijalar va hisobotlar boshqaruvi
 @admin_router.callback_query(F.data == "admin_leaderboard")
