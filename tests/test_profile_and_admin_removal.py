@@ -145,3 +145,56 @@ async def test_test_creation_flow_intact():
         assert "/admin.html" in routes
     finally:
         await client.close()
+
+
+@pytest.mark.anyio
+async def test_dashboard_completely_removed_and_bot_admin_intact():
+    """Dashboard tizimi (HTML/JS/API) to'liq 404 qaytarishi va bot admin paneli buzilmaganligini tasdiqlash."""
+    from core.keyboards import admin_menu_kb
+
+    app = await create_web_app()
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+
+    try:
+        # 1. Barcha dashboard yo'llari 404 berishi kerak
+        dashboard_paths = [
+            "/dashboard",
+            "/dashboard.html",
+            "/api/dashboard/overview",
+            "/api/dashboard/submissions",
+            "/api/dashboard/users",
+            "/api/dashboard/tests",
+            "/api/dashboard/logs",
+            "/api/dashboard/test-report-pdf/1"
+        ]
+        for p in dashboard_paths:
+            resp = await client.get(p)
+            assert resp.status == 404, f"Dashboard route {p} 404 bo'lishi kerak, lekin {resp.status} qaytdi"
+
+        # 2. Test yaratish endpointlari saqlanganligi
+        routes = [r.resource.canonical for r in app.router.routes() if r.resource]
+        required_creation_routes = [
+            "/admin.html",
+            "/api/next-test-code",
+            "/api/create-test",
+            "/api/admin/get-test-keys",
+            "/api/admin/update-test-keys",
+            "/api/scan-keys",
+            "/api/set-gemini-key",
+            "/api/admin/pdf-watermark",
+            "/api/admin/test/{test_id}/pdf-report"
+        ]
+        for r in required_creation_routes:
+            assert r in routes, f"Test yaratish marshruti mavjud bo'lishi shart: {r}"
+
+        # 3. Bot admin klaviaturasida dashboard havolasi yo'qligi
+        kb = admin_menu_kb()
+        for row in kb.inline_keyboard:
+            for btn in row:
+                if btn.url:
+                    assert "/dashboard" not in btn.url, f"Admin menyusida /dashboard havolasi qolmasligi kerak: {btn.url}"
+    finally:
+        await client.close()
+

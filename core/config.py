@@ -46,15 +46,9 @@ def tg_e(icon_name: str, fallback: str = "•") -> str:
         return f'<tg-emoji emoji-id="{eid}">{fallback}</tg-emoji>'
     return fallback
 
-_dashboard_overview_cache = {"data": None, "ts": 0}
-_dashboard_users_cache = {"data": None, "ts": 0}
-_dashboard_tests_cache = {"data": None, "ts": 0}
-
 def invalidate_dashboard_cache():
-    global _dashboard_overview_cache, _dashboard_users_cache, _dashboard_tests_cache
-    _dashboard_overview_cache["ts"] = 0
-    _dashboard_users_cache["ts"] = 0
-    _dashboard_tests_cache["ts"] = 0
+    """Eski dashboard keshini tozalash funksiyasi (dashboard bekor qilingani uchun no-op)."""
+    pass
 
 def get_test_schedule_status(test: Dict[str, Any]) -> Dict[str, Any]:
     """

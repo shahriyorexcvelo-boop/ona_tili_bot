@@ -169,64 +169,41 @@ async def test_broadcast_mass_1000_users_batching_and_resume(monkeypatch):
 @pytest.mark.anyio
 async def test_dashboard_broadcast_security_and_domain_whitelist(monkeypatch):
     """
-    4) Dashboard Broadcast xavfsizlik tekshiruvlari:
-    - button_url faqat https:// va ruxsat berilgan domenlar
-    - photo_url faqat https://
-    - Endpoint admin auth bilan himoyalanganligi.
+    4) Dashboard tizimi bekor qilinganligini va xavfsizlikni tekshirish:
+    - /dashboard va /api/dashboard/* endpointlari 404 qaytarishi (resurslar tejalishi)
+    - Bot ichki xabar tarqatish (services.broadcast) mustaqil va xavfsiz ishlashi.
     """
-    monkeypatch.setenv("ALLOW_INSECURE_AUTH", "1")
-    monkeypatch.setenv("ALLOWED_BUTTON_DOMAINS", "t.me,telegram.me,youtube.com")
-
     app = await create_web_app()
     server = TestServer(app)
     client = TestClient(server)
     await client.start_server()
 
     try:
+        # A) /dashboard sahifasi 404 qaytarishi (o'chirilgan)
+        resp_dash = await client.get("/dashboard")
+        assert resp_dash.status == 404
+
+        # B) /api/dashboard/overview 404 qaytarishi (DB yuklamasi oldi olingan)
+        resp_overview = await client.get("/api/dashboard/overview")
+        assert resp_overview.status == 404
+
+        # C) /api/dashboard/broadcast 404 qaytarishi
+        resp_bc = await client.post("/api/dashboard/broadcast", json={"message": "test"})
+        assert resp_bc.status == 404
+
+        # D) Bot ichki broadcast xizmati (services.broadcast) to'liq ishlashi
         admin_id = 8039427064
         await test_db.db(test_db.add_or_update_user, admin_id, "Admin", "admin", "+998901234567", "approved")
 
-        # A) Admin bo'lmagan so'rov -> 403
-        resp_unauth = await client.post("/api/dashboard/broadcast", json={
-            "admin_id": 999111222,
-            "message": "Salom"
-        })
-        assert resp_unauth.status == 403
-
-        # B) photo_url http bo'lsa -> 400 rad etiladi
-        resp_http_photo = await client.post("/api/dashboard/broadcast", json={
-            "admin_id": admin_id,
-            "message": "Rasm",
-            "photo_url": "http://insecure-site.com/image.jpg"
-        })
-        assert resp_http_photo.status == 400
-        data_p = await resp_http_photo.json()
-        assert "https://" in data_p["message"]
-
-        # C) button_url ruxsat etilmagan domen bo'lsa -> 400 rad etiladi
-        resp_bad_domain = await client.post("/api/dashboard/broadcast", json={
-            "admin_id": admin_id,
-            "message": "Havola",
-            "button_text": "Kiring",
-            "button_url": "https://phishing-site.xyz/login"
-        })
-        assert resp_bad_domain.status == 400
-        data_b = await resp_bad_domain.json()
-        assert "ruxsat etilmagan" in data_b["message"].lower()
-
-        # D) Ruxsat etilgan domen (t.me) -> qabul qilinadi
         mock_msg = AsyncMock()
         mock_msg.message_id = 9999
         monkeypatch.setattr(bot, "send_message", AsyncMock(return_value=mock_msg))
 
-        resp_ok = await client.post("/api/dashboard/broadcast", json={
-            "admin_id": admin_id,
-            "message": "Xavfsiz xabar",
-            "button_text": "Kanal",
-            "button_url": "https://t.me/rasmiy_kanal"
-        })
-        assert resp_ok.status == 200
-        data_ok = await resp_ok.json()
-        assert data_ok["success"] is True
+        sent, fail, batch_id = await bc.send_broadcast_to_users(
+            message_text="Bot ichki xabari",
+            sender_tg_id=admin_id
+        )
+        assert sent >= 1
+        assert fail == 0
     finally:
         await client.close()

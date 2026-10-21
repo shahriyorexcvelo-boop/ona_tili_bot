@@ -1282,13 +1282,11 @@ async def admin_view_users_redirect_cb(call: CallbackQuery):
     if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     text = (
-        "💻 <b>Foydalanuvchilar boshqaruvi MacBook Dashboard tizimida mavjud!</b>\n\n"
-        "Foydalanuvchilar ro'yxati, filtrlash, ruxsat berish, cheklash va barcha boshqaruv amallari "
-        "keng qulayliklar bilan to'liq <b>MacBook Dashboard</b>ga o'tkazilgan.\n\n"
-        "Shuningdek, tezkor ko'rsatkichlarni <b>/stats</b> buyrug'i orqali ko'rishingiz mumkin."
+        "👥 <b>Foydalanuvchilar va bot statistikasi</b>\n\n"
+        "Foydalanuvchilar holati, faollik va umumiy ma'lumotlarni "
+        "quyidagi tugma orqali yoki <b>/stats</b> buyrug'i yordamida tezkor ko'rishingiz mumkin."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💻 MacBook Dashboardni ochish", url=f"{get_webapp_url()}/dashboard")],
         [InlineKeyboardButton(text="📊 Tezkor statistika (/stats)", callback_data="admin_stats_quick")],
         [InlineKeyboardButton(text="🔙 Admin Menyuga qaytish", callback_data="admin_back_to_menu")]
     ])
@@ -1300,7 +1298,7 @@ async def admin_view_users_redirect_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_user_card_") | F.data.startswith("adm_act_") | F.data.startswith("admin_restrict_all_"))
 async def adm_legacy_users_redirect_cb(call: CallbackQuery):
-    await call.answer("Foydalanuvchilar boshqaruvi Dashboardga ko'chirilgan!", show_alert=True)
+    await call.answer("Tezkor ko'rsatkichlar uchun /stats buyrug'idan foydalaning!", show_alert=True)
 
 # 4. Adminlar boshqaruvi
 @admin_router.callback_query(F.data == "admin_manage_admins")

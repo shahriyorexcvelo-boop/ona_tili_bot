@@ -96,7 +96,6 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
 
     base_url = get_webapp_url()
     buttons = [
-        [InlineKeyboardButton(text="💻 MacBook Dashboard (Katta Baza)", url=f"{base_url}/dashboard")],
         [InlineKeyboardButton(text="📄 PDF Watermark qo'yish / Tayyorlash", callback_data="admin_pdf_watermark_info")],
         [InlineKeyboardButton(text="💬 Foydalanuvchiga yozish / Chat", callback_data="admin_contact_user_prompt")],
         [InlineKeyboardButton(text="📢 O'quvchilarga xabar yuborish", callback_data="admin_broadcast_menu")],
