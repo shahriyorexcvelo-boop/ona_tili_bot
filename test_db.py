@@ -1845,55 +1845,53 @@ def save_answer_draft(user_tg_id: int, test_id: int, question_key: str, answer_v
 
 
 def save_bulk_draft(user_tg_id: int, test_id: int, answers: Dict[str, str]) -> bool:
-    """Ko'p javoblarni birdaniga autosave qilish."""
+    """Ko'p javoblarni bitta tranzaksiyada autosave qilish (kalitlar tartiblangan, deadlock oldini olinadi)."""
     if not user_tg_id or not test_id or not answers:
         return False
+    # Bir xil kalitlarni normallashtirish va tartiblash: hamma so'rov qatorlarni bir xil tartibda yozadi
+    clean = {}
+    for qkey, val in answers.items():
+        clean[str(qkey).strip().lower()] = str(val).strip()
+    rows = sorted(clean.items())
+    now_ts = int(time.time())
+    ans_json = json.dumps(answers, ensure_ascii=False)
     conn = get_connection()
     try:
         cur = conn.cursor()
-        now_ts = int(time.time())
-        ans_json = json.dumps(answers, ensure_ascii=False)
+        ph = _ph()
+        cur.execute(f"""
+            INSERT INTO user_test_drafts (user_tg_id, test_id, answers_json, updated_at)
+            VALUES ({ph}, {ph}, {ph}, {ph})
+            ON CONFLICT (user_tg_id, test_id) DO UPDATE SET
+                answers_json = excluded.answers_json,
+                updated_at = excluded.updated_at
+        """, (user_tg_id, test_id, ans_json, now_ts))
 
         if USE_POSTGRES:
-            cur.execute("""
-                INSERT INTO user_test_drafts (user_tg_id, test_id, answers_json, updated_at)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (user_tg_id, test_id) DO UPDATE SET
-                    answers_json = EXCLUDED.answers_json,
-                    updated_at = EXCLUDED.updated_at
-            """, (user_tg_id, test_id, ans_json, now_ts))
-        else:
-            cur.execute("""
-                INSERT INTO user_test_drafts (user_tg_id, test_id, answers_json, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (user_tg_id, test_id) DO UPDATE SET
-                    answers_json = excluded.answers_json,
+            from psycopg2.extras import execute_values
+            execute_values(cur, """
+                INSERT INTO submission_drafts (user_tg_id, test_id, question_key, answer_val, updated_at)
+                VALUES %s
+                ON CONFLICT (user_tg_id, test_id, question_key) DO UPDATE SET
+                    answer_val = excluded.answer_val,
                     updated_at = excluded.updated_at
-            """, (user_tg_id, test_id, ans_json, now_ts))
-
-        for qkey, val in answers.items():
-            qkey_clean = str(qkey).strip().lower()
-            val_clean = str(val).strip()
-            if USE_POSTGRES:
-                cur.execute("""
-                    INSERT INTO submission_drafts (user_tg_id, test_id, question_key, answer_val, updated_at)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (user_tg_id, test_id, question_key) DO UPDATE SET
-                        answer_val = EXCLUDED.answer_val,
-                        updated_at = EXCLUDED.updated_at
-                """, (user_tg_id, test_id, qkey_clean, val_clean, now_ts))
-            else:
-                cur.execute("""
-                    INSERT INTO submission_drafts (user_tg_id, test_id, question_key, answer_val, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT (user_tg_id, test_id, question_key) DO UPDATE SET
-                        answer_val = excluded.answer_val,
-                        updated_at = excluded.updated_at
-                """, (user_tg_id, test_id, qkey_clean, val_clean, now_ts))
+            """, [(user_tg_id, test_id, qk, av, now_ts) for qk, av in rows])
+        else:
+            cur.executemany(f"""
+                INSERT INTO submission_drafts (user_tg_id, test_id, question_key, answer_val, updated_at)
+                VALUES ({ph}, {ph}, {ph}, {ph}, {ph})
+                ON CONFLICT (user_tg_id, test_id, question_key) DO UPDATE SET
+                    answer_val = excluded.answer_val,
+                    updated_at = excluded.updated_at
+            """, [(user_tg_id, test_id, qk, av, now_ts) for qk, av in rows])
 
         conn.commit()
         return True
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print(f"Error saving bulk draft: {e}")
         return False
     finally:
@@ -1901,28 +1899,45 @@ def save_bulk_draft(user_tg_id: int, test_id: int, answers: Dict[str, str]) -> b
 
 
 def get_answer_drafts(user_tg_id: int, test_id: int) -> Dict[str, str]:
-    """Foydalanuvchining ushbu test uchun saqlangan barcha qoralama javoblarini olish."""
+    """Qoralama javoblarni olish (RealDictCursor ham, oddiy tuple ham ishlaydi)."""
     if not user_tg_id or not test_id:
         return {}
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute(f"SELECT answers_json FROM user_test_drafts WHERE user_tg_id = {_ph()} AND test_id = {_ph()}", (user_tg_id, test_id))
+        ph = _ph()
+        cur.execute(f"SELECT answers_json FROM user_test_drafts WHERE user_tg_id = {ph} AND test_id = {ph}",
+                    (user_tg_id, test_id))
         row = cur.fetchone()
-        if row and row[0]:
-            try:
-                res = json.loads(row[0])
-                if isinstance(res, dict) and res:
-                    return res
-            except Exception:
-                pass
+        if row:
+            if isinstance(row, dict):
+                raw = row.get("answers_json")
+            else:
+                try:
+                    raw = row["answers_json"]
+                except (KeyError, TypeError, IndexError):
+                    raw = row[0]
+            if raw:
+                try:
+                    res = json.loads(raw)
+                    if isinstance(res, dict) and res:
+                        return res
+                except Exception:
+                    pass
 
-        cur.execute(f"SELECT question_key, answer_val FROM submission_drafts WHERE user_tg_id = {_ph()} AND test_id = {_ph()}", (user_tg_id, test_id))
-        rows = cur.fetchall()
+        cur.execute(f"SELECT question_key, answer_val FROM submission_drafts WHERE user_tg_id = {ph} AND test_id = {ph}",
+                    (user_tg_id, test_id))
         out = {}
-        for r in rows:
-            if r and r[0]:
-                out[str(r[0])] = str(r[1] or "")
+        for r in cur.fetchall():
+            if isinstance(r, dict):
+                qk, av = r.get("question_key"), r.get("answer_val")
+            else:
+                try:
+                    qk, av = r["question_key"], r["answer_val"]
+                except (KeyError, TypeError, IndexError):
+                    qk, av = r[0], r[1]
+            if qk:
+                out[str(qk)] = str(av or "")
         return out
     except Exception as e:
         print(f"Error fetching answer drafts: {e}")
