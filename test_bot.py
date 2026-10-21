@@ -76,13 +76,14 @@ async def main():
     is_render = bool(os.getenv("RENDER_EXTERNAL_URL") or os.getenv("RENDER") == "true" or os.getenv("RENDER_SERVICE_ID"))
     USE_WEBHOOK = os.getenv("USE_WEBHOOK", "1" if is_render else "0").strip().lower() in ("1", "true", "yes")
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
-    if use_webhook_mode and not WEBHOOK_SECRET:
-        log.error("❌ XATOLIK: WEBHOOK_SECRET muhit o'zgaruvchisi (env) o'rnatilmagan! Standart xavfli token ishlatilmaydi.")
     WEBHOOK_PATH = "/tg-webhook"
 
     active_url = get_webapp_url()
     is_valid_https = bool(active_url and active_url.startswith("https://") and "localhost" not in active_url)
     use_webhook_mode = bool(is_render and USE_WEBHOOK and is_valid_https)
+
+    if use_webhook_mode and not WEBHOOK_SECRET:
+        log.error("❌ XATOLIK: WEBHOOK_SECRET muhit o'zgaruvchisi (env) o'rnatilmagan! Standart xavfli token ishlatilmaydi.")
 
     app = await create_web_app()
 
