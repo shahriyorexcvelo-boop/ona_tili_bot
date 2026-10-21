@@ -3,8 +3,9 @@ import os
 import re
 from aiogram.types import MenuButtonWebApp, WebAppInfo
 
-from core.config import log, WEBAPP_URL
+from core.config import log, WEBAPP_URL, set_webapp_url, get_webapp_url
 from core.bot import bot
+import core.config
 
 async def maintain_tunnel(local_port: int):
     """Telegram Mini App uchun tunnel yoki Railway doimiy HTTPS manzilini sozlaydi."""
@@ -17,10 +18,10 @@ async def maintain_tunnel(local_port: int):
         if not render_domain:
             render_domain = os.getenv("WEBAPP_URL") or "https://ona-tili-bot.onrender.com"
         WEBAPP_URL = (render_domain if render_domain.startswith("http") else f"https://{render_domain}").rstrip("/")
+        set_webapp_url(WEBAPP_URL)
+        core.config.WEBAPP_URL = WEBAPP_URL
         log.info(f"🚀 Render.com Production muhiti aniqlandi: {WEBAPP_URL}")
         try:
-            with open("tunnel_url.txt", "w") as f:
-                f.write(WEBAPP_URL)
             menu_btn = MenuButtonWebApp(text="Profil 👤", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app.html"))
             await bot.set_chat_menu_button(menu_button=menu_btn)
             log.info("✅ Bot menyu tugmasi 'Profil 👤' Render.com URL ga ulandi!")
@@ -30,11 +31,11 @@ async def maintain_tunnel(local_port: int):
 
     railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
     if railway_domain:
-        WEBAPP_URL = f"https://{railway_domain}"
+        WEBAPP_URL = f"https://{railway_domain}".rstrip("/")
+        set_webapp_url(WEBAPP_URL)
+        core.config.WEBAPP_URL = WEBAPP_URL
         log.info(f"🚂 Railway Production muhiti aniqlandi: {WEBAPP_URL}")
         try:
-            with open("tunnel_url.txt", "w") as f:
-                f.write(WEBAPP_URL)
             menu_btn = MenuButtonWebApp(text="Profil 👤", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app.html"))
             await bot.set_chat_menu_button(menu_button=menu_btn)
             log.info("✅ Bot menyu tugmasi 'Profil 👤' Railway URL ga ulandi!")
@@ -45,10 +46,10 @@ async def maintain_tunnel(local_port: int):
     env_url = os.getenv("WEBAPP_URL", "")
     if env_url and not any(k in env_url for k in [".lhr.life", ".trycloudflare.com", ".serveo.net", "serveousercontent.com", "localhost", "127.0.0.1"]):
         WEBAPP_URL = env_url.rstrip("/")
+        set_webapp_url(WEBAPP_URL)
+        core.config.WEBAPP_URL = WEBAPP_URL
         log.info(f"🌐 Doimiy WEBAPP_URL sozlamasi aniqlandi: {WEBAPP_URL}")
         try:
-            with open("tunnel_url.txt", "w") as f:
-                f.write(WEBAPP_URL)
             menu_btn = MenuButtonWebApp(text="Profil 👤", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app.html"))
             await bot.set_chat_menu_button(menu_button=menu_btn)
             log.info("✅ Bot menyu tugmasi 'Profil 👤' env URL ga ulandi!")
@@ -77,12 +78,12 @@ async def maintain_tunnel(local_port: int):
                     decoded = line.decode('utf-8', errors='ignore')
                     match = re.search(pattern, decoded)
                     if match:
-                        new_url = match.group(0)
+                        new_url = match.group(0).rstrip("/")
                         WEBAPP_URL = new_url
+                        set_webapp_url(new_url)
+                        core.config.WEBAPP_URL = new_url
                         log.info(f"✨ JONLI HTTPS MINI APP URL ({name}): {WEBAPP_URL}")
                         try:
-                            with open("tunnel_url.txt", "w") as f:
-                                f.write(WEBAPP_URL)
                             # Update Bot Menu Button automatically
                             menu_btn = MenuButtonWebApp(text="Profil 👤", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app.html"))
                             await bot.set_chat_menu_button(menu_button=menu_btn)

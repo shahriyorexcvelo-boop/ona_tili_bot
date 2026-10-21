@@ -25,7 +25,7 @@ from aiogram.types import (
 import test_db
 from core import (
     UZB_TZ, format_uzb_time, TG_ICONS, tg_e,
-    BOT_TOKEN, ADMIN_ID, get_config_admin_ids, WEBAPP_URL, log, bot,
+    BOT_TOKEN, ADMIN_ID, get_config_admin_ids, WEBAPP_URL, get_webapp_url, log, bot,
     RegistrationState, SolveTestState, EditProfileState, StudentTahlilState,
     main_menu_kb, profile_webapp_kb, results_webapp_kb,
     contact_share_kb, make_webapp_button,
@@ -399,7 +399,7 @@ async def solve_test_cb(call: CallbackQuery):
         "title": t["title"],
         "subject": t.get("subject", "Ona tili")
     }
-    encoded_url = f"{WEBAPP_URL}?{urllib.parse.urlencode(params)}"
+    encoded_url = f"{get_webapp_url()}?{urllib.parse.urlencode(params)}"
     reply_kb = InlineKeyboardMarkup(inline_keyboard=[
         [make_webapp_button("📝 Testni boshlash (Mini App)", encoded_url)]
     ])
@@ -411,7 +411,7 @@ async def solve_test_cb(call: CallbackQuery):
 
 @user_router.callback_query(F.data == "admin_webapp_info")
 async def admin_webapp_info_cb(call: CallbackQuery):
-    admin_webapp_url = f"{WEBAPP_URL}/admin.html?tg_id={call.from_user.id}"
+    admin_webapp_url = f"{get_webapp_url()}/admin.html?tg_id={call.from_user.id}"
     reply_kb = InlineKeyboardMarkup(inline_keyboard=[
         [make_webapp_button("📱 Admin Panelni ochish (Mini App)", admin_webapp_url)],
         [InlineKeyboardButton(text="🔙 Admin Menyuga qaytish", callback_data="admin_back_to_menu")]
@@ -442,7 +442,7 @@ async def show_my_results(message: Message):
             btn_title = f"📊 #{t_code} tahlili" if t_code else f"📊 {t_title[:20]} tahlili"
             kb_rows.append([InlineKeyboardButton(text=btn_title, callback_data=f"user_req_tahlil_{s['test_id']}")])
 
-    kb_rows.append([make_webapp_button("📱 Barcha natijalar va tahlillar (Mini App)", f"{WEBAPP_URL}/app.html?tab=tests&tg_id={message.from_user.id}")])
+    kb_rows.append([make_webapp_button("📱 Barcha natijalar va tahlillar (Mini App)", f"{get_webapp_url()}/app.html?tab=tests&tg_id={message.from_user.id}")])
 
     await message.answer(
         "📊 <b>Mening natijalarim va tahlillar</b>\n\n"
@@ -490,7 +490,7 @@ async def show_profile(message: Message):
             InlineKeyboardButton(text="✏️ Ismni o'zgartirish", callback_data="profile_edit_name"),
             InlineKeyboardButton(text="📞 Raqamni o'zgartirish", callback_data="profile_edit_phone")
         ],
-        [make_webapp_button("📱 Shaxsiy profil (Mini App)", f"{WEBAPP_URL}/app.html?tg_id={message.from_user.id}")],
+        [make_webapp_button("📱 Shaxsiy profil (Mini App)", f"{get_webapp_url()}/app.html?tg_id={message.from_user.id}")],
         [InlineKeyboardButton(text="🗑 Akkauntni o'chirish", callback_data="profile_delete_account")]
     ])
 
@@ -527,7 +527,7 @@ async def profile_show_details_handler(call: CallbackQuery):
             InlineKeyboardButton(text="✏️ Ismni o'zgartirish", callback_data="profile_edit_name"),
             InlineKeyboardButton(text="📞 Raqamni o'zgartirish", callback_data="profile_edit_phone")
         ],
-        [make_webapp_button("📱 Shaxsiy profil (Mini App)", f"{WEBAPP_URL}/app.html?tg_id={call.from_user.id}")],
+        [make_webapp_button("📱 Shaxsiy profil (Mini App)", f"{get_webapp_url()}/app.html?tg_id={call.from_user.id}")],
         [InlineKeyboardButton(text="🗑 Akkauntni o'chirish", callback_data="profile_delete_account")]
     ])
     try:
@@ -566,7 +566,7 @@ async def profile_hide_details_handler(call: CallbackQuery):
             InlineKeyboardButton(text="✏️ Ismni o'zgartirish", callback_data="profile_edit_name"),
             InlineKeyboardButton(text="📞 Raqamni o'zgartirish", callback_data="profile_edit_phone")
         ],
-        [make_webapp_button("📱 Shaxsiy profil (Mini App)", f"{WEBAPP_URL}/app.html?tg_id={call.from_user.id}")],
+        [make_webapp_button("📱 Shaxsiy profil (Mini App)", f"{get_webapp_url()}/app.html?tg_id={call.from_user.id}")],
         [InlineKeyboardButton(text="🗑 Akkauntni o'chirish", callback_data="profile_delete_account")]
     ])
     try:
@@ -837,7 +837,7 @@ async def chat_member_joined_handler(event: ChatMemberUpdated):
 async def show_help(message: Message):
     contact_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✍️ Adminga murojaat (@eshmbetov)", url="https://t.me/eshmbetov")],
-        [make_webapp_button("📱 Ona tili Test (Mini App)", f"{WEBAPP_URL}/app.html?tg_id={message.from_user.id}")]
+        [make_webapp_button("📱 Ona tili Test (Mini App)", f"{get_webapp_url()}/app.html?tg_id={message.from_user.id}")]
     ])
     await message.answer(
         "ℹ️ <b>YORDAM VA QO'LLAB-QUVVATLASH</b>\n\n"
@@ -887,7 +887,7 @@ async def user_req_tahlil_cb(call: CallbackQuery, state: FSMContext):
     yt_url = (test.get("youtube_url") or "").strip()
     if yt_url:
         kb_rows.append([InlineKeyboardButton(text="🎬 Video tahlilni ko'rish (YouTube)", url=yt_url)])
-    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app.html?tab=tests&tg_id={call.from_user.id}"))])
+    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{get_webapp_url()}/app.html?tab=tests&tg_id={call.from_user.id}"))])
 
     await call.message.answer(
         tahlil_text,
@@ -986,7 +986,7 @@ async def process_tahlil_code(message: Message, state: FSMContext):
     yt_url = (test.get("youtube_url") or "").strip()
     if yt_url:
         kb_rows.append([InlineKeyboardButton(text="🎬 Video tahlilni ko'rish (YouTube)", url=yt_url)])
-    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app.html?tab=tests&tg_id={message.from_user.id}"))])
+    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{get_webapp_url()}/app.html?tab=tests&tg_id={message.from_user.id}"))])
 
     await message.answer(
         tahlil_text,

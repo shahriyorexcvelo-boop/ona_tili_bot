@@ -23,7 +23,7 @@ from core import (
     UZB_TZ, format_uzb_time, TG_ICONS, tg_e,
     get_test_schedule_status,
     is_working_hours, should_apply_night_mode, get_night_message,
-    ADMIN_ID, get_config_admin_ids, WEBAPP_URL, bot, log,
+    ADMIN_ID, get_config_admin_ids, WEBAPP_URL, get_webapp_url, bot, log,
     make_webapp_button, is_user_gone_error
 )
 
@@ -230,7 +230,7 @@ async def send_test_card_to_user_chat(user_tg_id: int, test: Dict[str, Any]):
         "subject": test.get("subject", "Ona tili"),
         "tg_id": user_tg_id
     }
-    encoded_url = f"{WEBAPP_URL}?{urllib.parse.urlencode(params)}"
+    encoded_url = f"{get_webapp_url()}?{urllib.parse.urlencode(params)}"
 
     inline_kb = InlineKeyboardMarkup(inline_keyboard=[
         [make_webapp_button("📝 Javoblarni topshirish (Mini App)", encoded_url, fallback_cb=f"solve_test_{test['id']}")]

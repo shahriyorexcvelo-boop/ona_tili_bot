@@ -648,24 +648,58 @@ body.keyboard-open .admin-compact-dock {
   border: 1px solid rgba(124, 58, 237, 0.4);
 }
 
-.esse-question-row {
-  background: rgba(124, 58, 237, 0.05);
-  border: 1.5px solid rgba(124, 58, 237, 0.25);
-  border-radius: 12px;
-  padding: 14px;
-  margin-top: 8px;
+.esse-question-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
 }
 
 .esse-input {
-  border-color: rgba(124, 58, 237, 0.4) !important;
-  font-weight: 700;
+  width: 100% !important;
+  text-align: center !important;
+  font-weight: 700 !important;
+  font-size: 15px !important;
   color: #7c3aed;
+  border: none !important;
+  background: transparent !important;
+  outline: none !important;
+}
+
+.esse-input::placeholder {
+  text-align: center;
+  color: rgba(100, 116, 139, 0.5);
+  font-weight: 500;
+  font-size: 13.5px;
+  opacity: 0.75;
+}
+
+.esse-input::-webkit-input-placeholder {
+  text-align: center;
+  color: rgba(100, 116, 139, 0.5);
+  font-weight: 500;
+  font-size: 13.5px;
+  opacity: 0.75;
+}
+
+body.dark-mode .esse-input {
+  color: #c4b5fd;
+}
+
+body.dark-mode .esse-input::placeholder {
+  color: rgba(167, 139, 250, 0.45);
+}
+
+body.dark-mode .esse-input::-webkit-input-placeholder {
+  color: rgba(167, 139, 250, 0.45);
 }
 
 .esse-hint-text {
   font-size: 11.5px;
   color: #64748b;
-  margin-top: 8px;
+  margin-top: 4px;
   line-height: 1.4;
 }
 

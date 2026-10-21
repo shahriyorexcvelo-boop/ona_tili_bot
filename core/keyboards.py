@@ -3,7 +3,7 @@ from aiogram.types import (
     KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 )
 import test_db
-from .config import WEBAPP_URL, ADMIN_ID
+from .config import WEBAPP_URL, ADMIN_ID, get_webapp_url
 
 def make_webapp_button(text: str, url: str, fallback_cb: str = "open_webapp_info") -> InlineKeyboardButton:
     """Telegram WebApp faqat HTTPS talab qiladi. Agar HTTP (localhost) bo'lsa callback ishlatiladi."""
@@ -16,9 +16,10 @@ def make_webapp_button(text: str, url: str, fallback_cb: str = "open_webapp_info
 
 def main_menu_kb(user_tg_id: int) -> ReplyKeyboardMarkup:
     is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
+    base_url = get_webapp_url()
     
-    app_url = f"{WEBAPP_URL}/app.html?tg_id={user_tg_id}&v=20261020_v1"
-    admin_webapp_url = f"{WEBAPP_URL}/admin.html?tg_id={user_tg_id}&v=20261020_v1"
+    app_url = f"{base_url}/app.html?tg_id={user_tg_id}&v=20261020_v1"
+    admin_webapp_url = f"{base_url}/admin.html?tg_id={user_tg_id}&v=20261020_v1"
 
     # Agar HTTPS bo'lsa to'g'ridan-to'g'ri Telegram WebApp ochadi
     if app_url.startswith("https://"):
@@ -54,7 +55,8 @@ def main_menu_kb(user_tg_id: int) -> ReplyKeyboardMarkup:
 
 def profile_webapp_kb(user_tg_id: int) -> InlineKeyboardMarkup:
     """Shaxsiy profil mini ilovasini ochish tugmasi."""
-    app_url = f"{WEBAPP_URL}/app.html?tg_id={user_tg_id}&v=20261020_v1"
+    base_url = get_webapp_url()
+    app_url = f"{base_url}/app.html?tg_id={user_tg_id}&v=20261020_v1"
     buttons = [
         [make_webapp_button("📱 Shaxsiy profilni ochish", app_url, fallback_cb="open_app_info")]
     ]
@@ -62,8 +64,9 @@ def profile_webapp_kb(user_tg_id: int) -> InlineKeyboardMarkup:
 
 def results_webapp_kb(user_tg_id: int = 0) -> InlineKeyboardMarkup:
     """Natijalarni ko'rish mini ilovasi tugmasi."""
+    base_url = get_webapp_url()
     qs = f"?tg_id={user_tg_id}&v=20261020_v1" if user_tg_id else "?v=20261020_v1"
-    app_url = f"{WEBAPP_URL}/app.html{qs}"
+    app_url = f"{base_url}/app.html{qs}"
     buttons = [
         [make_webapp_button("📊 Asosiy ilovani ochish", app_url, fallback_cb="open_app_info")]
     ]
@@ -91,8 +94,9 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     reg_status = "OCHIQ" if reg_open else "YOPIQ"
     reg_btn_text = f"👥 Yangi qabul: {reg_status} {reg_icon}"
 
+    base_url = get_webapp_url()
     buttons = [
-        [InlineKeyboardButton(text="💻 MacBook Dashboard (Katta Baza)", url=f"{WEBAPP_URL}/dashboard")],
+        [InlineKeyboardButton(text="💻 MacBook Dashboard (Katta Baza)", url=f"{base_url}/dashboard")],
         [InlineKeyboardButton(text="📄 PDF Watermark qo'yish / Tayyorlash", callback_data="admin_pdf_watermark_info")],
         [InlineKeyboardButton(text="💬 Foydalanuvchiga yozish / Chat", callback_data="admin_contact_user_prompt")],
         [InlineKeyboardButton(text="📢 O'quvchilarga xabar yuborish", callback_data="admin_broadcast_menu")],
@@ -101,6 +105,6 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=maint_btn_text, callback_data="admin_toggle_maint_prompt")],
         [InlineKeyboardButton(text=reg_btn_text, callback_data="admin_toggle_registration")],
         [InlineKeyboardButton(text="👑 Adminlar boshqaruvi", callback_data="admin_manage_admins")],
-        [make_webapp_button("👥 Foydalanuvchilar boshqaruvi (Web App)", f"{WEBAPP_URL}/app.html?tab=admin&tg_id={ADMIN_ID}", "admin_webapp_redirect_info")]
+        [make_webapp_button("👥 Foydalanuvchilar boshqaruvi (Web App)", f"{base_url}/app.html?tab=admin&tg_id={ADMIN_ID}", "admin_webapp_redirect_info")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)

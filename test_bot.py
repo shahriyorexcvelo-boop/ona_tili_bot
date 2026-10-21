@@ -15,7 +15,7 @@ from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
 
 import test_db
 from core import (
-    BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, log, bot, dp
+    BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, get_webapp_url, log, bot, dp
 )
 from services import maintain_tunnel, schedule_checker
 from handlers import user_router, admin_router, create_web_app
@@ -57,7 +57,8 @@ async def main():
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "onatili_sec_token_2026").strip()
     WEBHOOK_PATH = "/tg-webhook"
 
-    is_valid_https = bool(WEBAPP_URL and WEBAPP_URL.startswith("https://") and "localhost" not in WEBAPP_URL)
+    active_url = get_webapp_url()
+    is_valid_https = bool(active_url and active_url.startswith("https://") and "localhost" not in active_url)
     use_webhook_mode = USE_WEBHOOK and is_valid_https
 
     app = await create_web_app()
@@ -115,27 +116,19 @@ async def main():
 
             # Telegram pastki chat menyu tugmasini doimiy ravishda "Profil 👤" qilib o'rnatish
             try:
-                app_url = WEBAPP_URL
-                if not app_url and os.path.exists("tunnel_url.txt"):
-                    try:
-                        with open("tunnel_url.txt", "r") as f:
-                            app_url = f.read().strip()
-                    except Exception:
-                        pass
-                if not app_url:
-                    app_url = os.getenv("WEBAPP_URL") or "https://ona-tili-bot.onrender.com"
+                app_url = get_webapp_url()
                 if "/dashboard" in app_url:
                     app_url = app_url.split("/dashboard")[0]
                 menu_btn = MenuButtonWebApp(text="Profil 👤", web_app=WebAppInfo(url=f"{app_url.rstrip('/')}/app.html"))
                 await bot.set_chat_menu_button(menu_button=menu_btn)
-                log.info("✅ Telegram Bot pastki menyu tugmasi 'Profil 👤' qilib sozlandi!")
+                log.info(f"✅ Telegram Bot pastki menyu tugmasi 'Profil 👤' ({app_url}) qilib sozlandi!")
             except Exception as me:
                 log.warning(f"Bot chat menyu tugmasini o'rnatishda ogohlantirish: {me}")
         except Exception as ce:
             log.warning(f"Bot buyruqlarini o'rnatishda ogohlantirish: {ce}")
 
         if use_webhook_mode:
-            webhook_url = f"{WEBAPP_URL.rstrip('/')}{WEBHOOK_PATH}"
+            webhook_url = f"{get_webapp_url().rstrip('/')}{WEBHOOK_PATH}"
             log.info(f"🚀 Telegram Bot Webhook rejimida ishlamoqda: {webhook_url}")
             try:
                 await bot.set_webhook(

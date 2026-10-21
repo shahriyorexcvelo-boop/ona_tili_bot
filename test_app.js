@@ -605,6 +605,13 @@ const TestApp = {
       }
     }
 
+    // 45 Esse tozalash
+    const input45 = document.getElementById('input-45');
+    if (input45) input45.value = '';
+    const box45 = document.getElementById('box-45');
+    if (box45) box45.classList.remove('filled');
+    this.updateMapItem('45', false);
+
     this.updateProgress();
 
     if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {

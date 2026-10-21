@@ -255,26 +255,13 @@
           <span class="section-subtext">O'z ijodiy yozma ishingiz (esse) bo'yicha halol tahminiy balingizni kiriting (0 dan 75 gacha)</span>
         </div>
         <div class="questions-list" id="questions-part-5">
-          <div class="open-question-row esse-question-row" id="qrow-45">
-            <div class="savol-badge esse-badge">45-savol (Esse)</div>
-
-            <div style="margin-bottom: 12px;">
-              <label for="input-45" style="display: block; font-size: 13px; font-weight: 700; color: var(--text-main); margin-bottom: 6px;">
-                ⭐️ Halol tahminiy esse balingiz (0 dan 75 gacha):
-              </label>
-              <div class="savol-input-box" id="box-45">
-                <input type="text" inputmode="decimal" class="savol-input open-native-input esse-input" id="input-45" placeholder="Ballni kiriting (masalan: 65 yoki 70)..." autocomplete="off" oninput="TestApp.handleOpenInput('45', this.value)">
-              </div>
+          <div class="esse-question-box" id="qrow-45">
+            <div style="display: flex; align-items: center; justify-content: flex-start;">
+              <div class="savol-badge esse-badge">45-savol</div>
             </div>
-
-            <div style="margin-bottom: 8px;">
-              <label for="input-45-text" style="display: block; font-size: 13px; font-weight: 700; color: var(--text-main); margin-bottom: 6px;">
-                ✍️ Esse (yozma ish) matni yoki rejangiz:
-              </label>
-              <textarea class="savol-input open-native-input esse-textarea" id="input-45-text" placeholder="Esse matningizni shu yerga yozishingiz yoki nusxalab qo'yishingiz mumkin..." rows="5" style="width: 100%; border-radius: 12px; padding: 12px; font-size: 14px; font-family: inherit; line-height: 1.5; resize: vertical; border: 1.5px solid rgba(124, 58, 237, 0.35); background: var(--bg-card); color: var(--text-main); box-sizing: border-box;" oninput="TestApp.handleOpenInput('45_text', this.value)"></textarea>
+            <div class="savol-input-box" id="box-45" style="width: 100%; height: 46px; box-sizing: border-box;">
+              <input type="text" inputmode="decimal" class="savol-input open-native-input esse-input" id="input-45" placeholder="o'rtacha esse balingiz" autocomplete="off" oninput="TestApp.handleOpenInput('45', this.value)">
             </div>
-
-            <div class="esse-hint-text">ℹ️ <i>Ona tili milliy sertifikatida test uchun maksimal 75 ball, esse uchun maksimal 75 ball bo'ladi. Yakuniy ball ikkalasining o'rtacha arifmetigi asosida hisoblanadi (max 75 ball).</i></div>
           </div>
         </div>
       </section>

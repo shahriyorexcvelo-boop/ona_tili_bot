@@ -27,7 +27,7 @@ from aiogram.types import (
 import test_db
 from core import (
     UZB_TZ, format_uzb_time, TG_ICONS, tg_e,
-    BOT_TOKEN, ADMIN_ID, get_config_admin_ids, WEBAPP_URL, log, bot,
+    BOT_TOKEN, ADMIN_ID, get_config_admin_ids, WEBAPP_URL, get_webapp_url, log, bot,
     RegistrationState, SolveTestState, UploadPostPdfState, AddAdminState,
     SetTimeLimitState, BroadcastState, ScheduleState, SetYoutubeState,
     ContactUserState, AdminPdfWatermarkState,
@@ -307,7 +307,7 @@ async def adm_clean_blocked_start_cb(call: CallbackQuery):
 async def admin_create_test_text_handler(message: Message):
     if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         return
-    admin_webapp_url = f"{WEBAPP_URL}/admin.html?tg_id={message.from_user.id}"
+    admin_webapp_url = f"{get_webapp_url()}/admin.html?tg_id={message.from_user.id}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [make_webapp_button("➕ Yangi test yaratish (Mini App)", admin_webapp_url)]
     ])
@@ -824,7 +824,7 @@ async def admin_manage_test_card(call: CallbackQuery):
         f"<i>Boshqarish uchun quyidagi amallardan birini tanlang:</i>"
     )
 
-    edit_keys_url = f"{WEBAPP_URL}/admin.html?edit_test_id={t['id']}"
+    edit_keys_url = f"{get_webapp_url()}/admin.html?edit_test_id={t['id']}"
     kb_rows = [
         [make_webapp_button("✏️ Kalitlarni tahrirlash (Mini App)", edit_keys_url)],
         [InlineKeyboardButton(text=toggle_btn_text, callback_data=f"toggle_test_{t['id']}")],
@@ -1248,7 +1248,7 @@ async def admin_view_users_redirect_cb(call: CallbackQuery):
         "Quyidagi tugma orqali ilovani ochishingiz mumkin 👇"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [make_webapp_button("🚀 Foydalanuvchilarni boshqarish (Web App)", f"{WEBAPP_URL}/app.html?tab=admin&tg_id={ADMIN_ID}")],
+        [make_webapp_button("🚀 Foydalanuvchilarni boshqarish (Web App)", f"{get_webapp_url()}/app.html?tab=admin&tg_id={ADMIN_ID}")],
         [InlineKeyboardButton(text="🔙 Admin Menyuga qaytish", callback_data="admin_back_to_menu")]
     ])
     try:
@@ -2140,7 +2140,7 @@ async def admin_test_stats_detail(call: CallbackQuery):
         f"<i>Hisoblash, tahlil qilish va natijalarni e'lon qilish usulini tanlang 👇</i>"
     )
 
-    edit_keys_url = f"{WEBAPP_URL}/admin.html?edit_test_id={test_id}"
+    edit_keys_url = f"{get_webapp_url()}/admin.html?edit_test_id={test_id}"
     buttons = [
         [make_webapp_button("✏️ Kalitlarni tahrirlash (Mini App)", edit_keys_url)],
         [InlineKeyboardButton(text="🧮 Rasch modeli (JMLE) bo'yicha hisoblash", callback_data=f"adm_broadcast_rasch_{test_id}")],
@@ -2490,7 +2490,7 @@ def build_student_result_message(sub: dict, test: dict, eval_type: str = "rasch"
     else:
         kb_rows.append([InlineKeyboardButton(text="🎬 Video tahlil (mavjud emas)", callback_data="no_video_analysis")])
 
-    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app.html?tab=tests"))])
+    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{get_webapp_url()}/app.html?tab=tests"))])
 
     return msg_text, InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
