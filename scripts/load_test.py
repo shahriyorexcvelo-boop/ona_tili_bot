@@ -14,6 +14,12 @@ Natijalar:
 from __future__ import annotations
 import os
 import sys
+
+# Repo ildizini sys.path ga qo'shish
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 import time
 import math
 import asyncio
@@ -172,14 +178,15 @@ class LoadTestRunner:
                 conn = test_db.get_connection()
                 try:
                     cur = conn.cursor()
+                    now_ts = int(time.time())
                     for uid in all_uids:
                         cur.execute(
-                            f"INSERT INTO users (tg_id, fullname, phone, username, status) "
-                            f"VALUES ({test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}) "
+                            f"INSERT INTO users (tg_id, fullname, phone, username, status, registered_at) "
+                            f"VALUES ({test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}) "
                             f"ON CONFLICT (tg_id) DO UPDATE SET status = 'approved'",
-                            (uid, f"Virtual Student {uid}", "+998901234567", f"vuser_{uid}", "approved")
+                            (uid, f"Virtual Student {uid}", "+998901234567", f"vuser_{uid}", "approved", now_ts)
                         )
-                    cur.execute("DELETE FROM test_submissions WHERE tg_id >= 900000000 AND tg_id <= 900020000")
+                    cur.execute("DELETE FROM submissions WHERE user_tg_id >= 900000000 AND user_tg_id <= 900020000")
                     conn.commit()
                     print(f"✅ {len(all_uids)} ta virtual test foydalanuvchisi bazada tayyorlandi.")
                 finally:
