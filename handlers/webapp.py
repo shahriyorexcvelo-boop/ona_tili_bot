@@ -258,6 +258,8 @@ async def _process_submission_background(test_id: int, user_tg_id: int, user_ans
                 is_late=1 if is_late_submission else 0
             )
         invalidate_dashboard_cache()
+        test_db.invalidate_user_cache(user_tg_id)
+        invalidate_profile_cache(user_tg_id)
 
         now_uzb = datetime.now(UZB_TZ)
         time_str_sec = now_uzb.strftime("%H:%M:%S")
@@ -1149,6 +1151,15 @@ async def handle_static_file(request):
 
 # ── ASOSIY MINI APP API ENDPOINTLARI ────────────────────────────────────────
 
+_PROFILE_RAM_CACHE: dict[int, tuple[float, dict]] = {}
+
+def invalidate_profile_cache(tg_id: Optional[int] = None):
+    """Foydalanuvchi profili keshini tozalash (5s TTL)"""
+    if tg_id is not None:
+        _PROFILE_RAM_CACHE.pop(int(tg_id), None)
+    else:
+        _PROFILE_RAM_CACHE.clear()
+
 def _fetch_profile_data_sync(tg_id: int):
     try:
         user = test_db.get_user(tg_id)
@@ -1290,6 +1301,12 @@ async def handle_app_profile(request):
                 "bot_username": bot_user
             })
 
+        if tg_id and tg_id > 0:
+            now_ts = time.time()
+            cached_prof = _PROFILE_RAM_CACHE.get(int(tg_id))
+            if cached_prof and (now_ts - cached_prof[0] < 5.0):
+                return web.json_response(cached_prof[1])
+
         user, is_admin, submissions, pending_users = await test_db.db(_fetch_profile_data_sync, tg_id)
 
         # Foydalanuvchi statistikasi
@@ -1335,13 +1352,17 @@ async def handle_app_profile(request):
             user_data['max_score'] = max_score_val
             user_data['has_pin'] = bool(user and user.get('pin_code'))
 
-        return web.json_response({
+        profile_resp_data = {
             "success": True,
             "user": user_data,
             "is_admin": is_admin,
             "pending_users": pending_users,
             "bot_username": bot_user
-        })
+        }
+        if tg_id and tg_id > 0:
+            _PROFILE_RAM_CACHE[int(tg_id)] = (time.time(), profile_resp_data)
+
+        return web.json_response(profile_resp_data)
     except Exception as e:
         log.error(f"App Profile API Error: {e}", exc_info=True)
         return web.json_response({"success": False, "message": str(e)}, status=400)
@@ -2862,17 +2883,36 @@ async def mini_app_rate_limiter_middleware(request, handler):
         user_key = (
             request.query.get("tg_id")
             or request.query.get("user_tg_id")
-            or request.headers.get("X-Telegram-Init-Data", "")[:32]
-            or request.remote
-            or "anon"
+            or request.headers.get("X-Telegram-User-Id")
         )
+        if not user_key:
+            init_header = request.headers.get("X-Telegram-Init-Data", "")
+            if "user=" in init_header:
+                try:
+                    import urllib.parse
+                    import json
+                    parsed = urllib.parse.parse_qs(init_header)
+                    if "user" in parsed:
+                        u_obj = json.loads(parsed["user"][0])
+                        if u_obj and "id" in u_obj:
+                            user_key = str(u_obj["id"])
+                except Exception:
+                    pass
+        if not user_key:
+            init_val = request.headers.get("X-Telegram-Init-Data", "")
+            if init_val:
+                user_key = init_val[:32]
+
+        limit = 5 if user_key else 30
+        effective_key = user_key or request.remote or "anon"
+
         now = time.monotonic()
         async with _MINI_APP_RATE_LOCK:
-            timestamps = _MINI_APP_RATE_LIMITS.setdefault(user_key, [])
+            timestamps = _MINI_APP_RATE_LIMITS.setdefault(effective_key, [])
             cutoff = now - 1.0
             timestamps = [t for t in timestamps if t > cutoff]
-            if len(timestamps) >= 5:
-                _MINI_APP_RATE_LIMITS[user_key] = timestamps
+            if len(timestamps) >= limit:
+                _MINI_APP_RATE_LIMITS[effective_key] = timestamps
                 return web.json_response({
                     "success": False,
                     "error": "Juda ko'p so'rov yuborildi. Iltimos, 1 soniya kuting.",
@@ -2880,7 +2920,7 @@ async def mini_app_rate_limiter_middleware(request, handler):
                     "retry_after": 1
                 }, status=429, headers={"Retry-After": "1"})
             timestamps.append(now)
-            _MINI_APP_RATE_LIMITS[user_key] = timestamps
+            _MINI_APP_RATE_LIMITS[effective_key] = timestamps
 
             if len(_MINI_APP_RATE_LIMITS) > 5000:
                 _MINI_APP_RATE_LIMITS.clear()

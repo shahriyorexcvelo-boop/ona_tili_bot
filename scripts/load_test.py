@@ -64,10 +64,17 @@ class LoadTestRunner:
                 self.error_messages.append(error)
 
     async def simulate_user_flow(self, session: aiohttp.ClientSession, user_id: int, test_id: int):
+        init_data = f"user=%7B%22id%22%3A{user_id}%2C%22first_name%22%3A%22VirtualUser{user_id}%22%7D"
+        headers = {
+            "Content-Type": "application/json",
+            "X-Telegram-User-Id": str(user_id),
+            "X-Telegram-Init-Data": init_data
+        }
+
         # 1. Profilni yuklash
         t0 = time.monotonic()
         try:
-            async with session.get(f"{self.base_url}/api/app/profile?tg_id={user_id}") as resp:
+            async with session.get(f"{self.base_url}/api/app/profile?tg_id={user_id}", headers=headers) as resp:
                 await resp.read()
                 await self._record(resp.status, time.monotonic() - t0)
         except Exception as e:
@@ -76,20 +83,20 @@ class LoadTestRunner:
         # 2. Faol testlar ro'yxatini olish
         t0 = time.monotonic()
         try:
-            async with session.get(f"{self.base_url}/api/app/active-tests?tg_id={user_id}") as resp:
+            async with session.get(f"{self.base_url}/api/app/active-tests?tg_id={user_id}", headers=headers) as resp:
                 await resp.read()
                 await self._record(resp.status, time.monotonic() - t0)
         except Exception as e:
             await self._record(599, time.monotonic() - t0, f"Active tests error: {e}")
 
-        # 3. Test savollari / kalitlarini ochish
+        # 3. Testni ochish (Savollar / Qoralama yuklash)
         t0 = time.monotonic()
         try:
-            async with session.get(f"{self.base_url}/api/admin/get-test-keys?test_id={test_id}") as resp:
+            async with session.get(f"{self.base_url}/api/app/get-draft?test_id={test_id}&user_tg_id={user_id}", headers=headers) as resp:
                 await resp.read()
                 await self._record(resp.status, time.monotonic() - t0)
         except Exception as e:
-            await self._record(599, time.monotonic() - t0, f"Get test keys error: {e}")
+            await self._record(599, time.monotonic() - t0, f"Get draft error: {e}")
 
         # 4. Autosave javoblarini saqlash
         t0 = time.monotonic()
@@ -102,11 +109,12 @@ class LoadTestRunner:
         try:
             async with session.post(
                 f"{self.base_url}/api/app/autosave-answer",
+                headers=headers,
                 json={
                     "test_id": test_id,
                     "user_tg_id": user_id,
                     "answers": answers,
-                    "init_data": f"user=%7B%22id%22%3A{user_id}%2C%22first_name%22%3A%22TestUser%22%7D"
+                    "init_data": init_data
                 }
             ) as resp:
                 await resp.read()
@@ -119,12 +127,13 @@ class LoadTestRunner:
         try:
             async with session.post(
                 f"{self.base_url}/api/submit-test",
+                headers=headers,
                 json={
                     "test_id": test_id,
                     "user_tg_id": user_id,
                     "fullname": f"Virtual User {user_id}",
                     "answers": answers,
-                    "init_data": f"user=%7B%22id%22%3A{user_id}%2C%22first_name%22%3A%22TestUser%22%7D"
+                    "init_data": init_data
                 }
             ) as resp:
                 await resp.read()
@@ -155,6 +164,28 @@ class LoadTestRunner:
                             target_test_id = int(tests[0].get("id", 1))
             except Exception:
                 pass
+
+            # Virtual foydalanuvchilarni tasdiqlangan qilib tayyorlash
+            all_uids = [900000000 + i for i in range(1, num_phase1 + 1)] + [900010000 + j for j in range(1, num_phase2 + 1)]
+            try:
+                import test_db
+                conn = test_db.get_connection()
+                try:
+                    cur = conn.cursor()
+                    for uid in all_uids:
+                        cur.execute(
+                            f"INSERT INTO users (tg_id, fullname, phone, username, status) "
+                            f"VALUES ({test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}, {test_db._ph()}) "
+                            f"ON CONFLICT (tg_id) DO UPDATE SET status = 'approved'",
+                            (uid, f"Virtual Student {uid}", "+998901234567", f"vuser_{uid}", "approved")
+                        )
+                    cur.execute("DELETE FROM test_submissions WHERE tg_id >= 900000000 AND tg_id <= 900020000")
+                    conn.commit()
+                    print(f"✅ {len(all_uids)} ta virtual test foydalanuvchisi bazada tayyorlandi.")
+                finally:
+                    test_db._close_conn(conn)
+            except Exception as e:
+                print(f"⚠️ Foydalanuvchilarni tayyorlashda ogohlantirish (davom etiladi): {e}")
             # 1-Bosqich: Foydalanuvchilarning bir tekisda kirishi
             print(f"\n--- 1-BOSQICH: {num_phase1} virtual foydalanuvchi ---")
             delay_between = self.duration_sec / max(1, num_phase1)

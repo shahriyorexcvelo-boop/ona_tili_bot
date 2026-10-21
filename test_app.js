@@ -498,7 +498,8 @@ const TestApp = {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Telegram-Init-Data': initData
+            'X-Telegram-Init-Data': initData,
+            'X-Telegram-User-Id': String(this.userTgId || '')
           },
           body: payload
         })
@@ -526,7 +527,10 @@ const TestApp = {
     if (!this.testId || !this.userTgId) return;
     const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
     fetch(`/api/app/get-draft?test_id=${this.testId}&user_tg_id=${this.userTgId}`, {
-      headers: { 'X-Telegram-Init-Data': initData }
+      headers: {
+        'X-Telegram-Init-Data': initData,
+        'X-Telegram-User-Id': String(this.userTgId || '')
+      }
     })
       .then(res => res.json())
       .then(data => {
@@ -1103,7 +1107,8 @@ const TestApp = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Telegram-Init-Data': initData
+          'X-Telegram-Init-Data': initData,
+          'X-Telegram-User-Id': String(this.userTgId || '')
         },
         body: JSON.stringify(Object.assign({}, payload, { init_data: initData }))
       });
