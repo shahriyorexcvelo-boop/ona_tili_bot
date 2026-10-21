@@ -9,6 +9,7 @@ import os
 import re
 import time
 import math
+import inspect
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 import sqlite3
@@ -21,6 +22,9 @@ except ImportError:
 
 UZB_TZ = timezone(timedelta(hours=5))
 ADMIN_ID = int(os.getenv("ADMIN_ID", "8039427064"))
+
+if os.getenv("LOCAL_SAFE_MODE") == "1":
+    os.environ["DATABASE_URL"] = ""
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
@@ -61,7 +65,7 @@ async def db(func, *args, **kwargs):
     Sinxron test_db funksiyalarini alohida thread pool da ishga tushirish uchun yagona async yordamchi.
     Aiogram / Aiohttp bitta umumiy event loop da ishlayotganda event loop ni bloklashdan to'liq himoya qiladi.
     """
-    if asyncio.iscoroutinefunction(func):
+    if inspect.iscoroutinefunction(func):
         return await func(*args, **kwargs)
     loop = asyncio.get_running_loop()
     if kwargs:
@@ -2024,6 +2028,63 @@ def get_users_count() -> Dict[str, int]:
             "rejected": rejected,
             "blocked": 0
         }
+    finally:
+        _close_conn(conn)
+
+
+_SYSTEM_STATS_CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
+_SYSTEM_STATS_LOCK = threading.Lock()
+
+def invalidate_system_stats_cache():
+    with _SYSTEM_STATS_LOCK:
+        _SYSTEM_STATS_CACHE["ts"] = 0.0
+        _SYSTEM_STATS_CACHE["data"] = None
+
+def get_system_stats() -> Dict[str, int]:
+    """
+    Admin /stats uchun tizim statistikasi:
+    - tasdiqlangan (approved)
+    - kutilmoqda (pending)
+    - bloklangan (blocked / blocked_bot / rejected)
+    - jami testlar
+    - bugungi topshirishlar
+    Bitta COUNT so'rovi orqali va 10 soniyalik xotira keshi bilan ishlaydi.
+    """
+    now_ts = time.time()
+    with _SYSTEM_STATS_LOCK:
+        if _SYSTEM_STATS_CACHE["data"] is not None and (now_ts - _SYSTEM_STATS_CACHE["ts"] < 10.0):
+            return dict(_SYSTEM_STATS_CACHE["data"])
+
+    now_dt = datetime.now(UZB_TZ)
+    today_start_dt = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start_ts = int(today_start_dt.timestamp())
+
+    ph = "%s" if USE_POSTGRES else "?"
+    query = f"""
+    SELECT
+        (SELECT COUNT(*) FROM users WHERE status = 'approved') AS approved_users,
+        (SELECT COUNT(*) FROM users WHERE status = 'pending') AS pending_users,
+        (SELECT COUNT(*) FROM users WHERE status IN ('blocked', 'blocked_bot', 'rejected')) AS blocked_users,
+        (SELECT COUNT(*) FROM tests) AS total_tests,
+        (SELECT COUNT(*) FROM submissions WHERE submitted_at >= {ph}) AS today_submissions
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(query, (today_start_ts,))
+        row = cur.fetchone()
+        row_dict = _row_to_dict(row) or {}
+        res = {
+            "approved": int(row_dict.get("approved_users") or 0),
+            "pending": int(row_dict.get("pending_users") or 0),
+            "blocked": int(row_dict.get("blocked_users") or 0),
+            "tests": int(row_dict.get("total_tests") or 0),
+            "today_submissions": int(row_dict.get("today_submissions") or 0),
+        }
+        with _SYSTEM_STATS_LOCK:
+            _SYSTEM_STATS_CACHE["ts"] = time.time()
+            _SYSTEM_STATS_CACHE["data"] = res
+        return res
     finally:
         _close_conn(conn)
 

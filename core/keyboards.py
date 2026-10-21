@@ -105,6 +105,6 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=maint_btn_text, callback_data="admin_toggle_maint_prompt")],
         [InlineKeyboardButton(text=reg_btn_text, callback_data="admin_toggle_registration")],
         [InlineKeyboardButton(text="👑 Adminlar boshqaruvi", callback_data="admin_manage_admins")],
-        [make_webapp_button("👥 Foydalanuvchilar boshqaruvi (Web App)", f"{base_url}/app.html?tab=admin&tg_id={ADMIN_ID}", "admin_webapp_redirect_info")]
+        [InlineKeyboardButton(text="📊 Bot statistikasi (/stats)", callback_data="admin_stats_quick")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)

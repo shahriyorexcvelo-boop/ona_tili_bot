@@ -7,6 +7,7 @@ from pathlib import Path
 # Loyiha ildiz papkasini import yo'liga qo'shish
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
+os.environ["LOCAL_SAFE_MODE"] = "1"
 os.environ["DATABASE_URL"] = ""
 import test_db
 

@@ -21,8 +21,7 @@ var state = {
   pinMode: 'enter',
   pinFirst: '',
   activeTab: 'home',
-  homeSubtab: 'active',
-  adminSubtab: 'users',
+  homeSubtab: 'active'
 };
 
 // ── INIT ────────────────────────────────────────
@@ -248,12 +247,6 @@ async function launchApp() {
     loadActiveTests().catch(function(e) { console.warn('ActiveTests:', e); })
   ]).then(function() {
     updateHeaderUser();
-    try {
-      var urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get('tab') === 'admin' && state.isAdmin) {
-        switchTab('admin');
-      }
-    } catch (e) {}
   });
 
   // Yangi foydalanuvchilar uchun tugmalar va dizayn qo'llanmasi
@@ -350,8 +343,6 @@ async function loadUserProfile() {
     };
     state.isAdmin = false;
     window._unregBypassed = true;
-    var adminTab = document.getElementById('nav-admin');
-    if (adminTab) adminTab.style.display = 'none';
     var searchNav = document.getElementById('nav-search');
     if (searchNav) searchNav.style.display = 'flex';
     checkRegistrationStatus();
@@ -363,26 +354,12 @@ async function loadUserProfile() {
     if (data.success && data.user) {
       if (data.bot_username) window.BOT_USERNAME = data.bot_username;
       state.userInfo = data.user;
-      if (data.is_admin) {
-        state.isActualAdmin = true;
-      }
-      if (state.isSimulatedUser) {
-        state.isAdmin = false;
-      } else {
-        state.isAdmin = Boolean(data.is_admin);
-      }
+      state.isAdmin = Boolean(data.is_admin);
       if (data.user.status === 'not_registered' || !data.user.is_registered) {
         localStorage.removeItem(LS_USER);
       } else {
         localStorage.setItem(LS_USER, JSON.stringify(data.user));
       }
-      if (urlParams.get('preview') === 'user' || urlParams.get('mode') === 'user') {
-        state.isAdmin = false;
-      }
-      var adminTab = document.getElementById('nav-admin');
-      if (adminTab) adminTab.style.display = state.isAdmin ? 'flex' : 'none';
-      var banner = document.getElementById('admin-simulation-banner');
-      if (banner) banner.style.display = state.isSimulatedUser ? 'flex' : 'none';
 
       // Ro'yxatdan o'tgan bo'lsa yoki admin bo'lsa, modalni yopamiz
       var isReg = (state.isAdmin || ((data.user.is_registered === true || data.user.status === 'approved' || data.user.status === 'pending') && data.user.status !== 'not_registered'));
@@ -394,13 +371,6 @@ async function loadUserProfile() {
       }
       var searchNav = document.getElementById('nav-search');
       if (searchNav) searchNav.style.display = 'flex';
-      if (state.isAdmin && data.pending_users > 0) {
-        var badge = document.getElementById('admin-badge');
-        if (badge) { badge.textContent = data.pending_users; badge.style.display = 'block'; }
-      }
-      if (urlParams.get('tab') === 'admin' && state.isAdmin) {
-        switchTab('admin');
-      }
     } else {
       state.userInfo = { status: 'not_registered', is_registered: false };
       checkRegistrationStatus();
@@ -456,36 +426,6 @@ async function loadMyResults() {
   }
 }
 
-async function loadAllUsers() {
-  try {
-    var urlParams = new URLSearchParams(window.location.search);
-    var tgId = (state.tgUser && state.tgUser.id) || parseInt(urlParams.get('tg_id')) || 0;
-    
-    // Agar testlar ro'yxati yuklanmagan bo'lsa, shablonlar uchun fon rejimida yuklab olamiz
-    if (!window.availableActiveTests) {
-      apiGet('/api/app/active-tests?tg_id=' + tgId).then(function(d) {
-        if (d && d.success) window.availableActiveTests = d.tests || [];
-      }).catch(function() {});
-    }
-
-    var data = await apiGet('/api/app/users?tg_id=' + tgId);
-    if (data.success) {
-      renderUsersSection(data.users, data.stats);
-    } else {
-      var listEl = document.getElementById('users-list');
-      if (listEl) {
-        listEl.innerHTML = '<div class="empty-state" style="padding:24px 10px;"><div class="empty-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><p>' + (data.message || 'Foydalanuvchilarni yuklab bo\'lmadi') + '</p></div>';
-      }
-    }
-  } catch (e) {
-    console.warn('users err:', e);
-    var listEl = document.getElementById('users-list');
-    if (listEl) {
-      listEl.innerHTML = '<div class="empty-state" style="padding:24px 10px;"><div class="empty-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div><p>Server bilan bog\'lanishda xatolik</p></div>';
-    }
-  }
-}
-
 // ── TAB NAVIGATION ──────────────────────────────
 function switchTab(tabId) {
   state.activeTab = tabId;
@@ -517,7 +457,6 @@ function switchTab(tabId) {
   if (tabId === 'home') loadActiveTests();
   else if (tabId === 'tests') loadMyResults();
   else if (tabId === 'profile') renderProfileTab();
-  else if (tabId === 'admin') { renderAdminTab(); loadAllUsers(); }
 }
 
 function switchHomeSubtab(subtab) {
@@ -1514,37 +1453,6 @@ function renderProfileTab() {
   var curTheme = document.documentElement.getAttribute('data-theme') || 'light';
   var themeLabel = curTheme === 'dark' ? t('theme_dark_lbl') : t('theme_light_lbl');
 
-  var isActualAdmin = Boolean(state.isActualAdmin || state.isAdmin || state.isSimulatedUser);
-  var simSwitchHtml = '';
-  if (isActualAdmin) {
-    if (!state.isSimulatedUser) {
-      simSwitchHtml =
-        '<div class="admin-simulation-switch-card animate-in">' +
-          '<div class="sim-switch-body">' +
-            '<div class="sim-switch-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block;vertical-align:-1px;margin-right:3px"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>ADMIN BOSHQARUVI</div>' +
-            '<div class="sim-switch-title">O\'quvchi sifatida kirish (User Mode)</div>' +
-            '<div class="sim-switch-desc">Mini ilova oddiy o\'quvchida qanday ko\'rinishi va ishlashini o\'z ko\'zingiz bilan ko\'rib sinash uchun o\'quvchi rejimiga o\'ting.</div>' +
-          '</div>' +
-          '<button type="button" class="btn-switch-to-user" onclick="toggleUserSimulationMode(true)">' +
-            '<span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>User sifatida kirish</span>' +
-            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>' +
-          '</button>' +
-        '</div>';
-    } else {
-      simSwitchHtml =
-        '<div class="admin-simulation-switch-card simulated animate-in">' +
-          '<div class="sim-switch-body">' +
-            '<div class="sim-switch-badge simulated"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block;vertical-align:-1px;margin-right:3px"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>O\'QUVCHI REJIMI FAOL</div>' +
-            '<div class="sim-switch-title">Siz hozir o\'quvchi rejimidasiz</div>' +
-            '<div class="sim-switch-desc">Barcha ekranlar, qidiruv va testlar oddiy o\'quvchi sifatida ishlamoqda. Admin boshqaruviga qaytish uchun tugmani bosing.</div>' +
-          '</div>' +
-          '<button type="button" class="btn-switch-to-admin" onclick="toggleUserSimulationMode(false)">' +
-            '<span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Admin boshqaruviga qaytish</span>' +
-          '</button>' +
-        '</div>';
-    }
-  }
-
   tab.innerHTML =
     // ── 1. HERO PROFILE CARD (Ixcham, toza va to'g'ri o'lchamdagi ism) ──
     '<div class="profile-hero-card animate-in">' +
@@ -1564,9 +1472,6 @@ function renderProfileTab() {
         '</button>' +
       '</div>' +
     '</div>' +
-
-    // ── 1.5. ADMIN USER SIMULATION SWITCH (Agar Admin bo'lsa) ──
-    simSwitchHtml +
 
     // ── 2. METRIKALAR PANELCHASI (3 ta ustunli qulay va ixcham lenta) ──
     '<div class="profile-stats-ribbon animate-in">' +
@@ -1830,632 +1735,6 @@ async function deleteMyAccount() {
   }
 }
 
-// ── ADMIN TAB ───────────────────────────────────
-var ADMIN_QUICK_TEMPLATES_I18N = {
-  uz: {
-    '30m': "Diqqat! Test boshlanishiga 30 daqiqa qoldi! Internet aloqangizni tekshirib, qoralama qog'ozlarni tayyorlab oling.",
-    '10m': "Test boshlanishiga 10 daqiqa qoldi! Mini ilovaga kirib, tayyor bo'lib turing.",
-    'started': "Test boshlandi! Barchaga omad tilaymiz. Belgilangan vaqt ichida javoblarni topshirishni unutmang.",
-    '15m': "Diqqat, test yakunlanishiga 15 daqiqa qoldi! Qolgan javoblarni tekshirib, topshirishga shoshiling.",
-    'ended': "Test yakunlandi! Javoblarni qabul qilish to'xtatildi. Ishtirok etgan barcha o'quvchilarga minnatdorchilik bildiramiz. Tez orada to'liq tahlil va rasmiy natijalar e'lon qilinadi."
-  },
-  ru: {
-    '30m': "Внимание! До начала теста осталось 30 минут! Проверьте подключение к интернету и приготовьте черновики.",
-    '10m': "До начала теста осталось 10 минут! Войдите в приложение и будьте готовы.",
-    'started': "Тест начался! Желаем всем удачи. Не забудьте отправить ответы в установленное время.",
-    '15m': "Внимание, до окончания теста осталось 15 минут! Проверьте оставшиеся ответы и поторопитесь со сдачей.",
-    'ended': "Тест завершен! Прием ответов остановлен. Благодарим всех участников. Скоро будут опубликованы полный разбор и официальные результаты."
-  },
-  en: {
-    '30m': "Attention! 30 minutes left before the test starts! Check your internet connection and prepare draft papers.",
-    '10m': "10 minutes left before the test starts! Open the mini app and be ready.",
-    'started': "The test has started! Good luck to everyone. Remember to submit your answers within the allotted time.",
-    '15m': "Attention, 15 minutes left before the test ends! Double-check your answers and hurry to submit.",
-    'ended': "The test has ended! Answer submission is closed. Thank you to all participants. Full analysis and official results will be announced shortly."
-  }
-};
-
-function getActiveOrPlannedTestCode() {
-  var tests = window.availableActiveTests || [];
-  var active = tests.find(function(t) { return t.is_active; });
-  if (active && active.test_code) return String(active.test_code).trim();
-  if (tests.length > 0 && tests[0].test_code) return String(tests[0].test_code).trim();
-  return '';
-}
-
-function applyQuickTemplate(type) {
-  var textarea = document.getElementById('admin-broadcast-text');
-  if (!textarea) return;
-
-  var lang = localStorage.getItem(LS_LANG) || 'uz';
-  var tmpls = ADMIN_QUICK_TEMPLATES_I18N[lang] || ADMIN_QUICK_TEMPLATES_I18N.uz;
-  var text = tmpls[type] || '';
-  if (type === 'started' || type === 'ended') {
-    var code = getActiveOrPlannedTestCode();
-    var codeDisplay = code ? (code.startsWith('#') ? code : ('#' + code)) : '#TEST_KODI';
-    text = text + "\n\n" + t('lbl_test_code') + " " + codeDisplay;
-  }
-
-  textarea.value = text;
-  updateBroadcastCharCount();
-
-  textarea.focus();
-  try {
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-  } catch (e) {}
-
-  try {
-    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
-      window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
-    }
-  } catch (e) {}
-
-  var btn = document.getElementById('tmpl-btn-' + type);
-  if (btn) {
-    btn.classList.add('tmpl-active');
-    setTimeout(function() { btn.classList.remove('tmpl-active'); }, 300);
-  }
-}
-
-function updateBroadcastCharCount() {
-  var textarea = document.getElementById('admin-broadcast-text');
-  var countEl = document.getElementById('broadcast-char-count');
-  if (!textarea) return;
-  window._cachedBroadcastText = textarea.value || '';
-  if (countEl) {
-    var len = (textarea.value || '').length;
-    countEl.textContent = len + ' ' + t('bcast_chars');
-  }
-}
-
-function clearBroadcastText() {
-  var textarea = document.getElementById('admin-broadcast-text');
-  if (textarea) {
-    textarea.value = '';
-    window._cachedBroadcastText = '';
-    updateBroadcastCharCount();
-    textarea.focus();
-  }
-}
-
-async function sendAdminBroadcast() {
-  var textarea = document.getElementById('admin-broadcast-text');
-  if (!textarea) return;
-  var msg = (textarea.value || '').trim();
-  if (!msg) {
-    alert(t('admin_broadcast_empty_prompt'));
-    textarea.focus();
-    return;
-  }
-
-  if (!confirm(t('admin_broadcast_confirm_prompt') + "\n\n\"" + (msg.length > 80 ? msg.substring(0, 80) + '...' : msg) + "\"")) {
-    return;
-  }
-
-  var btn = document.getElementById('btn-send-broadcast');
-  var originalHtml = btn ? btn.innerHTML : '';
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<span>' + t('admin_broadcast_sending') + '</span>';
-  }
-
-  var urlParams = new URLSearchParams(window.location.search);
-  var adminId = (state.tgUser && state.tgUser.id) || parseInt(urlParams.get('tg_id')) || 0;
-
-  try {
-    var res = await fetch('/api/app/broadcast', {
-      method: 'POST',
-      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        admin_id: adminId,
-        message: msg,
-        init_data: (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || ''
-      })
-    });
-    var data = await res.json();
-    if (data.success) {
-      alert(t('admin_broadcast_sent_title') + "\n\n" + t('admin_broadcast_delivered_lbl') + ": " + (data.sent || 0) + " " + t('unit_count') + (data.fail ? ("\n" + t('admin_broadcast_failed_lbl') + ": " + data.fail + " " + t('unit_count')) : ""));
-      textarea.value = '';
-      window._cachedBroadcastText = '';
-      updateBroadcastCharCount();
-    } else {
-      alert((t('error_occurred') + ': ') + (data.message || ''));
-    }
-  } catch (e) {
-    console.error("Broadcast error:", e);
-    alert(t('err_network') + ' ' + e.message);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
-    }
-  }
-}
-
-function switchAdminSubtab(subtab) {
-  if (state.adminSubtab === subtab) return;
-
-  var currentText = document.getElementById('admin-broadcast-text');
-  if (currentText) {
-    window._cachedBroadcastText = currentText.value;
-  }
-
-  state.adminSubtab = subtab;
-
-  if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
-    try {
-      window.Telegram.WebApp.HapticFeedback.selectionChanged();
-    } catch(e) {}
-  }
-
-  renderAdminTab();
-
-  if (subtab === 'users') {
-    if (window.currentAdminUsers) {
-      renderUsersSection(window.currentAdminUsers, window.currentAdminStats);
-    } else {
-      loadAllUsers();
-    }
-  } else if (subtab === 'broadcast') {
-    var ta = document.getElementById('admin-broadcast-text');
-    if (ta && window._cachedBroadcastText) {
-      ta.value = window._cachedBroadcastText;
-      updateBroadcastCharCount();
-    }
-  }
-}
-
-function renderAdminTab() {
-  var tab = document.getElementById('tab-admin');
-  if (!tab) return;
-  var currentSubtab = state.adminSubtab || 'users';
-  var usersCount = window.currentAdminUsers ? window.currentAdminUsers.length : 0;
-
-  var usersIcon = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
-  var broadcastIcon = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
-
-  var html =
-    '<div class="admin-header-card animate-in">' +
-      '<div class="admin-header-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>' +
-      '<div>' +
-        '<div style="font-size:16px;font-weight:800;color:var(--text)">' + t('admin_panel') + '</div>' +
-        '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + t('admin_panel_sub') + '</div>' +
-      '</div>' +
-    '</div>' +
-
-    // ── ADMIN SUBTABS SWITCHER (Bo'limlarga ajratish) ──
-    '<div class="admin-subtabs animate-in" style="margin-top:12px;margin-bottom:14px;">' +
-      '<button type="button" class="admin-subtab ' + (currentSubtab === 'users' ? 'active' : '') + '" onclick="switchAdminSubtab(\'users\')">' +
-        '<span class="admin-subtab-icon">' + usersIcon + '</span>' +
-        '<span class="admin-subtab-text">' + t('admin_tab_users') + '</span>' +
-        '<span class="admin-subtab-badge" id="admin-subtab-users-count">' + usersCount + '</span>' +
-      '</button>' +
-      '<button type="button" class="admin-subtab ' + (currentSubtab === 'broadcast' ? 'active' : '') + '" onclick="switchAdminSubtab(\'broadcast\')">' +
-        '<span class="admin-subtab-icon">' + broadcastIcon + '</span>' +
-        '<span class="admin-subtab-text">' + t('admin_tab_broadcast') + '</span>' +
-        '<span class="admin-subtab-badge"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>' +
-      '</button>' +
-    '</div>';
-
-  if (currentSubtab === 'users') {
-    html +=
-      // Statistika konteyneri (JS to'ldiradi)
-      '<div id="admin-stats-container" class="animate-in"></div>' +
-
-      // Foydalanuvchilar kartasi
-      '<div class="card animate-in" style="margin-top:0">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
-          '<div style="font-size:13.5px;font-weight:800;color:var(--text)">' + t('admin_users_list') + '</div>' +
-          '<div id="admin-users-badge-count" style="font-size:11.5px;font-weight:700;color:var(--text-muted)">0 ' + t('unit_count') + '</div>' +
-        '</div>' +
-
-        // Qidiruv paneli
-        '<div class="admin-search-box">' +
-          '<span class="admin-search-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>' +
-          '<input type="text" id="admin-user-search-input" class="admin-search-input" placeholder="' + t('admin_search_ph') + '" oninput="handleAdminUserSearch(this.value)">' +
-        '</div>' +
-
-        // Filtr tugmalari
-        '<div class="admin-filter-tabs">' +
-          '<button class="admin-filter-btn active" id="btn-flt-all" onclick="setAdminUserFilter(\'all\')">' + t('flt_all') + '</button>' +
-          '<button class="admin-filter-btn" id="btn-flt-approved" onclick="setAdminUserFilter(\'approved\')">' + t('flt_approved') + '</button>' +
-          '<button class="admin-filter-btn" id="btn-flt-pending" onclick="setAdminUserFilter(\'pending\')">' + t('flt_pending') + '</button>' +
-          '<button class="admin-filter-btn" id="btn-flt-blocked" onclick="setAdminUserFilter(\'blocked\')">' + t('flt_blocked') + '</button>' +
-        '</div>' +
-
-        // Ro'yxat
-        '<div id="users-list">' +
-          '<div class="skeleton skeleton-card" style="height:50px"></div>' +
-          '<div class="skeleton skeleton-card" style="height:50px;margin-top:8px"></div>' +
-        '</div>' +
-      '</div>' +
-
-      // Barchani cheklash tugmasi
-      '<button class="admin-btn-restrict-all animate-in" style="margin-top:14px;" onclick="restrictAllUsersFromApp()">' +
-        t('btn_restrict_all') +
-      '</button>';
-  } else {
-    // O'quvchilarga xabar yuborish (Tezkor shablonlar + Textarea)
-    html +=
-      '<div class="admin-broadcast-card animate-in">' +
-        '<div class="admin-broadcast-header">' +
-          '<div class="admin-broadcast-title-wrap">' +
-            '<div class="admin-broadcast-icon-box"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></div>' +
-            '<div>' +
-              '<div class="admin-broadcast-title">' + t('bcast_title') + '</div>' +
-              '<div class="admin-broadcast-subtitle">' + t('bcast_subtitle') + '</div>' +
-            '</div>' +
-          '</div>' +
-          '<span class="admin-broadcast-badge">' + t('bcast_badge_fast') + '</span>' +
-        '</div>' +
-
-        // Tezkor tayyor shablonlar
-        '<div class="quick-templates-section">' +
-          '<div class="quick-templates-label"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block;vertical-align:-1px;margin-right:3px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> ' + t('bcast_quick_label') + '</div>' +
-          '<div class="quick-templates-grid">' +
-            '<button type="button" class="quick-tmpl-btn" id="tmpl-btn-30m" onclick="applyQuickTemplate(\'30m\')">' +
-              '<span class="tmpl-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>' +
-              '<span class="tmpl-text">' + t('tmpl_30m') + '</span>' +
-            '</button>' +
-            '<button type="button" class="quick-tmpl-btn" id="tmpl-btn-10m" onclick="applyQuickTemplate(\'10m\')">' +
-              '<span class="tmpl-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>' +
-              '<span class="tmpl-text">' + t('tmpl_10m') + '</span>' +
-            '</button>' +
-            '<button type="button" class="quick-tmpl-btn" id="tmpl-btn-started" onclick="applyQuickTemplate(\'started\')">' +
-              '<span class="tmpl-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg></span>' +
-              '<span class="tmpl-text">' + t('tmpl_started') + '</span>' +
-            '</button>' +
-            '<button type="button" class="quick-tmpl-btn" id="tmpl-btn-15m" onclick="applyQuickTemplate(\'15m\')">' +
-              '<span class="tmpl-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>' +
-              '<span class="tmpl-text">' + t('tmpl_15m') + '</span>' +
-            '</button>' +
-            '<button type="button" class="quick-tmpl-btn" id="tmpl-btn-ended" onclick="applyQuickTemplate(\'ended\')">' +
-              '<span class="tmpl-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg></span>' +
-              '<span class="tmpl-text">' + t('tmpl_ended') + '</span>' +
-            '</button>' +
-          '</div>' +
-        '</div>' +
-
-        // Xabar matni maydoni (textarea)
-        '<div class="broadcast-textarea-wrap">' +
-          '<textarea id="admin-broadcast-text" class="admin-broadcast-textarea" rows="3" placeholder="' + t('bcast_textarea_ph') + '" oninput="updateBroadcastCharCount()">' + escHtml(window._cachedBroadcastText || '') + '</textarea>' +
-          '<div class="broadcast-meta-row">' +
-            '<span id="broadcast-char-count" class="broadcast-char-count">' + (window._cachedBroadcastText ? window._cachedBroadcastText.length : 0) + ' ' + t('bcast_chars') + '</span>' +
-            '<button type="button" class="btn-clear-broadcast" onclick="clearBroadcastText()">' + t('bcast_clear') + '</button>' +
-          '</div>' +
-        '</div>' +
-
-        // Yuborish tugmasi
-        '<button type="button" class="btn-send-broadcast" id="btn-send-broadcast" onclick="sendAdminBroadcast()">' +
-          '<span>' + t('bcast_send_btn') + '</span>' +
-        '</button>' +
-      '</div>';
-  }
-
-  tab.innerHTML = html;
-}
-
-function handleAdminUserSearch(query) {
-  window.adminSearchQuery = (query || '').trim().toLowerCase();
-  renderFilteredAdminUsers();
-}
-
-function setAdminUserFilter(filter) {
-  window.adminCurrentFilter = filter;
-  ['all', 'approved', 'pending', 'blocked'].forEach(function(f) {
-    var btn = document.getElementById('btn-flt-' + f);
-    if (btn) btn.classList.toggle('active', f === filter);
-  });
-  renderFilteredAdminUsers();
-}
-
-function renderUsersSection(users, stats) {
-  window.currentAdminUsers = users || [];
-  window.currentAdminStats = stats || null;
-  window.adminCurrentFilter = window.adminCurrentFilter || 'all';
-  window.adminSearchQuery = window.adminSearchQuery || '';
-
-  // Admin subtabdagi foydalanuvchilar soni
-  var subtabBadge = document.getElementById('admin-subtab-users-count');
-  if (subtabBadge) {
-    subtabBadge.textContent = window.currentAdminUsers.length;
-  }
-
-  // 1. Statistikani yangilash
-  var statsContainer = document.getElementById('admin-stats-container');
-  if (statsContainer && stats) {
-    statsContainer.innerHTML =
-      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px">' +
-        '<div class="stat-card" style="padding:8px 4px;text-align:center"><div class="stat-value" style="font-size:16px;font-weight:800">' + (stats.total||0) + '</div><div class="stat-label" style="font-size:10px">' + t('admin_stat_total') + '</div></div>' +
-        '<div class="stat-card" style="padding:8px 4px;text-align:center"><div class="stat-value" style="font-size:16px;font-weight:800;color:#10b981">' + (stats.approved||0) + '</div><div class="stat-label" style="font-size:10px">' + t('admin_stat_active') + '</div></div>' +
-        '<div class="stat-card" style="padding:8px 4px;text-align:center"><div class="stat-value" style="font-size:16px;font-weight:800;color:#f59e0b">' + (stats.pending||0) + '</div><div class="stat-label" style="font-size:10px">' + t('admin_stat_pending') + '</div></div>' +
-        '<div class="stat-card" style="padding:8px 4px;text-align:center"><div class="stat-value" style="font-size:16px;font-weight:800;color:#ef4444">' + (stats.blocked||0) + '</div><div class="stat-label" style="font-size:10px">' + t('admin_stat_blocked') + '</div></div>' +
-      '</div>';
-  }
-
-  // 2. Foydalanuvchilar ro'yxatini render qilish
-  renderFilteredAdminUsers();
-}
-
-function renderFilteredAdminUsers() {
-  var listEl = document.getElementById('users-list');
-  if (!listEl) return;
-
-  var users = window.currentAdminUsers || [];
-  var filter = window.adminCurrentFilter || 'all';
-  var q = window.adminSearchQuery || '';
-
-  var filtered = users.filter(function(u) {
-    // Holat bo'yicha filter
-    var st = (u.status || 'pending').toLowerCase();
-    if (filter === 'approved' && st !== 'approved') return false;
-    if (filter === 'pending' && st !== 'pending') return false;
-    if (filter === 'blocked' && st !== 'blocked') return false;
-
-    // Qidiruv bo'yicha filter
-    if (q) {
-      var rawQ = q.toLowerCase().trim();
-      var cleanQ = rawQ.replace(/^@+/, '').trim();
-      var uName = (u.username || '').toLowerCase().replace(/^@+/, '').trim();
-      var nameMatch = (u.fullname || '').toLowerCase().indexOf(rawQ) !== -1 || (cleanQ && (u.fullname || '').toLowerCase().indexOf(cleanQ) !== -1);
-      var phoneMatch = cleanQ ? (u.phone || '').toLowerCase().indexOf(cleanQ) !== -1 : false;
-      var idMatch = cleanQ ? String(u.tg_id || '').indexOf(cleanQ) !== -1 : false;
-      var userMatch = Boolean(uName && (uName.indexOf(cleanQ) !== -1 || ('@' + uName).indexOf(rawQ) !== -1 || uName.indexOf(rawQ) !== -1));
-      if (!nameMatch && !phoneMatch && !idMatch && !userMatch) return false;
-    }
-    return true;
-  });
-
-  var countBadge = document.getElementById('admin-users-badge-count');
-  if (countBadge) {
-    countBadge.textContent = filtered.length + ' ' + t('unit_count') + (filtered.length !== users.length ? (' (' + t('filtered_suffix') + ')') : '');
-  }
-
-  if (filtered.length === 0) {
-    listEl.innerHTML =
-      '<div class="empty-state" style="padding:24px 10px;">' +
-        '<div class="empty-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>' +
-        '<p style="font-size:13px;color:var(--text-muted);">' + (q ? t('admin_no_match') : t('admin_no_users')) + '</p>' +
-      '</div>';
-    return;
-  }
-
-  var usersHtml = filtered.map(function(u) {
-    var letter = (u.fullname || 'F').charAt(0).toUpperCase();
-    var tc = u.tests_count || 0;
-    var st = (u.status || 'pending').toLowerCase();
-    var sb = '';
-    if (st === 'approved') {
-      sb = '<span class="badge" style="padding:3px 8px;font-size:10.5px;display:inline-flex;align-items:center;gap:4px;background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3);border-radius:12px;"><span class="status-dot approved" style="width:6px;height:6px"></span> ' + t('status_approved') + '</span>';
-    } else if (st === 'pending') {
-      sb = '<span class="badge" style="padding:3px 8px;font-size:10.5px;display:inline-flex;align-items:center;gap:4px;background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);border-radius:12px;"><span class="status-dot pending" style="width:6px;height:6px"></span> ' + t('status_pending') + '</span>';
-    } else if (st === 'blocked') {
-      sb = '<span class="badge" style="padding:3px 8px;font-size:10.5px;display:inline-flex;align-items:center;gap:4px;background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:12px;"><span class="status-dot rejected" style="width:6px;height:6px"></span> ' + t('status_blocked') + '</span>';
-    } else {
-      sb = '<span class="badge" style="padding:3px 8px;font-size:10.5px;display:inline-flex;align-items:center;gap:4px;background:rgba(100,116,139,0.15);color:#94a3b8;border:1px solid rgba(100,116,139,0.3);border-radius:12px;">' + st + '</span>';
-    }
-
-    return '<div class="user-row clickable" onclick="openAdminUserModal(' + u.tg_id + ')">' +
-      '<div class="user-row-avatar">' + letter + '</div>' +
-      '<div class="user-row-info">' +
-        '<div class="user-row-name" style="font-size:14.5px;font-weight:700;">' + escHtml(u.fullname || t('user_unknown')) + '</div>' +
-      '</div>' +
-      sb +
-      '<span style="color:var(--text-muted);display:flex;align-items:center;margin-left:4px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></span>' +
-    '</div>';
-  }).join('');
-
-  listEl.innerHTML = usersHtml;
-}
-
-function openAdminUserModal(targetUid) {
-  var users = window.currentAdminUsers || [];
-  var u = users.find(function(item) { return item.tg_id === Number(targetUid); });
-  if (!u && typeof targetUid === 'object') u = targetUid;
-
-  if (!u) {
-    alert(t('user_not_found'));
-    return;
-  }
-
-  var modal = document.getElementById('admin-user-modal');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'admin-user-modal';
-    modal.className = 'modal-overlay';
-    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;backdrop-filter:blur(6px);padding:16px;';
-    modal.onclick = function(e) { closeAdminUserModal(e); };
-    modal.innerHTML =
-      '<div class="modal-box" id="admin-user-modal-box" style="max-width:400px;width:100%;max-height:92vh;overflow-y:auto;padding:22px 18px;border-radius:24px;background:var(--bg-card,#1e293b);border:1px solid var(--border,rgba(255,255,255,0.12));box-shadow:0 24px 60px rgba(0,0,0,0.5);position:relative;">' +
-        '<div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
-          '<div class="modal-title" style="font-size:16px;font-weight:800;color:var(--text,#fff);">' + t('modal_user_mgmt_title') + '</div>' +
-          '<button class="modal-close" onclick="closeAdminUserModal()" style="background:none;border:none;color:var(--text-muted,#94a3b8);cursor:pointer;padding:4px 8px;display:flex;align-items:center;justify-content:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>' +
-        '</div>' +
-        '<div class="modal-body" id="admin-user-modal-body"></div>' +
-      '</div>';
-    document.body.appendChild(modal);
-  }
-
-  var body = document.getElementById('admin-user-modal-body');
-  if (!body) return;
-
-  var letter = (u.fullname || 'F').charAt(0).toUpperCase();
-  var st = (u.status || 'pending').toLowerCase();
-
-  var statusBadge = '';
-  if (st === 'approved') {
-    statusBadge = '<span class="stat-status-badge status-approved" style="font-size:12px;padding:4px 12px;"><span class="status-dot approved"></span> ' + t('admin_modal_approved_badge') + '</span>';
-  } else if (st === 'pending') {
-    statusBadge = '<span class="stat-status-badge status-pending" style="font-size:12px;padding:4px 12px;"><span class="status-dot pending"></span> ' + t('admin_modal_pending_badge') + '</span>';
-  } else if (st === 'blocked') {
-    statusBadge = '<span class="stat-status-badge status-rejected" style="font-size:12px;padding:4px 12px;"><span class="status-dot rejected"></span> ' + t('admin_modal_blocked_badge') + '</span>';
-  } else {
-    statusBadge = '<span class="stat-status-badge" style="font-size:12px;padding:4px 12px;">' + st + '</span>';
-  }
-
-  var regDateStr = u.registered_at ? formatDate(u.registered_at) : t('user_unknown');
-  var lastTestStr = u.last_test_at ? formatDate(u.last_test_at) : t('admin_no_tests_yet');
-  var usernameStr = u.username ? ('@' + u.username) : t('val_none');
-
-  // Harakat tugmalari (Action buttons) - Birinchi o'rinda ko'rinadi
-  var actionButtonsHtml = '<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">';
-
-  if (st !== 'approved') {
-    actionButtonsHtml += '<button class="admin-btn-action admin-btn-approve" onclick="updateUserStatusFromModal(' + u.tg_id + ', \'approved\')">' + t('btn_admin_approve') + '</button>';
-  } else {
-    actionButtonsHtml += '<button class="admin-btn-action admin-btn-pending" onclick="updateUserStatusFromModal(' + u.tg_id + ', \'pending\')">' + t('btn_admin_suspend') + '</button>';
-  }
-
-  if (st !== 'blocked') {
-    actionButtonsHtml += '<button class="admin-btn-action admin-btn-block" onclick="updateUserStatusFromModal(' + u.tg_id + ', \'blocked\')">' + t('btn_admin_block') + '</button>';
-  } else {
-    actionButtonsHtml += '<button class="admin-btn-action admin-btn-approve" onclick="updateUserStatusFromModal(' + u.tg_id + ', \'approved\')">' + t('btn_admin_unblock') + '</button>';
-  }
-
-  actionButtonsHtml += '<button class="admin-btn-action admin-btn-delete" onclick="updateUserStatusFromModal(' + u.tg_id + ', \'delete\')">' + t('btn_admin_delete_db') + '</button>';
-  actionButtonsHtml += '</div>';
-
-  // Foydalanuvchi ma'lumotlari (Akkordeon / Ko'rsatish-Yashirish)
-  var infoToggleHtml =
-    '<button type="button" class="admin-user-info-toggle-btn" id="btn-toggle-user-info" onclick="toggleAdminUserInfo()">' +
-      '<span class="info-toggle-left">' +
-        '<span style="display:flex;align-items:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>' +
-        '<span>' + t('admin_user_info_label') + '</span>' +
-      '</span>' +
-      '<span class="info-toggle-arrow" id="info-toggle-arrow">' + t('toggle_show') + '</span>' +
-    '</button>' +
-    '<div id="admin-user-info-content" class="admin-user-info-content" style="display:none;">' +
-      '<div class="card" style="margin:0;padding:10px 14px;border-radius:14px;background:var(--bg-glass-2);border:1px solid var(--border);">' +
-        '<div class="info-row" style="padding:9px 0;"><div class="info-icon" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></div><div><div class="info-label" style="font-size:11px;">' + t('lbl_phone_short') + '</div><div class="info-value" style="font-size:14px;font-weight:700;"><a href="tel:' + escHtml(u.phone || '') + '" style="color:var(--primary);text-decoration:none;">' + escHtml(u.phone || '—') + '</a></div></div></div>' +
-        '<div class="info-row" style="padding:9px 0;"><div class="info-icon" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><line x1="15" y1="8" x2="17" y2="8"/><line x1="15" y1="12" x2="17" y2="12"/><line x1="7" y1="16" x2="17" y2="16"/></svg></div><div><div class="info-label" style="font-size:11px;">' + t('lbl_tg_id_short') + '</div><div class="info-value" style="font-size:14px;font-weight:700;"><code>' + u.tg_id + '</code></div></div></div>' +
-        '<div class="info-row" style="padding:9px 0;"><div class="info-icon" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div><div><div class="info-label" style="font-size:11px;">' + t('lbl_username_short') + '</div><div class="info-value" style="font-size:14px;font-weight:700;">' + escHtml(usernameStr) + '</div></div></div>' +
-        '<div class="info-row" style="padding:9px 0;"><div class="info-icon" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div><div class="info-label" style="font-size:11px;">' + t('lbl_reg_date') + '</div><div class="info-value" style="font-size:13.5px;font-weight:700;color:var(--primary);">' + regDateStr + '</div></div></div>' +
-        '<div class="info-row" style="padding:9px 0;"><div class="info-icon" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div><div><div class="info-label" style="font-size:11px;">' + t('admin_lbl_tests_count') + '</div><div class="info-value" style="font-size:14px;font-weight:700;">' + (u.tests_count || 0) + ' ' + t('unit_count') + '</div></div></div>' +
-        '<div class="info-row" style="padding:9px 0;border-bottom:none;"><div class="info-icon" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 10"/></svg></div><div><div class="info-label" style="font-size:11px;">' + t('admin_lbl_last_test') + '</div><div class="info-value" style="font-size:13px;font-weight:600;">' + lastTestStr + '</div></div></div>' +
-      '</div>' +
-    '</div>';
-
-  body.innerHTML =
-    '<div style="text-align:center;padding:2px 0 10px;">' +
-      '<div class="profile-avatar" style="margin:0 auto 8px;width:52px;height:52px;font-size:22px;display:flex;align-items:center;justify-content:center;">' + letter + '</div>' +
-      '<div style="font-size:16.5px;font-weight:800;color:var(--text);">' + escHtml(u.fullname || t('default_user')) + '</div>' +
-      '<div style="margin-top:6px;">' + statusBadge + '</div>' +
-    '</div>' +
-    actionButtonsHtml +
-    infoToggleHtml;
-
-  modal.style.display = 'flex';
-}
-
-function toggleAdminUserInfo() {
-  var content = document.getElementById('admin-user-info-content');
-  var arrow = document.getElementById('info-toggle-arrow');
-  if (!content) return;
-  var isHidden = content.style.display === 'none' || content.style.display === '';
-  if (isHidden) {
-    content.style.display = 'block';
-    if (arrow) arrow.innerHTML = t('toggle_hide');
-  } else {
-    content.style.display = 'none';
-    if (arrow) arrow.innerHTML = t('toggle_show');
-  }
-  if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
-    try { window.Telegram.WebApp.HapticFeedback.selectionChanged(); } catch(e) {}
-  }
-}
-
-function closeAdminUserModal(e) {
-  if (e && e.target && e.target !== e.currentTarget && !e.target.classList.contains('modal-close')) return;
-  var modal = document.getElementById('admin-user-modal');
-  if (modal) modal.style.display = 'none';
-}
-
-async function updateUserStatusFromModal(targetUid, newStatus) {
-  if (newStatus === 'delete') {
-    if (!confirm(t('admin_confirm_delete_user'))) {
-      return;
-    }
-  } else if (newStatus === 'blocked') {
-    if (!confirm(t('admin_confirm_block_user'))) {
-      return;
-    }
-  } else if (newStatus === 'pending') {
-    if (!confirm(t('admin_confirm_pending_user'))) {
-      return;
-    }
-  }
-
-  var adminId = (state.tgUser && state.tgUser.id) || 0;
-  var btn = (typeof event !== 'undefined' && event && event.target) ? event.target : null;
-  var originalText = btn ? btn.textContent : '';
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = t('action_in_progress');
-  }
-
-  try {
-    var res = await fetch('/api/app/update-user-status', {
-      method: 'POST',
-      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        admin_id: adminId,
-        target_uid: targetUid,
-        status: newStatus,
-        init_data: (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || ''
-      })
-    });
-    var data = await res.json();
-    if (data.success) {
-      closeAdminUserModal();
-      if (newStatus === 'delete') {
-        alert(t('admin_alert_deleted'));
-      } else if (newStatus === 'approved') {
-        alert(t('admin_alert_approved'));
-      } else if (newStatus === 'blocked') {
-        alert(t('admin_alert_blocked'));
-      } else if (newStatus === 'pending') {
-        alert(t('admin_alert_pending'));
-      }
-      loadAllUsers();
-    } else {
-      alert((t('error_occurred') + ': ') + (data.message || ''));
-      if (btn) { btn.disabled = false; btn.textContent = originalText; }
-    }
-  } catch (err) {
-    alert(t('err_network') + ' ' + err.message);
-    if (btn) { btn.disabled = false; btn.textContent = originalText; }
-  }
-}
-
-async function restrictAllUsersFromApp() {
-  if (!confirm(t('admin_confirm_restrict_all'))) {
-    return;
-  }
-
-  var adminId = (state.tgUser && state.tgUser.id) || 0;
-  try {
-    var res = await fetch('/api/app/restrict-all-users', {
-      method: 'POST',
-      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        admin_id: adminId,
-        init_data: (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || ''
-      })
-    });
-    var data = await res.json();
-    if (data.success) {
-      alert('Jami ' + (data.count || 0) + ' ta foydalanuvchi muvaffaqiyatli cheklandi!');
-      loadAllUsers();
-    } else {
-      alert(data.message || 'Xatolik yuz berdi');
-    }
-  } catch (err) {
-    alert('Server bilan bogʻlanishda xatolik: ' + err.message);
-  }
-}
-
-// Webapp redirection functions removed (users will use bot inline buttons directly)
-
 // ── PIN CHANGE ───────────────────────────────────
 function changePinPrompt() {
   localStorage.removeItem(LS_PIN);
@@ -2665,38 +1944,6 @@ function checkRegistrationStatus() {
   return !!isUnreg;
 }
 
-function toggleUserSimulationMode(enable) {
-  if (enable) {
-    state.isActualAdmin = true;
-    state.isSimulatedUser = true;
-    state.isAdmin = false;
-    showToast("O'quvchi rejimiga o'tildi. O'zgarishlarni bemalol tekshirishingiz mumkin!");
-  } else {
-    state.isSimulatedUser = false;
-    state.isAdmin = true;
-    showToast("Admin rejimiga qaytildi.");
-  }
-
-  // Yuqori floating banner
-  var banner = document.getElementById('admin-simulation-banner');
-  if (banner) {
-    banner.style.display = state.isSimulatedUser ? 'flex' : 'none';
-  }
-
-  // Pastki navigatsiyadagi Admin tugmasi
-  var navAdmin = document.getElementById('nav-admin');
-  if (navAdmin) {
-    navAdmin.style.display = state.isAdmin ? 'flex' : 'none';
-  }
-
-  // Agar admin tabida turgan bo'lsa va user rejimiga o'tsa -> Asosiy tabga o'tkazish
-  if (state.isSimulatedUser && state.activeTab === 'admin') {
-    switchTab('home');
-  } else {
-    refreshActiveTab();
-  }
-}
-
 function goToBotRegister() {
   var botUser = window.BOT_USERNAME || 'bm_testbot';
   if (window.Telegram && window.Telegram.WebApp) {
@@ -2735,10 +1982,6 @@ function refreshActiveTab() {
     else loadMyResults();
   } else if (tabId === 'profile') {
     renderProfileTab();
-  } else if (tabId === 'admin') {
-    renderAdminTab();
-    if (window.currentAdminUsers) renderUsersSection(window.currentAdminUsers, window.currentAdminStats);
-    else loadAllUsers();
   }
 }
 
@@ -3325,7 +2568,6 @@ function finishOnboarding() {
 window.state = state;
 window.switchTab = switchTab;
 window.switchHomeSubtab = switchHomeSubtab;
-window.switchAdminSubtab = switchAdminSubtab;
 window.filterMyTests = filterMyTests;
 window.dismissSplash = dismissSplash;
 window.finishSplashImmediately = dismissSplash;
@@ -3356,23 +2598,11 @@ window.closeEditProfileModal = closeEditProfileModal;
 window.saveEditedProfile = saveEditedProfile;
 window.deleteMyAccount = deleteMyAccount;
 window.toggleProfileDetails = toggleProfileDetails;
-window.toggleUserSimulationMode = toggleUserSimulationMode;
-window.openAdminUserModal = openAdminUserModal;
-window.toggleAdminUserInfo = toggleAdminUserInfo;
-window.closeAdminUserModal = closeAdminUserModal;
-window.updateUserStatusFromModal = updateUserStatusFromModal;
-window.handleAdminUserSearch = handleAdminUserSearch;
-window.setAdminUserFilter = setAdminUserFilter;
-window.applyQuickTemplate = applyQuickTemplate;
-window.updateBroadcastCharCount = updateBroadcastCharCount;
-window.clearBroadcastText = clearBroadcastText;
-window.sendAdminBroadcast = sendAdminBroadcast;
 window.openOnboardingModal = openOnboardingModal;
 window.closeOnboardingModal = closeOnboardingModal;
 window.finishOnboarding = finishOnboarding;
 window.loadActiveTests = loadActiveTests;
 window.loadMyResults = loadMyResults;
-window.loadAllUsers = loadAllUsers;
 window.openTestSolving = openTestSolving;
 window.startTestInBot = startTestInBot;
 window.returnToTelegramChat = returnToTelegramChat;

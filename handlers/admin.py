@@ -1236,19 +1236,60 @@ async def admin_pdf_watermark_handler(message: Message, state: FSMContext):
                     pass
 
 
-# 3. Foydalanuvchilar boshqaruvi to'liq Asosiy Web Ilovaga (Main App) ko'chirildi
+# 3. Foydalanuvchilar boshqaruvi va statistika
+@admin_router.message(Command("stats"))
+async def cmd_admin_stats(message: Message):
+    if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
+        return
+    stats = await test_db.db(test_db.get_system_stats)
+    text = (
+        "📊 <b>Tizim statistikasi</b>\n\n"
+        f"👥 <b>Foydalanuvchilar:</b>\n"
+        f"  • ✅ Tasdiqlangan: <b>{stats['approved']}</b>\n"
+        f"  • ⏳ Kutilmoqda: <b>{stats['pending']}</b>\n"
+        f"  • 🚫 Bloklangan: <b>{stats['blocked']}</b>\n\n"
+        f"📝 <b>Testlar soni:</b> <b>{stats['tests']}</b>\n"
+        f"📥 <b>Bugungi topshirishlar:</b> <b>{stats['today_submissions']}</b>"
+    )
+    await message.answer(text, parse_mode="HTML")
+
+@admin_router.callback_query(F.data == "admin_stats_quick")
+async def cb_admin_stats_quick(call: CallbackQuery):
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
+        return
+    stats = await test_db.db(test_db.get_system_stats)
+    text = (
+        "📊 <b>Tizim statistikasi</b>\n\n"
+        f"👥 <b>Foydalanuvchilar:</b>\n"
+        f"  • ✅ Tasdiqlangan: <b>{stats['approved']}</b>\n"
+        f"  • ⏳ Kutilmoqda: <b>{stats['pending']}</b>\n"
+        f"  • 🚫 Bloklangan: <b>{stats['blocked']}</b>\n\n"
+        f"📝 <b>Testlar soni:</b> <b>{stats['tests']}</b>\n"
+        f"📥 <b>Bugungi topshirishlar:</b> <b>{stats['today_submissions']}</b>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Yangilash", callback_data="admin_stats_quick")],
+        [InlineKeyboardButton(text="🔙 Admin Menyuga qaytish", callback_data="admin_back_to_menu")]
+    ])
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
 @admin_router.callback_query(F.data.in_(["admin_view_users", "admin_webapp_redirect_info"]))
 async def admin_view_users_redirect_cb(call: CallbackQuery):
     if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
     text = (
-        "🌐 <b>Foydalanuvchilar boshqaruvi Asosiy Web Ilovaga (Main App) ko'chirildi!</b>\n\n"
-        "Foydalanuvchilar bilan bog'liq barcha amallar (ko'rish, qidirish, ruxsat berish, cheklash, bloklash, o'chirish va barchani cheklash) "
-        "endi <b>Asosiy ilovaning «Admin»</b> bo'limida amalga oshiriladi.\n\n"
-        "Quyidagi tugma orqali ilovani ochishingiz mumkin 👇"
+        "💻 <b>Foydalanuvchilar boshqaruvi MacBook Dashboard tizimida mavjud!</b>\n\n"
+        "Foydalanuvchilar ro'yxati, filtrlash, ruxsat berish, cheklash va barcha boshqaruv amallari "
+        "keng qulayliklar bilan to'liq <b>MacBook Dashboard</b>ga o'tkazilgan.\n\n"
+        "Shuningdek, tezkor ko'rsatkichlarni <b>/stats</b> buyrug'i orqali ko'rishingiz mumkin."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [make_webapp_button("🚀 Foydalanuvchilarni boshqarish (Web App)", f"{get_webapp_url()}/app.html?tab=admin&tg_id={ADMIN_ID}")],
+        [InlineKeyboardButton(text="💻 MacBook Dashboardni ochish", url=f"{get_webapp_url()}/dashboard")],
+        [InlineKeyboardButton(text="📊 Tezkor statistika (/stats)", callback_data="admin_stats_quick")],
         [InlineKeyboardButton(text="🔙 Admin Menyuga qaytish", callback_data="admin_back_to_menu")]
     ])
     try:
@@ -1259,7 +1300,7 @@ async def admin_view_users_redirect_cb(call: CallbackQuery):
 
 @admin_router.callback_query(F.data.startswith("adm_user_card_") | F.data.startswith("adm_act_") | F.data.startswith("admin_restrict_all_"))
 async def adm_legacy_users_redirect_cb(call: CallbackQuery):
-    await call.answer("Foydalanuvchilar boshqaruvi Web Appga ko'chirilgan!", show_alert=True)
+    await call.answer("Foydalanuvchilar boshqaruvi Dashboardga ko'chirilgan!", show_alert=True)
 
 # 4. Adminlar boshqaruvi
 @admin_router.callback_query(F.data == "admin_manage_admins")

@@ -1186,27 +1186,23 @@ def invalidate_profile_cache(tg_id: Optional[int] = None):
 
 def _fetch_profile_data_sync(tg_id: int):
     try:
-        user = test_db.get_user(tg_id)
-    except Exception as ex:
-        log.warning(f"_fetch_profile_data_sync get_user error: {ex}")
-        user = None
-    try:
         is_admin = test_db.is_admin(tg_id, ADMIN_ID)
     except Exception:
         is_admin = (tg_id == ADMIN_ID)
+    try:
+        user = test_db.get_user(tg_id)
+        if not user and is_admin:
+            test_db.add_or_update_user(tg_id, "Administrator", "", "", "approved")
+            user = test_db.get_user(tg_id)
+    except Exception as ex:
+        log.warning(f"_fetch_profile_data_sync get_user error: {ex}")
+        user = None
     try:
         submissions = test_db.get_user_submissions(tg_id)
     except Exception as ex:
         log.warning(f"_fetch_profile_data_sync get_user_submissions error: {ex}")
         submissions = []
-    pending_users = 0
-    if is_admin:
-        try:
-            counts = test_db.get_users_count()
-            pending_users = counts.get('pending', 0)
-        except Exception:
-            pass
-    return user, is_admin, submissions, pending_users
+    return user, is_admin, submissions
 
 async def handle_admin_pdf_watermark(request):
     """Admin uchun WebApp orqali PDF faylga watermark qo'yish va natijaviy faylni yuklab berish."""
@@ -1279,43 +1275,13 @@ async def handle_app_profile(request):
                 "message": "Autentifikatsiya xatosi: Telegram WebApp initData noto'g'ri yoki taqdim etilmagan"
             }, status=401)
 
-        # Agar foydalanuvchi admin bo'lsa va hali bazada yo'q bo'lsa, avtomatik yaratamiz
-        is_admin_user = await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)
-        if is_admin_user:
-            existing_user = await test_db.db(test_db.get_user, tg_id)
-            if not existing_user:
-                await test_db.db(
-                    test_db.add_or_update_user,
-                    tg_id, "Administrator", "", "", "approved"
-                )
-
-        if not tg_id or tg_id <= 0:
-            return web.json_response({
-                "success": True,
-                "user": {
-                    "tg_id": 0,
-                    "fullname": "Mehmon",
-                    "phone": "—",
-                    "status": "not_registered",
-                    "is_registered": False,
-                    "registered_at": int(time.time()),
-                    "tests_count": 0,
-                    "avg_score": 0,
-                    "max_score": 0,
-                    "has_pin": False
-                },
-                "is_admin": False,
-                "pending_users": 0,
-                "bot_username": bot_user
-            })
-
         if tg_id and tg_id > 0:
             now_ts = time.time()
             cached_prof = _PROFILE_RAM_CACHE.get(int(tg_id))
             if cached_prof and (now_ts - cached_prof[0] < 5.0):
                 return web.json_response(cached_prof[1])
 
-        user, is_admin, submissions, pending_users = await test_db.db(_fetch_profile_data_sync, tg_id)
+        user, is_admin, submissions = await test_db.db(_fetch_profile_data_sync, tg_id)
 
         # Foydalanuvchi statistikasi
         avg_score = 0.0
@@ -1364,7 +1330,7 @@ async def handle_app_profile(request):
             "success": True,
             "user": user_data,
             "is_admin": is_admin,
-            "pending_users": pending_users,
+            "pending_users": 0,
             "bot_username": bot_user
         }
         if tg_id and tg_id > 0:
@@ -1373,6 +1339,116 @@ async def handle_app_profile(request):
         return web.json_response(profile_resp_data)
     except Exception as e:
         log.error(f"App Profile API Error: {e}", exc_info=True)
+        return web.json_response({"success": False, "message": str(e)}, status=400)
+
+
+_ME_RAM_CACHE: Dict[int, Tuple[float, Dict[str, Any]]] = {}
+
+async def handle_app_me(request):
+    """
+    Yengil autentifikatsiya va foydalanuvchi holati (/api/app/me).
+    30 soniyalik xotira (RAM) keshi bilan ishlaydi, ortiqcha DB yuklamasini oldini oladi.
+    """
+    try:
+        tg_id = _get_authenticated_user_id(request)
+        if not tg_id or tg_id <= 0:
+            return web.json_response({
+                "success": False,
+                "message": "Autentifikatsiya xatosi: Telegram WebApp initData noto'g'ri yoki taqdim etilmagan"
+            }, status=401)
+
+        now_ts = time.time()
+        cached = _ME_RAM_CACHE.get(int(tg_id))
+        if cached and (now_ts - cached[0] < 30.0):
+            return web.json_response(cached[1])
+
+        def _fetch_me_sync(uid: int):
+            try:
+                is_admin = test_db.is_admin(uid, ADMIN_ID)
+            except Exception:
+                is_admin = (uid == ADMIN_ID)
+            u = test_db.get_user(uid)
+            if not u and is_admin:
+                test_db.add_or_update_user(uid, "Administrator", "", "", "approved")
+                u = test_db.get_user(uid)
+            return u, is_admin
+
+        user, is_admin = await test_db.db(_fetch_me_sync, tg_id)
+
+        if not user:
+            user_data = {
+                "tg_id": tg_id,
+                "fullname": "Administrator" if is_admin else "Foydalanuvchi",
+                "phone": "—",
+                "status": "approved" if is_admin else "not_registered",
+                "is_registered": bool(is_admin),
+                "has_pin": False,
+                "registered_at": int(now_ts)
+            }
+        else:
+            user_data = {
+                "tg_id": user.get("tg_id", tg_id),
+                "fullname": user.get("fullname", ""),
+                "phone": user.get("phone", ""),
+                "status": user.get("status", "pending"),
+                "is_registered": bool(user.get("phone") and user.get("fullname")),
+                "has_pin": bool(user.get("pin_code")),
+                "registered_at": user.get("registered_at", int(now_ts))
+            }
+
+        resp_data = {
+            "success": True,
+            "user": user_data,
+            "is_admin": is_admin,
+            "bot_username": CACHED_BOT_USERNAME
+        }
+        _ME_RAM_CACHE[int(tg_id)] = (now_ts, resp_data)
+        return web.json_response(resp_data)
+    except Exception as e:
+        log.error(f"App Me API Error: {e}", exc_info=True)
+        return web.json_response({"success": False, "message": str(e)}, status=400)
+
+
+async def handle_app_my_submissions(request):
+    """
+    Foydalanuvchining test topshirishlari tarixi (/api/app/my-submissions).
+    Faqat Natijalar (Testlar) bo'limi ochilganda yuklanadi.
+    Parametrlar: limit (standart 20), offset (standart 0).
+    """
+    try:
+        tg_id = _get_authenticated_user_id(request)
+        if not tg_id or tg_id <= 0:
+            return web.json_response({
+                "success": False,
+                "message": "Autentifikatsiya xatosi: Telegram WebApp initData noto'g'ri yoki taqdim etilmagan"
+            }, status=401)
+
+        try:
+            limit = int(request.rel_url.query.get("limit", 20))
+            offset = int(request.rel_url.query.get("offset", 0))
+        except (ValueError, TypeError):
+            limit = 20
+            offset = 0
+
+        limit = max(1, min(limit, 100))
+        offset = max(0, offset)
+
+        all_submissions = await test_db.db(test_db.get_user_submissions, tg_id)
+        if not all_submissions:
+            all_submissions = []
+
+        total = len(all_submissions)
+        paged = all_submissions[offset:offset + limit]
+
+        return web.json_response({
+            "success": True,
+            "submissions": paged,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        })
+    except Exception as e:
+        log.error(f"App My Submissions API Error: {e}", exc_info=True)
         return web.json_response({"success": False, "message": str(e)}, status=400)
 
 async def handle_app_set_pin(request):
@@ -1641,108 +1717,6 @@ async def handle_app_my_results(request):
         log.error(f"App My Results API Error: {e}", exc_info=True)
         return web.json_response({"success": False, "message": str(e)}, status=400)
 
-async def handle_app_users(request):
-    """Admin uchun barcha foydalanuvchilar ro'yxati va statistika."""
-    try:
-        tg_id = _get_authenticated_user_id(request)
-        if not tg_id or not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
-            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=401)
-
-        users = await test_db.db(test_db.get_all_users)
-        counts = await test_db.db(test_db.get_users_count)
-        return web.json_response({
-            "success": True,
-            "users": users,
-            "stats": counts
-        })
-    except Exception as e:
-        log.error(f"App Users API Error: {e}", exc_info=True)
-        return web.json_response({"success": False, "message": str(e)}, status=400)
-
-async def handle_app_update_user_status(request):
-    """Admin tomonidan foydalanuvchi holatini (approved / pending / blocked / delete) o'zgartirish."""
-    try:
-        data = await request.json()
-        admin_id = int(data.get('admin_id', 0))
-        target_uid = int(data.get('target_uid', 0))
-        action = str(data.get('status', '')).strip().lower()
-
-        if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
-            init_data = data.get('init_data', '') or request.headers.get('X-Telegram-Init-Data', '')
-            import urllib.parse, json
-            try:
-                parsed = dict(urllib.parse.parse_qsl(init_data))
-                if 'user' in parsed:
-                    u_dict = json.loads(parsed['user'])
-                    if u_dict and u_dict.get('id'):
-                        admin_id = int(u_dict['id'])
-            except Exception:
-                pass
-
-        if not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
-            return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
-
-        if not target_uid:
-            return web.json_response({"success": False, "message": "Foydalanuvchi ID ko'rsatilmadi"}, status=400)
-
-        if action == 'delete':
-            # Foydalanuvchini bazadan butunlay tozalash va admin_deleted_users ga yozish
-            deleted_user = await test_db.db(test_db.delete_user, target_uid, deleted_by=admin_id, by_admin=True)
-            return web.json_response({"success": bool(deleted_user), "status": "deleted"})
-
-        if action == 'restore':
-            # Foydalanuvchini qayta tiklash
-            restored = await test_db.db(test_db.restore_user, target_uid)
-            return web.json_response({"success": bool(restored), "status": "approved"})
-
-        if action not in ['approved', 'rejected', 'pending']:
-            return web.json_response({"success": False, "message": "Noto'g'ri amal"}, status=400)
-
-        if action == 'approved':
-            await test_db.db(test_db.approve_user, target_uid)
-            try:
-                await bot.send_message(
-                    chat_id=target_uid,
-                    text=(
-                        "🎉 <b>Xushxabar! Sizga test tizimidan to'liq foydalanishga ruxsat berildi!</b>\n\n"
-                        "Endi botdagi barcha imkoniyatlar va Mini ilovadan to'siqsiz foydalanishingiz mumkin.\n"
-                        "Test topshirish uchun bot menyusidan foydalaning!"
-                    ),
-                    reply_markup=main_menu_kb(target_uid)
-                )
-            except Exception:
-                pass
-        elif action == 'rejected':
-            await test_db.db(test_db.reject_user, target_uid)
-            try:
-                await bot.send_message(
-                    chat_id=target_uid,
-                    text="❌ <b>Sizning botdan foydalanish huquqingiz admin tomonidan rad etildi!</b>\n\nMurojaat uchun: @eshmbetov"
-                )
-            except Exception:
-                pass
-        elif action == 'pending':
-            await test_db.db(test_db.set_user_pending, target_uid)
-            try:
-                req_kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🔔 Admindan ruxsat so'rash", callback_data=f"user_req_access_{target_uid}")]
-                ])
-                await bot.send_message(
-                    chat_id=target_uid,
-                    text=(
-                        "⏳ <b>Sizning botdan foydalanish huquqingiz admin tomonidan to'xtatildi!</b>\n\n"
-                        "Qayta foydalanish uchun quyidagi tugma orqali adminga so'rov yuborishingiz mumkin."
-                    ),
-                    reply_markup=req_kb
-                )
-            except Exception:
-                pass
-
-        return web.json_response({"success": True, "status": action})
-    except Exception as e:
-        log.error(f"App Update User Status Error: {e}", exc_info=True)
-        return web.json_response({"success": False, "message": str(e)}, status=400)
-
 async def handle_app_update_profile(request):
     """Foydalanuvchi o'z ism va telefon raqamini tahrirlashi uchun API."""
     try:
@@ -1827,34 +1801,6 @@ async def handle_app_delete_my_account(request):
         log.error(f"App Delete My Account Error: {e}", exc_info=True)
         return web.json_response({"success": False, "message": str(e)}, status=400)
 
-async def handle_app_restrict_all_users(request):
-    """Admin tomonidan barcha oddiy foydalanuvchilarni kutilmoqda (pending) holatiga o'tkazish (oldingi status saqlanadi)."""
-    try:
-        data = await request.json()
-        admin_id = int(data.get('admin_id', 0))
-        if not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
-            return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
-
-        count = await test_db.db(test_db.restrict_all_users, ADMIN_ID)
-        return web.json_response({"success": True, "count": count})
-    except Exception as e:
-        log.error(f"App Restrict All Users Error: {e}", exc_info=True)
-        return web.json_response({"success": False, "message": str(e)}, status=400)
-
-async def handle_app_unrestrict_all_users(request):
-    """Admin tomonidan barcha cheklangan foydalanuvchilarning oldingi statusini qaytarish."""
-    try:
-        data = await request.json()
-        admin_id = int(data.get('admin_id', 0))
-        if not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
-            return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
-
-        count = await test_db.db(test_db.unrestrict_all_users, ADMIN_ID)
-        return web.json_response({"success": True, "count": count})
-    except Exception as e:
-        log.error(f"App Unrestrict All Users Error: {e}", exc_info=True)
-        return web.json_response({"success": False, "message": str(e)}, status=400)
-
 async def handle_app_autosave_answer(request):
     """
     O'quvchi test ishlayotganda har bir savolga belgilangan javobni darhol DB'ga qoralama (draft) sifatida saqlash.
@@ -1928,57 +1874,6 @@ async def handle_app_get_draft(request):
         log.warning(f"Get draft error: {e}")
         return web.json_response({"success": False, "answers": {}, "error": str(e)}, status=500)
 
-async def handle_app_broadcast(request):
-    """Admin tomonidan barcha o'quvchilarga xabar yuborish (Mini App orqali)."""
-    try:
-        data = await request.json()
-        admin_id = _get_authenticated_user_id(request, data)
-        message_text = str(data.get('message', '')).strip()
-
-        if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
-            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=401)
-            return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
-
-        if not message_text:
-            return web.json_response({"success": False, "message": "Xabar matni bo'sh bo'lishi mumkin emas!"}, status=400)
-
-        # Barcha faol o'quvchilarga xabar tarqatish
-        sent, fail, batch_id = await send_broadcast_to_users(message_text=message_text, sender_tg_id=admin_id)
-        return web.json_response({
-            "success": True,
-            "sent": sent,
-            "fail": fail,
-            "batch_id": batch_id,
-            "message": f"Xabar {sent} nafar o'quvchiga muvaffaqiyatli yetkazildi!"
-        })
-    except Exception as e:
-        log.error(f"App Broadcast Error: {e}", exc_info=True)
-        return web.json_response({"success": False, "message": str(e)}, status=400)
-
-async def handle_app_broadcast_delete(request):
-    """Admin tomonidan yuborilgan xabarni partiya (batch_id) bo'yicha o'chirish (Mini App API)."""
-    try:
-        data = await request.json()
-        admin_id = _get_authenticated_user_id(request, data)
-        batch_id = str(data.get('batch_id', '')).strip()
-
-        if not admin_id or not (await test_db.db(test_db.is_admin, admin_id, ADMIN_ID)):
-            return web.json_response({"success": False, "message": "Admin ruxsati talab qilinadi"}, status=403)
-
-        if not batch_id:
-            return web.json_response({"success": False, "message": "batch_id ko'rsatilmadi"}, status=400)
-
-        deleted, fail = await delete_broadcast_batch_from_users(batch_id)
-        return web.json_response({
-            "success": True,
-            "deleted": deleted,
-            "fail": fail,
-            "message": f"Xabar {deleted} nafar o'quvchi chatidan o'chirildi!"
-        })
-    except Exception as e:
-        log.error(f"App Broadcast Delete Error: {e}", exc_info=True)
-        return web.json_response({"success": False, "message": str(e)}, status=400)
-
 async def handle_next_test_code_api(request):
     """Keyingi navbatdagi ketma-ket unikal test kodini qaytarish."""
     try:
@@ -1986,19 +1881,6 @@ async def handle_next_test_code_api(request):
         return web.json_response({"success": True, "next_code": next_code})
     except Exception as e:
         return web.json_response({"success": False, "next_code": "1", "message": str(e)})
-
-async def handle_app_test_submissions(request):
-    """Admin uchun test topshirgan barcha foydalanuvchilar va ularning tafsilotlari."""
-    try:
-        tg_id = int(request.rel_url.query.get('tg_id', 0))
-        if not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
-            return web.json_response({"success": False, "message": "Ruxsat yo'q"}, status=403)
-        test_id = int(request.match_info.get('test_id', 0))
-        subs = await test_db.db(test_db.get_test_submissions_with_users, test_id)
-        return web.json_response({"success": True, "submissions": subs})
-    except Exception as e:
-        log.error(f"App Test Submissions Error: {e}", exc_info=True)
-        return web.json_response({"success": False, "message": str(e)}, status=500)
 
 async def handle_rasch_evaluate_api(request):
     try:
@@ -3064,22 +2946,17 @@ async def create_web_app():
     app.router.add_get('/api/dashboard/test-report-pdf/{test_id}', handle_admin_test_pdf_report)
     # Asosiy Mini App API
     app.router.add_get('/api/app/profile', handle_app_profile)
+    app.router.add_get('/api/app/me', handle_app_me)
+    app.router.add_get('/api/app/my-submissions', handle_app_my_submissions)
     app.router.add_post('/api/app/update-profile', handle_app_update_profile)
     app.router.add_post('/api/app/delete-my-account', handle_app_delete_my_account)
     app.router.add_get('/api/app/active-tests', handle_app_active_tests)
-    app.router.add_get('/api/app/test-submissions/{test_id}', handle_app_test_submissions)
     app.router.add_get('/api/app/my-results', handle_app_my_results)
     app.router.add_get('/api/app/check-membership', handle_app_check_membership)
     app.router.add_get('/api/app/trigger-solve', handle_app_trigger_solve)
     app.router.add_post('/api/app/trigger-solve', handle_app_trigger_solve)
-    app.router.add_get('/api/app/users', handle_app_users)
-    app.router.add_post('/api/app/update-user-status', handle_app_update_user_status)
-    app.router.add_post('/api/app/restrict-all-users', handle_app_restrict_all_users)
-    app.router.add_post('/api/app/unrestrict-all-users', handle_app_unrestrict_all_users)
     app.router.add_post('/api/app/autosave-answer', handle_app_autosave_answer)
     app.router.add_get('/api/app/get-draft', handle_app_get_draft)
-    app.router.add_post('/api/app/broadcast', handle_app_broadcast)
-    app.router.add_post('/api/app/broadcast/delete', handle_app_broadcast_delete)
     app.router.add_get('/api/next-test-code', handle_next_test_code_api)
     app.router.add_get('/api/app/status', handle_app_status)
     app.router.add_get('/healthz', handle_app_status)
