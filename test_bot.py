@@ -157,8 +157,6 @@ async def main():
             # Telegram pastki chat menyu tugmasini doimiy ravishda "Profil 👤" qilib o'rnatish
             try:
                 app_url = get_webapp_url()
-                if "/dashboard" in app_url:
-                    app_url = app_url.split("/dashboard")[0]
                 menu_btn = MenuButtonWebApp(text="Profil 👤", web_app=WebAppInfo(url=f"{app_url.rstrip('/')}/app.html"))
                 await bot.set_chat_menu_button(menu_button=menu_btn)
                 log.info(f"✅ Telegram Bot pastki menyu tugmasi 'Profil 👤' ({app_url}) qilib sozlandi!")

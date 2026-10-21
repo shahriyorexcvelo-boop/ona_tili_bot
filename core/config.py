@@ -46,10 +46,6 @@ def tg_e(icon_name: str, fallback: str = "•") -> str:
         return f'<tg-emoji emoji-id="{eid}">{fallback}</tg-emoji>'
     return fallback
 
-def invalidate_dashboard_cache():
-    """Eski dashboard keshini tozalash funksiyasi (dashboard bekor qilingani uchun no-op)."""
-    pass
-
 def get_test_schedule_status(test: Dict[str, Any]) -> Dict[str, Any]:
     """
     Testning joriy vaqtga (UZB_TZ) nisbatan aniq holatini hisoblaydi:

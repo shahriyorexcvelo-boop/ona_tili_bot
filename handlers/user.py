@@ -30,7 +30,7 @@ from core import (
     main_menu_kb, profile_webapp_kb, results_webapp_kb,
     contact_share_kb, make_webapp_button,
     is_working_hours, should_apply_night_mode, get_night_message,
-    invalidate_dashboard_cache, get_test_schedule_status,
+    get_test_schedule_status,
     set_cached_membership
 )
 from .common import (
@@ -198,7 +198,6 @@ async def reg_fullname(message: Message, state: FSMContext):
         await test_db.db(test_db.log_activity, user_tg_id, "user_register", f"Yangi o'quvchi ro'yxatdan o'tdi: {fullname}", {"tg_id": user_tg_id, "fullname": fullname, "username": username, "status": status})
     except Exception:
         pass
-    invalidate_dashboard_cache()
     await state.clear()
 
     if is_adm:
@@ -281,7 +280,6 @@ async def reg_phone(message: Message, state: FSMContext):
         await test_db.db(test_db.log_activity, user_tg_id, "user_register", f"Yangi o'quvchi ro'yxatdan o'tdi: {fullname}", {"tg_id": user_tg_id, "fullname": fullname, "username": username, "status": status})
     except Exception:
         pass
-    invalidate_dashboard_cache()
     await state.clear()
 
     # Barcha adminlarga xabar

@@ -1,6 +1,5 @@
 from .config import (
     UZB_TZ, format_uzb_time, TG_ICONS, tg_e,
-    invalidate_dashboard_cache,
     get_test_schedule_status, get_test_min_submit_info,
     WORK_START_HOUR, WORK_END_HOUR, is_working_hours, should_apply_night_mode, get_night_message, get_maintenance_message,
     BOT_TOKEN, ADMIN_ID, get_config_admin_ids, PORT, WEBAPP_URL, get_webapp_url, set_webapp_url, CACHED_BOT_USERNAME, log
@@ -25,7 +24,7 @@ from .telegram_utils import is_user_gone_error
 
 __all__ = [
     "UZB_TZ", "format_uzb_time", "TG_ICONS", "tg_e",
-    "invalidate_dashboard_cache", "get_test_schedule_status", "get_test_min_submit_info",
+    "get_test_schedule_status", "get_test_min_submit_info",
     "is_working_hours", "should_apply_night_mode", "get_night_message", "get_maintenance_message",
     "BOT_TOKEN", "ADMIN_ID", "PORT", "WEBAPP_URL", "get_webapp_url", "set_webapp_url", "CACHED_BOT_USERNAME", "log",
     "bot", "dp", "MaintenanceMiddleware",

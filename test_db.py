@@ -845,11 +845,6 @@ def set_test_schedule(test_id: int, scheduled_date: str, start_time: str, end_ti
         conn.commit()
         invalidate_test_cache(test_id)
         _notify_schedule_changed_internal()
-        try:
-            from core import invalidate_dashboard_cache
-            invalidate_dashboard_cache()
-        except Exception:
-            pass
         return True
     except Exception as e:
         print(f"Error set_test_schedule: {e}")
@@ -892,11 +887,6 @@ def clear_test_schedule(test_id: int) -> bool:
         conn.commit()
         invalidate_test_cache(test_id)
         _notify_schedule_changed_internal()
-        try:
-            from core import invalidate_dashboard_cache
-            invalidate_dashboard_cache()
-        except Exception:
-            pass
         return True
     except Exception as e:
         print(f"Error clear_test_schedule: {e}")
@@ -917,11 +907,6 @@ def set_test_youtube_url(test_id: int, url: str) -> bool:
         )
         conn.commit()
         invalidate_test_cache(test_id)
-        try:
-            from core import invalidate_dashboard_cache
-            invalidate_dashboard_cache()
-        except Exception:
-            pass
         return True
     except Exception as e:
         print(f"Error set_test_youtube_url: {e}")
@@ -1503,11 +1488,6 @@ def approve_user(tg_id: int) -> bool:
         conn.commit()
         invalidate_user_cache(tg_id)
         invalidate_admin_deleted_cache(tg_id)
-        try:
-            from core import invalidate_dashboard_cache
-            invalidate_dashboard_cache()
-        except Exception:
-            pass
         return True
     except Exception as e:
         print(f"Error approving user: {e}")
@@ -1523,11 +1503,6 @@ def reject_user(tg_id: int) -> bool:
         cur.execute(f"UPDATE users SET status = 'rejected' WHERE tg_id = {_ph()}", (tg_id,))
         conn.commit()
         invalidate_user_cache(tg_id)
-        try:
-            from core import invalidate_dashboard_cache
-            invalidate_dashboard_cache()
-        except Exception:
-            pass
         return True
     except Exception as e:
         print(f"Error rejecting user: {e}")
@@ -1796,11 +1771,6 @@ def delete_user(tg_id: int, deleted_by: Optional[int] = None, is_self_delete: bo
         conn.commit()
         invalidate_user_cache(actual_tg_id)
         invalidate_admin_deleted_cache(actual_tg_id)
-        try:
-            from core import invalidate_dashboard_cache
-            invalidate_dashboard_cache()
-        except Exception:
-            pass
         return user_row or {"tg_id": actual_tg_id}
     except Exception as e:
         print(f"Error deleting user {tg_id}: {e}")
@@ -2354,11 +2324,6 @@ def update_test_time_limit(test_id: int, time_limit_min: int) -> bool:
         )
         conn.commit()
         invalidate_test_cache(test_id)
-        try:
-            from core import invalidate_dashboard_cache
-            invalidate_dashboard_cache()
-        except Exception:
-            pass
         return True
     except Exception as e:
         print(f"Error updating test time limit: {e}")
@@ -2433,11 +2398,6 @@ def delete_test(test_id: int) -> bool:
         cur.execute(f"DELETE FROM tests WHERE id = {_ph()}", (test_id,))
         conn.commit()
         invalidate_test_cache(test_id)
-        try:
-            from core import invalidate_dashboard_cache
-            invalidate_dashboard_cache()
-        except Exception:
-            pass
         print(f"🗑 Test #{test_id} bazadan va RAM keshdan muvaffaqiyatli o'chirildi.")
         return True
     except Exception as e:
@@ -4156,218 +4116,6 @@ def _fetch_scalar(row, key: str = "cnt") -> Any:
     if isinstance(row, dict):
         return row.get(key, list(row.values())[0]) if row else 0
     return row[0]
-
-
-def get_dashboard_summary() -> Dict[str, Any]:
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        now_ts = int(time.time())
-        today_midnight = now_ts - (now_ts % 86400) - (5 * 3600)
-        if today_midnight > now_ts:
-            today_midnight -= 86400
-
-        cur.execute(f"""
-        SELECT 
-            (SELECT COUNT(*) FROM users) as total_users,
-            (SELECT COUNT(*) FROM users WHERE status = 'approved') as approved_users,
-            (SELECT COUNT(*) FROM users WHERE status = 'pending') as pending_users,
-            0 as blocked_users,
-            (SELECT COUNT(*) FROM tests) as total_tests,
-            (SELECT COUNT(*) FROM tests WHERE is_active = 1) as active_tests,
-            (SELECT COUNT(*) FROM submissions) as total_submissions,
-            (SELECT COUNT(*) FROM submissions WHERE is_late = 1) as late_submissions,
-            (SELECT COUNT(*) FROM submissions WHERE submitted_at >= {_ph()}) as today_submissions,
-            (SELECT COALESCE(AVG(score), 0) FROM submissions WHERE score IS NOT NULL) as avg_score,
-            (SELECT COALESCE(AVG(correct_count), 0) FROM submissions WHERE correct_count IS NOT NULL) as avg_correct
-        """, (today_midnight,))
-        row = cur.fetchone()
-        d = _row_to_dict(row) or {}
-
-        return {
-            "total_users": int(d.get("total_users") or 0),
-            "approved_users": int(d.get("approved_users") or 0),
-            "pending_users": int(d.get("pending_users") or 0),
-            "blocked_users": int(d.get("blocked_users") or 0),
-            "total_tests": int(d.get("total_tests") or 0),
-            "active_tests": int(d.get("active_tests") or 0),
-            "total_submissions": int(d.get("total_submissions") or 0),
-            "today_submissions": int(d.get("today_submissions") or 0),
-            "late_submissions": int(d.get("late_submissions") or 0),
-            "avg_score": round(float(d.get("avg_score") or 0.0), 1),
-            "avg_correct": round(float(d.get("avg_correct") or 0.0), 1),
-            "db_type": "PostgreSQL (Neon Cloud)" if USE_POSTGRES else "SQLite (Local)"
-        }
-    finally:
-        _close_conn(conn)
-
-
-def get_all_submissions_for_admin(limit: int = 1000) -> List[Dict[str, Any]]:
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(f"""
-        SELECT s.id, s.test_id, s.test_code, s.user_tg_id, s.fullname, s.phone,
-               s.score, s.max_score, s.correct_count, s.total_count,
-               s.submitted_at, s.is_late, s.status, s.reject_reason,
-               u.username, u.status as user_status,
-               t.title as test_title, t.subject as test_subject,
-               t.results_published, t.is_active as test_is_active
-        FROM submissions s
-        LEFT JOIN users u ON s.user_tg_id = u.tg_id
-        LEFT JOIN tests t ON s.test_id = t.id
-        ORDER BY s.submitted_at DESC
-        LIMIT {int(limit)}
-        """)
-        rows = cur.fetchall()
-        results = []
-        for r in rows:
-            d = _row_to_dict(r)
-            if not d:
-                continue
-            d["grade"] = calculate_grade(d.get("score", 0), correct_count=d.get("correct_count", 0))
-            results.append(d)
-        return results
-    finally:
-        _close_conn(conn)
-
-
-def get_user_submissions_for_admin(user_tg_id: int) -> List[Dict[str, Any]]:
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(f"""
-        SELECT s.id, s.test_id, s.test_code, s.user_tg_id, s.fullname, s.phone,
-               s.score, s.max_score, s.correct_count, s.total_count,
-               s.submitted_at, s.is_late, s.status, s.reject_reason,
-               u.username, u.status as user_status,
-               t.title as test_title, t.subject as test_subject,
-               t.results_published, t.is_active as test_is_active
-        FROM submissions s
-        LEFT JOIN users u ON s.user_tg_id = u.tg_id
-        LEFT JOIN tests t ON s.test_id = t.id
-        WHERE s.user_tg_id = {_ph()}
-        ORDER BY s.submitted_at DESC
-        """, (user_tg_id,))
-        rows = cur.fetchall()
-        results = []
-        for r in rows:
-            d = _row_to_dict(r)
-            if not d:
-                continue
-            d["grade"] = calculate_grade(d.get("score", 0), correct_count=d.get("correct_count", 0))
-            results.append(d)
-        return results
-    finally:
-        _close_conn(conn)
-
-
-get_user_results = get_user_submissions_for_admin
-
-
-def get_submission_details_for_admin(sub_id: int) -> Optional[Dict[str, Any]]:
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(f"""
-        SELECT s.*, u.username, u.status as user_status,
-               t.title as test_title, t.subject as test_subject, t.answers_json as test_keys_json
-        FROM submissions s
-        LEFT JOIN users u ON s.user_tg_id = u.tg_id
-        LEFT JOIN tests t ON s.test_id = t.id
-        WHERE s.id = {_ph()}
-        """, (sub_id,))
-        row = cur.fetchone()
-        if not row:
-            return None
-        d = _row_to_dict(row)
-        d["grade"] = calculate_grade(d.get("score", 0), correct_count=d.get("correct_count", 0))
-        return d
-    finally:
-        _close_conn(conn)
-
-
-def get_activity_logs(limit: int = 60) -> List[Dict[str, Any]]:
-    """Tizimdagi so'nggi jarayonlar va voqealar xronologiyasi."""
-    events = []
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        # 1. So'nggi topshirilgan testlar
-        cur.execute(f"""
-        SELECT s.id, s.user_tg_id, s.fullname, s.submitted_at, s.score, s.correct_count, s.is_late,
-               s.test_code, t.title as test_title, u.username
-        FROM submissions s
-        LEFT JOIN tests t ON s.test_id = t.id
-        LEFT JOIN users u ON s.user_tg_id = u.tg_id
-        ORDER BY s.submitted_at DESC
-        LIMIT {int(limit)}
-        """)
-        for r in cur.fetchall():
-            d = _row_to_dict(r)
-            if d:
-                events.append({
-                    "type": "late_submission" if d.get("is_late") else "submission",
-                    "time": d.get("submitted_at"),
-                    "title": f"Test topshirildi: {d.get('test_title') or '#' + str(d.get('test_code'))}",
-                    "user_name": d.get("fullname"),
-                    "username": d.get("username"),
-                    "user_id": d.get("user_tg_id"),
-                    "badge": f"{d.get('correct_count', 0)} to'g'ri • {d.get('score', 0)} ball" + (" (Kech)" if d.get("is_late") else ""),
-                    "badge_color": "warning" if d.get("is_late") else "success",
-                    "data_id": d.get("id")
-                })
-        
-        # 2. So'nggi ro'yxatdan o'tgan foydalanuvchilar
-        cur.execute(f"""
-        SELECT id, tg_id, fullname, username, phone, status, registered_at
-        FROM users
-        ORDER BY registered_at DESC
-        LIMIT {int(limit // 2)}
-        """)
-        for r in cur.fetchall():
-            d = _row_to_dict(r)
-            if d:
-                events.append({
-                    "type": "registration",
-                    "time": d.get("registered_at"),
-                    "title": "Yangi foydalanuvchi qo'shildi",
-                    "user_name": d.get("fullname"),
-                    "username": d.get("username"),
-                    "user_id": d.get("tg_id"),
-                    "badge": d.get("status", "approved").capitalize(),
-                    "badge_color": "danger" if d.get("status") == "blocked" else ("warning" if d.get("status") == "pending" else "info"),
-                    "data_id": d.get("id")
-                })
-
-        # Vaqt bo'yicha kamayish tartibida saralash
-        events.sort(key=lambda x: x.get("time") or 0, reverse=True)
-        return events[:limit]
-    finally:
-        _close_conn(conn)
-
-
-def execute_admin_safe_query(query: str, limit: int = 100) -> Dict[str, Any]:
-    """Admin uchun xavfsiz SELECT so'rovlarini bajarish."""
-    q = (query or "").strip()
-    if not q.lower().startswith("select"):
-        return {"success": False, "error": "Faqat SELECT so'rovlarini bajarish mumkin!"}
-    
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(q)
-        rows = cur.fetchmany(limit)
-        results = [_row_to_dict(r) for r in rows if r]
-        return {
-            "success": True,
-            "count": len(results),
-            "rows": results
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-    finally:
-        _close_conn(conn)
 
 
 def recalculate_all_submissions_globally() -> int:

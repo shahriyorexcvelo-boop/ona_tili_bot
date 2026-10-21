@@ -24,7 +24,6 @@ import test_db
 import rasch_engine
 from core import (
     UZB_TZ, format_uzb_time, TG_ICONS, tg_e,
-    invalidate_dashboard_cache,
     get_test_schedule_status, get_test_min_submit_info,
     BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, CACHED_BOT_USERNAME, log, bot, main_menu_kb,
     GLOBAL_RATE_LIMITER, SUBMIT_CONCURRENCY_SEMAPHORE, COMPARE_CONCURRENCY_SEMAPHORE,
@@ -280,7 +279,6 @@ async def _process_submission_background(test_id: int, user_tg_id: int, user_ans
                 test_id, user_tg_id, user_answers,
                 is_late=1 if is_late_submission else 0
             )
-        invalidate_dashboard_cache()
         test_db.invalidate_user_cache(user_tg_id)
         invalidate_profile_cache(user_tg_id)
 
