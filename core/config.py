@@ -336,10 +336,25 @@ _config_admins = get_config_admin_ids()
 ADMIN_ID = _config_admins[0] if _config_admins else 8039427064
 PORT = int(os.getenv("PORT", "8080"))
 
+DEFAULT_RENDER_URL = "https://ona-tili-bot.onrender.com"
+
 def get_webapp_url() -> str:
-    """Mini App URL manzilini dinamik va doimo eng yangi holatda qaytaradi."""
+    """Mini App URL manzilini dinamik va 24/7 Render doimiy manzili bilan qaytaradi."""
     global WEBAPP_URL
-    # 1. Doimiy cloud ishlab chiqarish muhitlari (Render.com, Railway)
+    
+    # 1. Agar USE_TUNNEL=true deb ataylab ko'rsatilsagina vaqtinchalik tunnel tekshiriladi
+    use_tunnel = os.getenv("USE_TUNNEL", "0").strip().lower() in ("1", "true", "yes")
+    if use_tunnel and os.path.exists("tunnel_url.txt"):
+        try:
+            with open("tunnel_url.txt", "r") as tf:
+                url_str = tf.read().strip()
+                if url_str and url_str.startswith("http") and not any(k in url_str for k in ["localhost", "127.0.0.1"]):
+                    WEBAPP_URL = url_str.rstrip("/")
+                    return WEBAPP_URL
+        except Exception:
+            pass
+
+    # 2. Doimiy cloud ishlab chiqarish muhitlari (Render.com, Railway)
     render_domain = os.getenv("RENDER_EXTERNAL_URL")
     if render_domain:
         WEBAPP_URL = (render_domain if render_domain.startswith("http") else f"https://{render_domain}").rstrip("/")
@@ -350,37 +365,31 @@ def get_webapp_url() -> str:
         WEBAPP_URL = f"https://{railway_domain}".rstrip("/")
         return WEBAPP_URL
 
-    # 2. tunnel_url.txt - Cloudflare yoki Localhost.run jonli tunneli
-    if os.path.exists("tunnel_url.txt"):
-        try:
-            with open("tunnel_url.txt", "r") as tf:
-                url_str = tf.read().strip()
-                if url_str and url_str.startswith("http"):
-                    WEBAPP_URL = url_str.rstrip("/")
-                    return WEBAPP_URL
-        except Exception:
-            pass
-
-    # 3. .env dagi WEBAPP_URL
+    # 3. .env dagi WEBAPP_URL (vaqtinchalik tunnel bo'lmasa yoki USE_TUNNEL ruxsat berilgan bo'lsa)
     env_url = os.getenv("WEBAPP_URL", "").strip()
     if env_url:
-        WEBAPP_URL = (env_url if env_url.startswith("http") else f"https://{env_url}").rstrip("/")
-        return WEBAPP_URL
+        is_temp_tunnel = any(k in env_url for k in [".trycloudflare.com", ".lhr.life", ".serveo.net", "localhost", "127.0.0.1"])
+        if not is_temp_tunnel or use_tunnel:
+            WEBAPP_URL = (env_url if env_url.startswith("http") else f"https://{env_url}").rstrip("/")
+            return WEBAPP_URL
 
-    return getattr(globals(), "WEBAPP_URL", "https://ona-tili-bot.onrender.com")
+    # 4. Asosiy 24/7 Render doimiy domeni
+    WEBAPP_URL = DEFAULT_RENDER_URL
+    return WEBAPP_URL
 
 def set_webapp_url(url: str):
-    """Barcha modullar uchun umumiy WEBAPP_URL ni yangilaydi va tunnel_url.txt ga yozadi."""
+    """Barcha modullar uchun umumiy WEBAPP_URL ni yangilaydi."""
     global WEBAPP_URL
     if not url:
         return
     clean_url = (url if url.startswith("http") else f"https://{url}").rstrip("/")
     WEBAPP_URL = clean_url
-    try:
-        with open("tunnel_url.txt", "w") as f:
-            f.write(clean_url)
-    except Exception:
-        pass
+    if os.getenv("USE_TUNNEL", "0").strip().lower() in ("1", "true", "yes"):
+        try:
+            with open("tunnel_url.txt", "w") as f:
+                f.write(clean_url)
+        except Exception:
+            pass
 
 WEBAPP_URL = get_webapp_url()
 
