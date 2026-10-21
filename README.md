@@ -55,6 +55,11 @@ python -m migrations.runner
 python test_bot.py
 ```
 
+> [!IMPORTANT]
+> **Lokal sinovlar uchun alohida `BOT_TOKEN` ishlating:**
+> Render production serveri Webhook rejimida 24/7 ishlaydi. Agar lokal kompyuteringizda production `BOT_TOKEN` orqali bot ishga tushirilsa, Telegram bot ziddiyatiga (Conflict error) olib kelishi mumkin. Shuning uchun lokal sinov va testlar uchun @BotFather orqali yaratilgan alohida test boti tokenini (.env da) ishlatish tavsiya etiladi. Lokal ishga tushirilganda production webhooki o'chirilmaydi.
+
+
 ---
 
 ## 🧪 AVTOMATLASHGAN TESTLARNI ISHGA TUSHIRISH

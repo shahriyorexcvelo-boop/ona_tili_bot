@@ -11,18 +11,37 @@ import os
 import sys
 
 from aiohttp import web
-from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo
+from aiogram.types import BotCommand, MenuButtonWebApp, WebAppInfo, ErrorEvent
 
 import test_db
 from core import (
     BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, get_webapp_url, log, bot, dp
 )
-from services import maintain_tunnel, schedule_checker
+from services import (
+    maintain_tunnel, schedule_checker,
+    supabase_keepalive_task, event_loop_lag_monitor, memory_rss_monitor
+)
 from handlers import user_router, admin_router, create_web_app
 
 # ── ROUTERLARNI REGISTRATSIYA QILISH ──
 dp.include_router(admin_router)
 dp.include_router(user_router)
+
+
+@dp.error()
+async def global_error_handler(event: ErrorEvent):
+    """Botda connection pool band bo'lganda foydalanuvchiga muloyim javob qaytarish."""
+    if isinstance(event.exception, test_db.DatabasePoolBusyError):
+        log.warning(f"⚠️ Botda Pool band ogohlantirishi: {event.exception}")
+        try:
+            if event.update and event.update.message:
+                await event.update.message.answer("⚠️ Server band, bir necha soniyadan keyin urinib ko'ring.")
+            elif event.update and event.update.callback_query:
+                await event.update.callback_query.answer("⚠️ Server band, bir necha soniyadan keyin urinib ko'ring.", show_alert=True)
+        except Exception:
+            pass
+        return True
+    return False
 
 
 async def tests_cache_refresher():
@@ -53,13 +72,15 @@ async def main():
 
 
     # 2. Webhook va Polling rejimini aniqlash (M7: Bir nechta instance to'qnashuvini oldini olish)
-    USE_WEBHOOK = os.getenv("USE_WEBHOOK", "0").strip().lower() in ("1", "true", "yes")
+    # Lokal ishga tushirilganda (RENDER_EXTERNAL_URL va RENDER env yo'q bo'lsa) webhook O'RNATILMASIN va O'CHIRILMASIN
+    is_render = bool(os.getenv("RENDER_EXTERNAL_URL") or os.getenv("RENDER") == "true" or os.getenv("RENDER_SERVICE_ID"))
+    USE_WEBHOOK = os.getenv("USE_WEBHOOK", "1" if is_render else "0").strip().lower() in ("1", "true", "yes")
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "onatili_sec_token_2026").strip()
     WEBHOOK_PATH = "/tg-webhook"
 
     active_url = get_webapp_url()
     is_valid_https = bool(active_url and active_url.startswith("https://") and "localhost" not in active_url)
-    use_webhook_mode = USE_WEBHOOK and is_valid_https
+    use_webhook_mode = bool(is_render and USE_WEBHOOK and is_valid_https)
 
     app = await create_web_app()
 
@@ -68,10 +89,11 @@ async def main():
         SimpleRequestHandler(
             dispatcher=dp,
             bot=bot,
-            secret_token=WEBHOOK_SECRET
+            secret_token=WEBHOOK_SECRET,
+            handle_in_background=True
         ).register(app, path=WEBHOOK_PATH)
         setup_application(app, dp, bot=bot)
-        log.info(f"🔗 Webhook endpoint ro'yxatdan o'tkazildi: {WEBHOOK_PATH}")
+        log.info(f"🔗 Webhook endpoint ro'yxatdan o'tkazildi (handle_in_background=True): {WEBHOOK_PATH}")
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -101,7 +123,12 @@ async def main():
     # 6. Global testlar keshini fonda har 30 soniyada yangilab turish (Zero-Block)
     _cache_refresher_task = asyncio.create_task(tests_cache_refresher())
 
-    # 7. Telegram Botni ishga tushirish (Webhook yoki Polling)
+    # 7. Kuzatuv va Keep-Alive fon vazifalari
+    _supabase_keepalive_task = asyncio.create_task(supabase_keepalive_task())
+    _lag_monitor_task = asyncio.create_task(event_loop_lag_monitor())
+    _rss_monitor_task = asyncio.create_task(memory_rss_monitor())
+
+    # 8. Telegram Botni ishga tushirish (Webhook yoki Polling)
     try:
         # Telegram rasmiy menyu buyruqlarini ro'yxatdan o'tkazish
         try:
@@ -135,9 +162,9 @@ async def main():
                     url=webhook_url,
                     secret_token=WEBHOOK_SECRET,
                     allowed_updates=dp.resolve_used_update_types(),
-                    drop_pending_updates=True
+                    drop_pending_updates=False
                 )
-                log.info("✅ Telegram Webhook muvaffaqiyatli o'rnatildi!")
+                log.info("✅ Telegram Webhook muvaffaqiyatli o'rnatildi (drop_pending_updates=False)!")
             except Exception as we:
                 log.error(f"❌ Telegram Webhook o'rnatishda xatolik: {we}")
             # Webhook rejimida aiohttp serverini to'xtovsiz ushlab turamiz
@@ -145,13 +172,21 @@ async def main():
             await stop_event.wait()
         else:
             log.info("🤖 Telegram Bot Polling rejimida ishga tushmoqda...")
-            await bot.delete_webhook(drop_pending_updates=True)
+            if is_render:
+                try:
+                    await bot.delete_webhook(drop_pending_updates=False)
+                except Exception:
+                    pass
             await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
-        for t in (_cache_refresher_task, _sched_task, _tunnel_task):
+        for t in (
+            _cache_refresher_task, _sched_task, _tunnel_task,
+            _supabase_keepalive_task, _lag_monitor_task, _rss_monitor_task
+        ):
             if t and not t.done():
                 t.cancel()
-        if use_webhook_mode:
+        # finally blokidagi bot.delete_webhook() faqat polling rejimida chaqirilsin, webhook rejimida o'chirilmasin
+        if not use_webhook_mode and is_render:
             try:
                 await bot.delete_webhook()
             except Exception:

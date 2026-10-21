@@ -34,22 +34,27 @@ if DATABASE_URL and "neon.tech" in DATABASE_URL and "-pooler" not in DATABASE_UR
 # PostgreSQL yoki SQLite ni avtomatik aniqlash
 USE_POSTGRES = bool(DATABASE_URL and ("postgresql" in DATABASE_URL or "postgres" in DATABASE_URL))
 
+class DatabasePoolBusyError(Exception):
+    """PostgreSQL connection pool to'liq va 2 soniyada ulanish ololmaganda ko'tariladi."""
+    pass
+
 # ── PostgreSQL Connection Pool (Yuqori yuklama uchun optimallashtirilgan) ──
 _pg_pool = None
 _pool_connections = set()
 _conn_last_used = {}
 PG_POOL_MINCONN = int(os.getenv("PG_POOL_MINCONN", "1"))
-PG_POOL_MAXCONN = int(os.getenv("PG_POOL_MAXCONN", "25"))
+PG_POOL_MAXCONN = int(os.getenv("PG_POOL_MAXCONN", "5"))
 
 # ── ASYNC DB HELPER (Non-blocking ThreadPoolExecutor) ──
 import asyncio
 import functools
 from concurrent.futures import ThreadPoolExecutor
 
-# Chegaralangan ThreadPoolExecutor: thread soni pool hajmidan (PG_POOL_MAXCONN) oshmaydi
-# Masalan, pool max 25 bo'lsa, 20 ta worker ishlatiladi.
-_DB_MAX_WORKERS = min(20, max(4, PG_POOL_MAXCONN - 2)) if PG_POOL_MAXCONN > 4 else PG_POOL_MAXCONN
-_db_executor = ThreadPoolExecutor(max_workers=_DB_MAX_WORKERS, thread_name_prefix="db_pool_worker")
+# Chegaralangan ThreadPoolExecutor: thread soni pool hajmidan oshmasligi shart (executor <= pool - 1)
+_DB_DEFAULT_WORKERS = min(4, max(1, PG_POOL_MAXCONN - 1))
+_DB_EXECUTOR_WORKERS = int(os.getenv("DB_EXECUTOR_WORKERS", str(_DB_DEFAULT_WORKERS)))
+_DB_EXECUTOR_WORKERS = min(_DB_EXECUTOR_WORKERS, max(1, PG_POOL_MAXCONN - 1))
+_db_executor = ThreadPoolExecutor(max_workers=_DB_EXECUTOR_WORKERS, thread_name_prefix="db_pool_worker")
 
 async def db(func, *args, **kwargs):
     """
@@ -79,6 +84,7 @@ _GLOBAL_TESTS_CACHE_TIME: float = 0.0
 _CACHE_TEST_BOUNDS: Dict[str, Any] = {}
 _CACHE_TEST_BOUNDS_TIME: float = 0.0
 _USER_SUBMISSIONS_MAP_CACHE: Dict[int, Any] = {}
+_USER_SUBMISSIONS_CACHE: Dict[int, Tuple[float, List[Dict[str, Any]]]] = {}
 _USER_SUBMITTED_IDS_CACHE: Dict[Any, Any] = {}
 _CACHE_USERS: Dict[int, Any] = {}
 _CACHE_SETTINGS: Dict[str, Any] = {}
@@ -113,10 +119,11 @@ def _ensure_tests_cache_loaded():
         preload_all_tests_cache()
 
 # Kesh siyosati (M3): DB — yagona haqiqat manbai. 
-# 45 soniyalik Read-Through TTL bir nechta instance larda kesh nomutanosibligining oldini oladi.
+# 30 soniyalik Read-Through TTL bir nechta instance larda kesh nomutanosibligining oldini oladi.
 # Local yozish amallari darhol invalidate qiladi.
-CACHE_TTL_TESTS = 45.0       # Read-through RAM kesh TTL: 45 soniya
-CACHE_TTL_USERS = 300.0     # 5 daqiqa
+CACHE_TTL_TESTS = 30.0       # Read-through RAM kesh TTL: 30 soniya (Mini App talabi)
+CACHE_TTL_USER_PROFILE = 5.0 # Foydalanuvchi profili va natijalari TTL: 5 soniya
+CACHE_TTL_USERS = 5.0       # 5 soniya
 CACHE_TTL_SETTINGS = 300.0  # 5 daqiqa
 CACHE_TTL_ADMINS = 300.0    # 5 daqiqa
 CACHE_TTL_ADMIN_DELETED = 300.0 # 5 daqiqa
@@ -172,6 +179,7 @@ def invalidate_test_cache(test_id: Optional[int] = None):
         _CACHE_TEST_BOUNDS.clear()
         _CACHE_TEST_BOUNDS_TIME = 0.0
         _USER_SUBMISSIONS_MAP_CACHE.clear()
+        _USER_SUBMISSIONS_CACHE.clear()
         _USER_SUBMITTED_IDS_CACHE.clear()
         if test_id is not None:
             tid = int(test_id)
@@ -187,9 +195,13 @@ def invalidate_test_cache(test_id: Optional[int] = None):
             _GLOBAL_ALL_TESTS_LIST = []
             _GLOBAL_ACTIVE_TESTS_LIST = []
     try:
-        preload_all_tests_cache()
-    except Exception as e:
-        print(f"Error reloading tests cache in invalidate_test_cache: {e}")
+        loop = asyncio.get_running_loop()
+        loop.create_task(db(preload_all_tests_cache))
+    except RuntimeError:
+        try:
+            preload_all_tests_cache()
+        except Exception as e:
+            print(f"Error reloading tests cache in invalidate_test_cache: {e}")
 
 def invalidate_user_cache(tg_id: Optional[int] = None):
     """Foydalanuvchi ma'lumotlari yangilanganda RAM keshni tozalash"""
@@ -197,6 +209,7 @@ def invalidate_user_cache(tg_id: Optional[int] = None):
         if tg_id is not None:
             _CACHE_USERS.pop(int(tg_id), None)
             _USER_SUBMISSIONS_MAP_CACHE.pop(int(tg_id), None)
+            _USER_SUBMISSIONS_CACHE.pop(int(tg_id), None)
             # Ushbu userning topshirganlik keshini tozalash
             to_del = [k for k in _USER_SUBMITTED_IDS_CACHE.keys() if k[0] == int(tg_id)]
             for k in to_del:
@@ -204,6 +217,7 @@ def invalidate_user_cache(tg_id: Optional[int] = None):
         else:
             _CACHE_USERS.clear()
             _USER_SUBMISSIONS_MAP_CACHE.clear()
+            _USER_SUBMISSIONS_CACHE.clear()
             _USER_SUBMITTED_IDS_CACHE.clear()
 
 def invalidate_settings_cache():
@@ -228,7 +242,7 @@ def _notify_schedule_changed_internal():
 
 def _get_pg_pool():
     """PostgreSQL connection pool — bir marta yaratiladi, qayta ishlatiladi.
-    minconn=1, maxconn=25: Neon serverless va PgBouncer uchun optimallashtirilgan.
+    minconn=1, maxconn=5: Supabase transaction pooler (port 6543) uchun optimallashtirilgan.
     """
     global _pg_pool
     if _pg_pool is None and USE_POSTGRES:
@@ -242,7 +256,8 @@ def _get_pg_pool():
                 keepalives=1,
                 keepalives_idle=60,
                 keepalives_interval=30,
-                keepalives_count=3
+                keepalives_count=3,
+                options="-c statement_timeout=8000"
             )
         except Exception as e:
             print(f"Connection pool xatolik: {e}")
@@ -330,7 +345,7 @@ def get_connection():
         pool = _get_pg_pool()
         if pool:
             # Yuqori yuklamada pool to'lib qolsa, thread ichida qisqa kutish bilan qayta urinish.
-            # Umumiy kutish vaqti 2.0 soniyadan oshmaydi va ulanish olinmasa xato qaytariladi.
+            # Umumiy kutish vaqti 2.0 soniyadan oshmaydi va ulanish olinmasa DatabasePoolBusyError ko'tariladi.
             start_wait = time.time()
             sleep_time = 0.04
             while True:
@@ -358,21 +373,10 @@ def get_connection():
                             time.sleep(sleep_time)
                             sleep_time = min(sleep_time * 1.5, 0.2)
                             continue
-                        raise TimeoutError(f"PostgreSQL connection pool band (kutish 2s dan oshdi): {pe}") from pe
+                        raise DatabasePoolBusyError(f"Server band: connection pool to'liq (2 soniya kutildi): {pe}") from pe
                     raise
-
-        # Fallback: Agar pool mavjud bo'lmasa to'g'ridan-to'g'ri ulanish
-        conn = psycopg2.connect(
-            DATABASE_URL,
-            cursor_factory=RealDictCursor,
-            connect_timeout=2,
-            keepalives=1,
-            keepalives_idle=30,
-            keepalives_interval=10,
-            keepalives_count=5
-        )
-        conn.autocommit = False
-        return conn
+        else:
+            raise DatabasePoolBusyError("Server band: PostgreSQL connection pool mavjud emas yoki ulanib bo'lmadi")
     else:
         conn = sqlite3.connect(DB_FILE, timeout=20.0, check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -405,6 +409,21 @@ def _commit_and_close(conn):
     """Commit qilib, ulanishni pool ga qaytarish (yoki yopish)."""
     try:
         conn.commit()
+    finally:
+        _close_conn(conn)
+
+
+def ping_db() -> bool:
+    """Supabase/PostgreSQL ulanishini tirik saqlash (Keep-Alive) uchun SELECT 1 tekshiruvi."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        row = cur.fetchone()
+        return bool(row)
+    except Exception as e:
+        print(f"ping_db xatolik: {e}")
+        return False
     finally:
         _close_conn(conn)
 
@@ -3400,6 +3419,14 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
 
 
 def get_user_submissions(user_tg_id: int) -> List[Dict[str, Any]]:
+    uid = int(user_tg_id)
+    now = time.time()
+    with _RAM_CACHE_LOCK:
+        if uid in _USER_SUBMISSIONS_CACHE:
+            ts, cached_list = _USER_SUBMISSIONS_CACHE[uid]
+            if now - ts < CACHE_TTL_5S:
+                return [dict(x) for x in cached_list]
+
     conn = get_connection()
     try:
         cur = conn.cursor()
@@ -3408,7 +3435,7 @@ def get_user_submissions(user_tg_id: int) -> List[Dict[str, Any]]:
         FROM submissions s
         JOIN tests t ON s.test_id = t.id
         WHERE s.user_tg_id = {_ph()} ORDER BY s.id DESC
-        """, (user_tg_id,))
+        """, (uid,))
         rows = cur.fetchall()
     finally:
         _close_conn(conn)
@@ -3436,6 +3463,10 @@ def get_user_submissions(user_tg_id: int) -> List[Dict[str, Any]]:
             d["total_count"] = None
             d["details_json"] = "{}"
         results.append(d)
+
+    with _RAM_CACHE_LOCK:
+        _USER_SUBMISSIONS_CACHE[uid] = (now, [dict(x) for x in results])
+
     return results
 
 

@@ -33,7 +33,7 @@ from core import (
 from services import (
     MAINT_START_TEXT, MAINT_END_TEXT,
     send_broadcast_to_users, delete_broadcast_batch_from_users,
-    process_pdf_watermark_async
+    process_pdf_watermark_async, HEAVY_TASKS_SEMAPHORE
 )
 from .common import (
     get_all_admin_ids, send_test_card_to_user_chat,
@@ -111,9 +111,19 @@ async def handle_submit_test_api(request):
             # Allaqachon topshirganlikni RAM keshdan tekshirish (Zero-DB)
             if await test_db.db(test_db.has_user_submitted, test_id, user_tg_id):
                 return web.json_response({
-                    "success": False,
-                    "message": "Siz ushbu testni allaqachon topshirgansiz! Qayta topshirish taqiqlanadi."
-                }, status=400)
+                    "success": True,
+                    "already_submitted": True,
+                    "message": "Siz ushbu testni allaqachon topshirgansiz! Natijangiz saqlangan.",
+                    "data": {
+                        "test_id": test_id,
+                        "fullname": data.get("fullname", "Foydalanuvchi"),
+                        "already_submitted": True,
+                        "is_published": False,
+                        "is_late": False,
+                        "score": None,
+                        "grade": "Topshirilgan"
+                    }
+                }, status=200)
 
         # 4. Rate Limiting (1-2 soniya)
         rate_key = f"submit_{user_tg_id or request.remote or 'unknown'}"
@@ -262,7 +272,10 @@ async def _process_submission_background(test_id: int, user_tg_id: int, user_ans
             datetime_str_sec=datetime_str_sec
         )
     except Exception as ex:
-        log.error(f"_process_submission_background xatolik [user={user_tg_id}, test={test_id}]: {ex}", exc_info=True)
+        if "allaqachon topshirgansiz" in str(ex):
+            log.info(f"User {user_tg_id} test {test_id} ni allaqachon topshirgan.")
+        else:
+            log.error(f"_process_submission_background xatolik [user={user_tg_id}, test={test_id}]: {ex}", exc_info=True)
     finally:
         _IN_FLIGHT_SUBMISSIONS.discard(sub_key)
 
@@ -364,8 +377,9 @@ async def handle_admin_test_pdf_report(request):
         if not test:
             return web.json_response({"success": False, "message": "Test topilmadi"}, status=404)
 
-        # PDF hisobotini asinxron generatsiya qilish
-        pdf_path = await test_db.db(test_db.generate_test_results_pdf, test_id)
+        # PDF hisobotini asinxron generatsiya qilish (bir vaqtda max 2 ta)
+        async with HEAVY_TASKS_SEMAPHORE:
+            pdf_path = await test_db.db(test_db.generate_test_results_pdf, test_id)
         if not pdf_path or not os.path.exists(pdf_path):
             return web.json_response({"success": False, "message": "PDF hisobotni shakllantirib bo'lmadi yoki testda ishtirokchilar mavjud emas"}, status=500)
 
@@ -835,7 +849,8 @@ async def handle_scan_keys_api(request):
             return web.json_response({"success": False, "message": "Rasm topilmadi yoki yuklanmadi"}, status=400)
 
         loop = asyncio.get_running_loop()
-        keys_dict = await loop.run_in_executor(None, _sync_extract_keys_gemini, image_bytes, mime_type)
+        async with HEAVY_TASKS_SEMAPHORE:
+            keys_dict = await loop.run_in_executor(None, _sync_extract_keys_gemini, image_bytes, mime_type)
 
         if not keys_dict:
             return web.json_response({
@@ -1060,12 +1075,35 @@ async def handle_app(request):
     return set_app_cache_headers(resp)
 
 
+_STATIC_MEMORY_CACHE: Dict[str, Tuple[bytes, str]] = {}
+
 async def handle_static_file(request):
     path_name = request.match_info.get('path', '')
     if '..' in path_name:
         return web.Response(status=403, text="Ruxsat berilmagan yo'l")
+
+    # Katta yoki doimiy statik fayllarni xotirada (RAM) bir marta saqlash (Zero-Disk)
+    if path_name in _STATIC_MEMORY_CACHE:
+        body_bytes, mime = _STATIC_MEMORY_CACHE[path_name]
+        resp = web.Response(body=body_bytes, content_type=mime)
+        resp.headers['Cache-Control'] = 'public, max-age=3600'
+        return resp
+
     fpath = await find_web_file(path_name)
     if os.path.exists(fpath) and os.path.isfile(fpath):
+        # Katta fayllar (logo_data.js, Arial.ttf, bm_logo.jpg/png) xotirada bir marta yuklanadi
+        if any(path_name.endswith(k) for k in ['logo_data.js', 'Arial.ttf', 'Arial-Bold.ttf', 'bm_logo.jpg', 'bm_logo.png', 'logo.png']):
+            try:
+                with open(fpath, 'rb') as f:
+                    content = f.read()
+                mime = 'application/javascript' if path_name.endswith('.js') else ('font/ttf' if path_name.endswith('.ttf') else 'image/jpeg')
+                _STATIC_MEMORY_CACHE[path_name] = (content, mime)
+                resp = web.Response(body=content, content_type=mime)
+                resp.headers['Cache-Control'] = 'public, max-age=86400'
+                return resp
+            except Exception:
+                pass
+
         resp = web.FileResponse(fpath)
         if any(path_name.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.svg', '.webp', '.ico']):
             resp.headers['Cache-Control'] = 'public, max-age=86400'
@@ -1160,12 +1198,13 @@ async def handle_admin_pdf_watermark(request):
         if not os.path.exists(logo_file):
             logo_file = "logo.png"
 
-        total_pages = await process_pdf_watermark_async(
-            input_pdf_path=input_path,
-            output_pdf_path=output_path,
-            logo_path=logo_file,
-            opacity=0.22
-        )
+        async with HEAVY_TASKS_SEMAPHORE:
+            total_pages = await process_pdf_watermark_async(
+                input_pdf_path=input_path,
+                output_pdf_path=output_path,
+                logo_path=logo_file,
+                opacity=0.22
+            )
 
         with open(output_path, 'rb') as f:
             out_bytes = f.read()
@@ -2783,13 +2822,98 @@ async def handle_app_check_membership(request):
         return web.json_response({"success": True, "is_member": True})
 
 
+_MINI_APP_RATE_LIMITS: Dict[str, List[float]] = {}
+_MINI_APP_RATE_LOCK = asyncio.Lock()
+
+@web.middleware
+async def database_pool_error_middleware(request, handler):
+    """
+    Supabase/PostgreSQL pool band bo'lganda (2 soniyada ulanish ololmaganda)
+    jimjit xato bo'lmasligi uchun darhol HTTP 503 + Retry-After: 2 qaytarish.
+    """
+    try:
+        return await handler(request)
+    except test_db.DatabasePoolBusyError as pbe:
+        log.warning(f"⚠️ 503 Pool band: {request.method} {request.path} - {pbe}")
+        return web.json_response({
+            "success": False,
+            "error": "Server band, bir necha soniyadan keyin urinib ko'ring",
+            "code": "SERVER_BUSY",
+            "retry_after": 2
+        }, status=503, headers={"Retry-After": "2"})
+    except TimeoutError as te:
+        if "pool" in str(te).lower():
+            return web.json_response({
+                "success": False,
+                "error": "Server band, bir necha soniyadan keyin urinib ko'ring",
+                "code": "SERVER_BUSY",
+                "retry_after": 2
+            }, status=503, headers={"Retry-After": "2"})
+        raise
+
+
+@web.middleware
+async def mini_app_rate_limiter_middleware(request, handler):
+    """
+    Mini App API da bir foydalanuvchiga soniyasiga 5 tadan ko'p so'rov bo'lsa HTTP 429 qaytarish.
+    """
+    path = request.path
+    if path.startswith("/api/") and path not in ("/api/app/status", "/healthz", "/ping"):
+        user_key = (
+            request.query.get("tg_id")
+            or request.query.get("user_tg_id")
+            or request.headers.get("X-Telegram-Init-Data", "")[:32]
+            or request.remote
+            or "anon"
+        )
+        now = time.monotonic()
+        async with _MINI_APP_RATE_LOCK:
+            timestamps = _MINI_APP_RATE_LIMITS.setdefault(user_key, [])
+            cutoff = now - 1.0
+            timestamps = [t for t in timestamps if t > cutoff]
+            if len(timestamps) >= 5:
+                _MINI_APP_RATE_LIMITS[user_key] = timestamps
+                return web.json_response({
+                    "success": False,
+                    "error": "Juda ko'p so'rov yuborildi. Iltimos, 1 soniya kuting.",
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "retry_after": 1
+                }, status=429, headers={"Retry-After": "1"})
+            timestamps.append(now)
+            _MINI_APP_RATE_LIMITS[user_key] = timestamps
+
+            if len(_MINI_APP_RATE_LIMITS) > 5000:
+                _MINI_APP_RATE_LIMITS.clear()
+
+    return await handler(request)
+
+
+@web.middleware
+async def slow_request_logger_middleware(request, handler):
+    """
+    Handler nomi bilan >1.5 s davom etgan so'rovlar uchun ogohlantiruvchi log yozish.
+    """
+    t0 = time.monotonic()
+    try:
+        return await handler(request)
+    finally:
+        elapsed = time.monotonic() - t0
+        if elapsed > 1.5:
+            handler_name = getattr(handler, "__name__", str(handler))
+            log.warning(f"🐢 Sekin so'rov (>1.5s): {request.method} {request.path} [{handler_name}] {elapsed:.2f}s")
+
+
 async def create_web_app():
     try:
         await test_db.db(test_db.ensure_db_initialized)
     except Exception as ex:
         log.warning(f"create_web_app ensure_db_initialized xatolik: {ex}")
 
-    app = web.Application()
+    app = web.Application(middlewares=[
+        database_pool_error_middleware,
+        mini_app_rate_limiter_middleware,
+        slow_request_logger_middleware
+    ])
     app.router.add_post('/api/admin/clean-blocked-users', handle_clean_blocked_users)
     app.router.add_get('/api/admin/clean-blocked-users', handle_clean_blocked_users)
     app.router.add_post('/api/admin/notify-inactive-users', handle_notify_inactive_users)

@@ -485,23 +485,41 @@ const TestApp = {
     if (!this.testId || !this.userTgId) return;
     clearTimeout(this._autosaveSyncTimer);
     this._autosaveSyncTimer = setTimeout(() => {
-      try {
-        const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
+      const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
+      const payload = JSON.stringify({
+        test_id: this.testId,
+        user_tg_id: this.userTgId,
+        answers: this.answers,
+        init_data: initData
+      });
+
+      const attemptSave = (retriesLeft = 3, delay = 500) => {
         fetch('/api/app/autosave-answer', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-Telegram-Init-Data': initData
           },
-          body: JSON.stringify({
-            test_id: this.testId,
-            user_tg_id: this.userTgId,
-            answers: this.answers,
-            init_data: initData
-          })
-        }).catch(err => console.warn('Backend draft autosave warning:', err));
+          body: payload
+        })
+        .then(res => {
+          if (!res.ok && retriesLeft > 0) {
+            setTimeout(() => attemptSave(retriesLeft - 1, delay * 1.5), delay);
+          }
+        })
+        .catch(err => {
+          if (retriesLeft > 0) {
+            setTimeout(() => attemptSave(retriesLeft - 1, delay * 1.5), delay);
+          } else {
+            console.warn('Backend draft autosave warning:', err);
+          }
+        });
+      };
+
+      try {
+        attemptSave(3, 500);
       } catch (e) {}
-    }, 600);
+    }, 800);
   },
 
   fetchDraftFromBackend() {

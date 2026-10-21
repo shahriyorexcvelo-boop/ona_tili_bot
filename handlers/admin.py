@@ -39,7 +39,7 @@ from services import (
     MAINT_START_TEXT, MAINT_END_TEXT,
     send_broadcast_to_users, delete_broadcast_batch_from_users,
     delete_recent_bot_messages_from_all_users,
-    process_pdf_watermark_async
+    process_pdf_watermark_async, HEAVY_TASKS_SEMAPHORE
 )
 from .common import (
     get_all_admin_ids, check_access, clean_blocked_users_from_db,
@@ -322,7 +322,7 @@ async def admin_create_test_text_handler(message: Message):
 async def admin_manage_tests_text_handler(message: Message):
     if not (await test_db.db(test_db.is_admin, message.from_user.id, ADMIN_ID)):
         return
-    tests = test_db.get_all_tests()
+    tests = await test_db.db(test_db.get_all_tests)
     if not tests:
         await message.answer("ℹ️ Hozircha bazada birorta ham test yo'q.")
         return
@@ -762,7 +762,7 @@ async def admin_manage_tests(call: CallbackQuery):
     if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
         return
 
-    tests = test_db.get_all_tests()
+    tests = await test_db.db(test_db.get_all_tests)
     if not tests:
         text = "ℹ️ Hozircha bazada birorta ham test yo'q."
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -1198,12 +1198,13 @@ async def admin_pdf_watermark_handler(message: Message, state: FSMContext):
         if not os.path.exists(logo_file):
             logo_file = "logo.png"
 
-        total_pages = await process_pdf_watermark_async(
-            input_pdf_path=input_path,
-            output_pdf_path=output_path,
-            logo_path=logo_file,
-            opacity=0.22
-        )
+        async with HEAVY_TASKS_SEMAPHORE:
+            total_pages = await process_pdf_watermark_async(
+                input_pdf_path=input_path,
+                output_pdf_path=output_path,
+                logo_path=logo_file,
+                opacity=0.22
+            )
 
         output_filename = f"{base_name}_watermarked.pdf"
         doc_to_send = FSInputFile(output_path, filename=output_filename)
@@ -2935,7 +2936,8 @@ async def admin_test_res_pdf(call: CallbackQuery):
     await call.answer("⏳ PDF hisobot yaratilmoqda...")
     status_msg = await call.message.answer("⏳ <i>PDF reyting jadvali shakllantirilmoqda, iltimos kuting...</i>")
 
-    pdf_path = await test_db.db(test_db.generate_test_results_pdf, test_id)
+    async with HEAVY_TASKS_SEMAPHORE:
+        pdf_path = await test_db.db(test_db.generate_test_results_pdf, test_id)
     if pdf_path and os.path.exists(pdf_path):
         try:
             caption = (
