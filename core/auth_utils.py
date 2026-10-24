@@ -83,7 +83,8 @@ def verify_telegram_webapp_data(init_data: str, bot_token: str) -> Tuple[bool, O
             return False, None
         try:
             auth_date = float(auth_date_str)
-            if now - auth_date > 86400.0:  # 24 soatdan eski
+            # Sessiya muddati: 7 kungacha (604800 soniya) ruxsat beriladi
+            if (now - auth_date) > 604800.0:
                 _INITDATA_CACHE[init_data] = (now, False, None)
                 return False, None
         except (ValueError, TypeError):

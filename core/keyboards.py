@@ -18,12 +18,17 @@ def main_menu_kb(user_tg_id: int) -> ReplyKeyboardMarkup:
     is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
     base_url = get_webapp_url()
     
-    app_url = f"{base_url}/app.html?tg_id={user_tg_id}&v=20261020_v1"
-    admin_webapp_url = f"{base_url}/admin.html?tg_id={user_tg_id}&v=20261020_v1"
+    test_webapp_url = f"{base_url}/index.html?tg_id={user_tg_id}&v=20261022_v9_q37"
+    results_webapp_url = f"{base_url}/results.html?tg_id={user_tg_id}&v=20261022_v9_q37"
+    admin_webapp_url = f"{base_url}/admin.html?tg_id={user_tg_id}&v=20261022_v9_q37"
 
-    # Agar HTTPS bo'lsa to'g'ridan-to'g'ri Telegram WebApp ochadi
-    if app_url.startswith("https://"):
-        results_btn = KeyboardButton(text="📊 Mening natijalarim", web_app=WebAppInfo(url=app_url))
+    if test_webapp_url.startswith("https://"):
+        test_btn = KeyboardButton(text="📝 Test yechish", web_app=WebAppInfo(url=test_webapp_url))
+    else:
+        test_btn = KeyboardButton(text="📝 Test yechish")
+
+    if results_webapp_url.startswith("https://"):
+        results_btn = KeyboardButton(text="📊 Mening natijalarim", web_app=WebAppInfo(url=results_webapp_url))
     else:
         results_btn = KeyboardButton(text="📊 Mening natijalarim")
 
@@ -33,42 +38,39 @@ def main_menu_kb(user_tg_id: int) -> ReplyKeyboardMarkup:
         create_test_btn = KeyboardButton(text="➕ Yangi test yaratish")
 
     if is_adm:
-        # Adminlar uchun faqat admin funksiyalari:
-        # 1-qator: Test kodini kiritish + Yangi test yaratish (Mini App)
-        # 2-qator: Test natijalari va reyting + Testlarni boshqarish
-        # 3-qator: Admin Panel
+        # Adminlar uchun menyu
         buttons = [
-            [KeyboardButton(text="🔢 Test kodini kiritish"), create_test_btn],
+            [test_btn, create_test_btn],
             [KeyboardButton(text="📊 Test natijalari va reyting"), KeyboardButton(text="📋 Testlarni boshqarish")],
             [KeyboardButton(text="⚙️ Admin Panel")]
         ]
     else:
-        # Oddiy foydalanuvchilar uchun menyu tartibi:
-        # 1-qator: Test kodini kiritish + Mening natijalarim (Asosiy App)
-        # 2-qator: Profilim + Yordam (adminga murojaat)
+        # Oddiy foydalanuvchilar uchun ixcham menyu:
+        # 1-qator: Test yechish (Mini App) + Mening natijalarim (Ixcham Mini App)
+        # 2-qator: Yordam
         buttons = [
-            [KeyboardButton(text="🔢 Test kodini kiritish"), results_btn],
-            [KeyboardButton(text="👤 Profilim"), KeyboardButton(text="ℹ️ Yordam")]
+            [test_btn, results_btn],
+            [KeyboardButton(text="ℹ️ Yordam")]
         ]
 
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 def profile_webapp_kb(user_tg_id: int) -> InlineKeyboardMarkup:
-    """Shaxsiy profil mini ilovasini ochish tugmasi."""
+    """Natijalar mini ilovasini ochish tugmasi."""
     base_url = get_webapp_url()
-    app_url = f"{base_url}/app.html?tg_id={user_tg_id}&v=20261020_v1"
+    results_url = f"{base_url}/results.html?tg_id={user_tg_id}&v=20261022_v9_q37"
     buttons = [
-        [make_webapp_button("📱 Shaxsiy profilni ochish", app_url, fallback_cb="open_app_info")]
+        [make_webapp_button("📊 Mening natijalarimni ochish", results_url, fallback_cb="open_app_info")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def results_webapp_kb(user_tg_id: int = 0) -> InlineKeyboardMarkup:
     """Natijalarni ko'rish mini ilovasi tugmasi."""
     base_url = get_webapp_url()
-    qs = f"?tg_id={user_tg_id}&v=20261020_v1" if user_tg_id else "?v=20261020_v1"
-    app_url = f"{base_url}/app.html{qs}"
+    qs = f"?tg_id={user_tg_id}&v=20261022_v9_q37" if user_tg_id else "?v=20261022_v9_q37"
+    results_url = f"{base_url}/results.html{qs}"
     buttons = [
-        [make_webapp_button("📊 Asosiy ilovani ochish", app_url, fallback_cb="open_app_info")]
+        [make_webapp_button("📊 Mening natijalarim", results_url, fallback_cb="open_app_info")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -96,11 +98,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
 
     base_url = get_webapp_url()
     buttons = [
-        [InlineKeyboardButton(text="📄 PDF Watermark qo'yish / Tayyorlash", callback_data="admin_pdf_watermark_info")],
-        [InlineKeyboardButton(text="💬 Foydalanuvchiga yozish / Chat", callback_data="admin_contact_user_prompt")],
         [InlineKeyboardButton(text="📢 O'quvchilarga xabar yuborish", callback_data="admin_broadcast_menu")],
-        [InlineKeyboardButton(text="⚠️ Faoliyatsizlarga ogohlantirish", callback_data="admin_warn_inactive_menu")],
-        [InlineKeyboardButton(text="🧹 Botni bloklaganlarni tozalash", callback_data="admin_clean_blocked_prompt")],
         [InlineKeyboardButton(text=maint_btn_text, callback_data="admin_toggle_maint_prompt")],
         [InlineKeyboardButton(text=reg_btn_text, callback_data="admin_toggle_registration")],
         [InlineKeyboardButton(text="👑 Adminlar boshqaruvi", callback_data="admin_manage_admins")],

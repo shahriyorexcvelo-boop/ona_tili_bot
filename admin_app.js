@@ -5,6 +5,53 @@ const AdminApp = {
   answers: {}, // {"1": {"ans": ""}, ...} — ball Rasch tomonidan avtomatik hisoblanadi
   isEditMode: false,
   editTestId: null,
+  q37Mode: 'xato_togri', // 'xato_togri' (Xato -> To'g'ri) yoki 'punct' (1 katakchali tinish belgisi)
+  _activeQ37Field: 'xato',
+
+  parseQ37Raw(val) {
+    if (!val) return null;
+    if (typeof val === 'object') {
+      if (val.mode === 'xato_togri' && (val.xato || val.togri)) {
+        return { mode: 'xato_togri', xato: String(val.xato || '').trim(), togri: String(val.togri || '').trim() };
+      }
+      if (val.mode === 'punct') {
+        return { mode: 'punct', ans: String(val.ans || '').trim() };
+      }
+      val = val.ans || val.answer || '';
+    }
+    const s = String(val || '').trim();
+    if (!s) return null;
+    // 1. "(: xato) (— to'g'ri)" format
+    const mParen = s.match(/\(\s*([^\(\)]+?)\s+xato\s*\)\s*\(\s*([^\(\)]+?)\s+to['\u2018\u2019\u02BB\u02BC`ʼʻ]?g['\u2018\u2019\u02BB\u02BC`ʼʻ]?ri\s*\)/i);
+    if (mParen) {
+      return { mode: 'xato_togri', xato: mParen[1].trim(), togri: mParen[2].trim() };
+    }
+    // 2. ": -> —" yoki ": ➔ —" format
+    const parts = s.split(/\s*(?:->|➔|→|=>)\s*/);
+    if (parts.length === 2 && (parts[0].trim() || parts[1].trim())) {
+      const rClean = parts[1].replace(/\s*\([^)]*(?:xato|to['\u2018\u2019\u02BB\u02BC`ʼʻ]?g['\u2018\u2019\u02BB\u02BC`ʼʻ]?ri)[^)]*\)/gi, '').trim();
+      return { mode: 'xato_togri', xato: parts[0].trim(), togri: rClean };
+    }
+    return { mode: 'punct', ans: s };
+  },
+
+  toggleTimeLimit() {
+    const chk = document.getElementById('adm-test-has-time');
+    if (chk) {
+      chk.checked = !chk.checked;
+      this.onTimeToggleChange(chk.checked);
+    }
+  },
+
+  onTimeToggleChange(hasTime) {
+    const box = document.getElementById('adm-schedule-box');
+    const desc = document.getElementById('time-limit-status-desc');
+    if (box) box.style.display = hasTime ? 'block' : 'none';
+    if (desc) {
+      desc.textContent = hasTime ? "Yoqilgan (Boshlanish va tugash vaqti bor)" : "O'chirilgan (Test vaqti cheklovsiz)";
+      desc.style.color = hasTime ? "#2563EB" : "var(--text-muted)";
+    }
+  },
 
   init() {
     const tg = window.Telegram && window.Telegram.WebApp;
@@ -136,8 +183,12 @@ const AdminApp = {
           codeInput.style.opacity = '0.75';
         }
 
-        const timeInput = document.getElementById('adm-test-time');
-        if (timeInput && t.time_limit_min !== undefined) timeInput.value = t.time_limit_min;
+        const hasSchedule = Boolean(t.scheduled_date || t.scheduled_start);
+        const timeToggle = document.getElementById('adm-test-has-time');
+        if (timeToggle) {
+          timeToggle.checked = hasSchedule;
+          AdminApp.onTimeToggleChange(hasSchedule);
+        }
 
         const schedDate = document.getElementById('adm-test-sched-date');
         if (schedDate && t.scheduled_date) schedDate.value = t.scheduled_date;
@@ -147,9 +198,6 @@ const AdminApp = {
 
         const schedEnd = document.getElementById('adm-test-sched-end');
         if (schedEnd && t.scheduled_end) schedEnd.value = t.scheduled_end;
-
-        const keyCode = document.getElementById('adm-test-key-code');
-        if (keyCode && t.key_access_code) keyCode.value = t.key_access_code;
 
         const ytUrl = document.getElementById('adm-test-youtube-url');
         if (ytUrl && t.youtube_url) ytUrl.value = t.youtube_url;
@@ -173,9 +221,26 @@ const AdminApp = {
           for (let q = 36; q <= 39; q++) {
             const k = String(q);
             const val = t.answers[k];
-            const ansVal = (typeof val === 'object' && val !== null) ? (val.ans || '') : String(val || '');
-            if (this.answers[k]) {
-              this.answers[k].ans = ansVal;
+            if (q === 37) {
+              const p37 = this.parseQ37Raw(val);
+              if (p37 && p37.mode === 'xato_togri') {
+                this.q37Mode = 'xato_togri';
+                this.answers['37'] = {
+                  ans: (p37.xato || p37.togri) ? `${p37.xato} -> ${p37.togri}` : '',
+                  mode: 'xato_togri',
+                  xato: p37.xato || '',
+                  togri: p37.togri || ''
+                };
+              } else {
+                const ansVal = (typeof val === 'object' && val !== null) ? (val.ans || '') : String(val || '');
+                this.q37Mode = (typeof val === 'object' && val && val.mode === 'punct') ? 'punct' : (ansVal ? 'punct' : 'xato_togri');
+                this.answers['37'] = { ans: ansVal, mode: this.q37Mode, xato: '', togri: '' };
+              }
+            } else {
+              const ansVal = (typeof val === 'object' && val !== null) ? (val.ans || '') : String(val || '');
+              if (this.answers[k]) {
+                this.answers[k].ans = ansVal;
+              }
             }
           }
           for (let q = 40; q <= 44; q++) {
@@ -343,9 +408,13 @@ const AdminApp = {
     for (let q = 33; q <= 35; q++) {
       this.answers[String(q)] = { ans: '' };
     }
-    // 36-39 (1 ta variantli yopiq savollar)
+    // 36-39 (1 ta variantli yopiq savollar, 37-savol esa Xato -> To'g'ri yoki Tinish belgisi)
     for (let q = 36; q <= 39; q++) {
-      this.answers[String(q)] = { ans: '' };
+      if (q === 37) {
+        this.answers['37'] = { ans: '', mode: this.q37Mode || 'xato_togri', xato: '', togri: '' };
+      } else {
+        this.answers[String(q)] = { ans: '' };
+      }
     }
     // 40-44 (2 qismli yopiq savollar: a va b)
     for (let q = 40; q <= 44; q++) {
@@ -389,12 +458,65 @@ const AdminApp = {
       part2.style.display = 'none';
     }
 
-    // 3. 36-39 (1 ta variantli yopiq savollar)
+    // 3. 36-39 (1 ta variantli yopiq savollar; 37-savol: Xato -> To'g'ri va Tinish belgilari bilan)
     if (part3) {
       let html = '';
+      const punctSyms = [':', '—', ',', ';', '.', '?', '!', '...', '«»', '()'];
       for (let q = 36; q <= 39; q++) {
         const item = this.answers[String(q)] || { ans: '' };
         const val = (item.ans || '').replace(/"/g, '&quot;');
+        if (q === 37) {
+          const mode37 = this.q37Mode || item.mode || 'xato_togri';
+          const xatoVal = (item.xato || '').replace(/"/g, '&quot;');
+          const togriVal = (item.togri || '').replace(/"/g, '&quot;');
+          const isPairFilled = Boolean((item.xato || '').trim() && (item.togri || '').trim());
+          html += `
+            <div class="open-admin-box" style="margin-bottom: 12px; border: 1.5px solid rgba(37, 99, 235, 0.25); background: linear-gradient(135deg, rgba(37, 99, 235, 0.03), rgba(16, 185, 129, 0.03));">
+              <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">
+                <span style="font-size: 13px; font-weight: 800; color: var(--text-main);">37-savol (Tinish belgisi / Xato ➔ To'g'ri)</span>
+                <div style="display: inline-flex; background: rgba(148, 163, 184, 0.14); border-radius: 8px; padding: 2px; gap: 2px;">
+                  <button type="button" onclick="AdminApp.setQ37Mode('xato_togri')" style="border: none; border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: 800; cursor: pointer; background: ${mode37 === 'xato_togri' ? '#2563EB' : 'transparent'}; color: ${mode37 === 'xato_togri' ? '#fff' : 'var(--text-muted)'}; transition: all 0.15s;">
+                    ❌ Xato ➔ ✅ To'g'ri
+                  </button>
+                  <button type="button" onclick="AdminApp.setQ37Mode('punct')" style="border: none; border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: 800; cursor: pointer; background: ${mode37 === 'punct' ? '#2563EB' : 'transparent'}; color: ${mode37 === 'punct' ? '#fff' : 'var(--text-muted)'}; transition: all 0.15s;">
+                    ✍️ 1 katakli
+                  </button>
+                </div>
+              </div>
+
+              ${mode37 === 'xato_togri' ? `
+                <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
+                  <div style="flex: 1; min-width: 0;">
+                    <div style="font-size: 11px; font-weight: 800; color: #EF4444; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+                      <span>❌ Xato</span>
+                    </div>
+                    <div class="savol-input-box q37-pair-box-xato" id="box-37-xato">
+                      <input type="text" class="savol-input open-native-input q37-pair-input-xato" id="input-37-xato" placeholder="Xato (masalan, :)" value="${xatoVal}" onfocus="AdminApp._activeQ37Field='xato'" oninput="AdminApp.handleQ37PairInput()" autocomplete="off" autocapitalize="none">
+                    </div>
+                  </div>
+
+                  <div style="padding-top: 18px; color: #2563EB; font-weight: 900; font-size: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                  </div>
+
+                  <div style="flex: 1; min-width: 0;">
+                    <div style="font-size: 11px; font-weight: 800; color: #10B981; margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+                      <span>✅ To'g'ri</span>
+                    </div>
+                    <div class="savol-input-box q37-pair-box-togri" id="box-37-togri">
+                      <input type="text" class="savol-input open-native-input q37-pair-input-togri" id="input-37-togri" placeholder="To'g'ri (masalan, —)" value="${togriVal}" onfocus="AdminApp._activeQ37Field='togri'" oninput="AdminApp.handleQ37PairInput()" autocomplete="off" autocapitalize="none">
+                    </div>
+                  </div>
+                </div>
+              ` : `
+                <div class="savol-input-box q37-glow-box" id="box-37">
+                  <input type="text" class="savol-input open-native-input q37-glow-input" id="input-37" placeholder="Tinish belgisi yoki javobni kiriting..." value="${val}" onfocus="AdminApp._activeQ37Field='single'" oninput="AdminApp.handleOpenInput('37', this.value)" autocomplete="off" autocapitalize="none">
+                </div>
+              `}
+            </div>
+          `;
+          continue;
+        }
         html += `
           <div class="open-admin-box" style="margin-bottom: 10px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
@@ -443,11 +565,85 @@ const AdminApp = {
     }
   },
 
+  setQ37Mode(mode) {
+    this.q37Mode = (mode === 'punct') ? 'punct' : 'xato_togri';
+    if (!this.answers['37']) {
+      this.answers['37'] = { ans: '', mode: this.q37Mode, xato: '', togri: '' };
+    } else {
+      this.answers['37'].mode = this.q37Mode;
+      if (this.q37Mode === 'xato_togri') {
+        const xVal = (this.answers['37'].xato || '').trim();
+        const tVal = (this.answers['37'].togri || '').trim();
+        this.answers['37'].ans = (xVal && tVal) ? `${xVal} -> ${tVal}` : '';
+      }
+    }
+    this.renderForm();
+    this.updateUnfilledStats();
+  },
+
+  handleQ37PairInput() {
+    const xInput = document.getElementById('input-37-xato');
+    const tInput = document.getElementById('input-37-togri');
+    const xVal = xInput ? xInput.value.trim() : '';
+    const tVal = tInput ? tInput.value.trim() : '';
+    this.q37Mode = 'xato_togri';
+    this.answers['37'] = {
+      ans: (xVal && tVal) ? `${xVal} -> ${tVal}` : '',
+      mode: 'xato_togri',
+      xato: xVal,
+      togri: tVal
+    };
+    const xBox = document.getElementById('box-37-xato');
+    const tBox = document.getElementById('box-37-togri');
+    if (xBox) {
+      xBox.classList.toggle('filled', xVal.length > 0);
+      xBox.style.borderColor = xVal.length > 0 ? '#EF4444' : '';
+    }
+    if (tBox) {
+      tBox.classList.toggle('filled', tVal.length > 0);
+      tBox.style.borderColor = tVal.length > 0 ? '#10B981' : '';
+    }
+    this.updateUnfilledStats();
+  },
+
+  insertQ37Punct(sym) {
+    const mode = this.q37Mode || 'xato_togri';
+    if (mode === 'xato_togri') {
+      const xInput = document.getElementById('input-37-xato');
+      const tInput = document.getElementById('input-37-togri');
+      let target = (this._activeQ37Field === 'togri') ? tInput : xInput;
+      if (!target) target = xInput;
+      if (target === xInput && xInput.value.trim() && (!tInput.value.trim()) && this._activeQ37Field !== 'xato') {
+        target = tInput;
+      }
+      if (target) {
+        target.value = (target.value ? target.value + ' ' : '') + sym;
+        this.handleQ37PairInput();
+        if (target === xInput && tInput && !tInput.value.trim()) {
+          this._activeQ37Field = 'togri';
+          tInput.focus();
+        } else {
+          target.focus();
+        }
+      }
+    } else {
+      const inp = document.getElementById('input-37');
+      if (inp) {
+        inp.value = (inp.value ? inp.value + ' ' : '') + sym;
+        this.handleOpenInput('37', inp.value);
+        inp.focus();
+      }
+    }
+  },
+
   handleOpenInput(key, val) {
     if (!this.answers[key]) {
       this.answers[key] = { ans: '' };
     }
     this.answers[key].ans = val;
+    if (key === '37') {
+      this.answers['37'].mode = 'punct';
+    }
     const box = document.getElementById(`box-${key}`);
     if (box) {
       box.classList.toggle('filled', (val || '').trim().length > 0);
@@ -515,8 +711,16 @@ const AdminApp = {
     let sec3Unfilled = 0;
     for (let q = 36; q <= 39; q++) {
       const item = this.answers[String(q)];
-      if (!item || !item.ans || !String(item.ans).trim()) {
-        sec3Unfilled++;
+      if (q === 37 && (this.q37Mode === 'xato_togri' || (item && item.mode === 'xato_togri'))) {
+        const xOk = item && item.xato && String(item.xato).trim().length > 0;
+        const tOk = item && item.togri && String(item.togri).trim().length > 0;
+        if (!xOk || !tOk) {
+          sec3Unfilled++;
+        }
+      } else {
+        if (!item || !item.ans || !String(item.ans).trim()) {
+          sec3Unfilled++;
+        }
       }
     }
 
@@ -634,7 +838,6 @@ const AdminApp = {
     const title = (document.getElementById('adm-test-title')?.value || '').trim() || 'Ona tili Milliy Sertifikat Testi';
     const subject = (document.getElementById('adm-test-subject')?.value || '').trim() || 'Ona tili';
     let code = (document.getElementById('adm-test-code')?.value || '').trim().toUpperCase();
-    const timeLimit = parseInt(document.getElementById('adm-test-time')?.value) || 0;
 
     if (!code) {
       try {
@@ -648,12 +851,26 @@ const AdminApp = {
     // 36-39 va 40-45 savollarni to'g'ridan-to'g'ri DOM inputlaridan ham tekshirib olish (100% kafolat)
     for (let q = 36; q <= 39; q++) {
       const key = String(q);
+      if (q === 37 && this.q37Mode === 'xato_togri') {
+        const xInput = document.getElementById('input-37-xato');
+        const tInput = document.getElementById('input-37-togri');
+        const xVal = xInput && xInput.value !== undefined ? xInput.value.trim() : ((this.answers['37'] && this.answers['37'].xato) || '');
+        const tVal = tInput && tInput.value !== undefined ? tInput.value.trim() : ((this.answers['37'] && this.answers['37'].togri) || '');
+        this.answers['37'] = {
+          ans: (xVal && tVal) ? `${xVal} -> ${tVal}` : '',
+          mode: 'xato_togri',
+          xato: xVal,
+          togri: tVal
+        };
+        continue;
+      }
       const input = document.getElementById(`input-${key}`);
       if (!this.answers[key]) {
         this.answers[key] = { ans: '' };
       }
       if (input && input.value !== undefined) {
         this.answers[key].ans = input.value.trim();
+        if (q === 37) this.answers['37'].mode = 'punct';
       }
     }
     for (let q = 40; q <= 44; q++) {
@@ -685,12 +902,16 @@ const AdminApp = {
       return;
     }
 
-    const keyCodeInput = document.getElementById('adm-test-key-code');
-    const keyCode = keyCodeInput ? keyCodeInput.value.trim() : '';
-
-    const schedDate = (document.getElementById('adm-test-sched-date')?.value || '').trim();
-    const schedStart = (document.getElementById('adm-test-sched-start')?.value || '').trim();
-    const schedEnd = (document.getElementById('adm-test-sched-end')?.value || '').trim();
+    const hasTime = document.getElementById('adm-test-has-time')?.checked || false;
+    let schedDate = '';
+    let schedStart = '';
+    let schedEnd = '';
+    if (hasTime) {
+      schedDate = (document.getElementById('adm-test-sched-date')?.value || '').trim();
+      schedStart = (document.getElementById('adm-test-sched-start')?.value || '').trim();
+      schedEnd = (document.getElementById('adm-test-sched-end')?.value || '').trim();
+    }
+    const keyCode = '';
     const youtubeUrl = (document.getElementById('adm-test-youtube-url')?.value || '').trim();
 
     const tgUser = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) || null;
@@ -701,8 +922,8 @@ const AdminApp = {
       test_code: code,
       title: title,
       subject: subject,
-      time_limit_min: timeLimit,
-      key_access_code: keyCode,
+      time_limit_min: 0,
+      key_access_code: '',
       scheduled_date: schedDate,
       scheduled_start: schedStart,
       scheduled_end: schedEnd,
@@ -728,9 +949,10 @@ const AdminApp = {
         test_code: code,
         title: title,
         subject: subject,
-        time_limit_min: timeLimit,
-        key_access_code: keyCode,
+        time_limit_min: 0,
+        key_access_code: '',
         scheduled_date: schedDate,
+        schedStart: schedStart,
         scheduled_start: schedStart,
         scheduled_end: schedEnd,
         youtube_url: youtubeUrl,
@@ -864,7 +1086,34 @@ const AdminApp = {
             let cleanVal = String(v).trim();
             // Apostroflarni me'yorga keltirish
             cleanVal = cleanVal.replace(/[\u2018\u2019\u02BB\u02BC\u00B4`ʼʻ\‘\’\']/g, "'");
-            this.answers[normKey].ans = cleanVal;
+            if (normKey === '37') {
+              const p37 = this.parseQ37Raw(cleanVal);
+              if (p37 && p37.mode === 'xato_togri') {
+                this.q37Mode = 'xato_togri';
+                this.answers['37'] = {
+                  ans: (p37.xato && p37.togri) ? `${p37.xato} -> ${p37.togri}` : cleanVal,
+                  mode: 'xato_togri',
+                  xato: p37.xato || '',
+                  togri: p37.togri || ''
+                };
+              } else {
+                // Agar skanerda ": —" kabi 2 ta belgi bo'shliq bilan kelsa va Xato->To'g'ri rejimda bo'lsa
+                const tokens = cleanVal.split(/\s+/).filter(Boolean);
+                if (this.q37Mode === 'xato_togri' && tokens.length === 2) {
+                  this.answers['37'] = {
+                    ans: `${tokens[0]} -> ${tokens[1]}`,
+                    mode: 'xato_togri',
+                    xato: tokens[0],
+                    togri: tokens[1]
+                  };
+                } else {
+                  this.q37Mode = 'punct';
+                  this.answers['37'] = { ans: cleanVal, mode: 'punct', xato: '', togri: '' };
+                }
+              }
+            } else {
+              this.answers[normKey].ans = cleanVal;
+            }
             recognizedCount++;
           }
         }
@@ -897,10 +1146,7 @@ const AdminApp = {
           alert(msg);
         }
       } else if (res.need_api_key) {
-        const userKey = prompt("Google Gemini API kaliti kiritilmagan yoki noto'g'ri.\nIltimos, aistudio.google.com dan olingan Gemini API kalitini kiriting:");
-        if (userKey && userKey.trim()) {
-          await this.saveGeminiKey(userKey.trim());
-        }
+        this.openGeminiModal();
       } else {
         alert(res.message || 'Rasmdan kalitlarni ajratib bo\'lmadi. Iltimos, aniqroq rasm yuklang.');
       }
@@ -928,11 +1174,33 @@ const AdminApp = {
     }
   },
 
-  async configureGeminiKey() {
-    const userKey = prompt("Google Gemini API kalitini kiriting (yoki yangilang):");
-    if (userKey && userKey.trim()) {
-      await this.saveGeminiKey(userKey.trim());
+  openGeminiModal() {
+    const m = document.getElementById('gemini-key-modal');
+    if (m) {
+      m.style.display = 'flex';
+      const inp = document.getElementById('adm-gemini-key-input');
+      if (inp) setTimeout(() => inp.focus(), 150);
     }
+  },
+
+  closeGeminiModal() {
+    const m = document.getElementById('gemini-key-modal');
+    if (m) m.style.display = 'none';
+  },
+
+  async saveGeminiKeyFromModal() {
+    const inp = document.getElementById('adm-gemini-key-input');
+    const key = (inp ? inp.value : '').trim();
+    if (!key) {
+      alert("Iltimos, API kalitni kiriting!");
+      return;
+    }
+    await this.saveGeminiKey(key);
+    this.closeGeminiModal();
+  },
+
+  configureGeminiKey() {
+    this.openGeminiModal();
   },
 
   async saveGeminiKey(key) {
@@ -950,64 +1218,6 @@ const AdminApp = {
       }
     } catch (e) {
       alert("Serverga ulanishda xatolik: " + e.message);
-    }
-  },
-
-  triggerPdfWatermark() {
-    const input = document.getElementById('adm-pdf-watermark-input');
-    if (input) input.click();
-  },
-
-  async handlePdfWatermarkSelected(input) {
-    if (!input.files || !input.files[0]) return;
-    const file = input.files[0];
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      alert("Iltimos, faqat PDF formatidagi faylni tanlang!");
-      input.value = '';
-      return;
-    }
-
-    const btn = document.getElementById('btn-watermark-pdf');
-    const btnText = document.getElementById('btn-wm-text');
-    const originalText = btnText ? btnText.textContent : 'PDF Tanlash';
-
-    try {
-      if (btn) btn.disabled = true;
-      if (btnText) btnText.textContent = 'Qayta ishlanmoqda...';
-
-      const formData = new FormData();
-      formData.append('pdf', file);
-
-      const resp = await fetch('/api/admin/pdf-watermark', {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!resp.ok) {
-        const errJson = await resp.json().catch(() => ({}));
-        throw new Error(errJson.message || `Xatolik: HTTP ${resp.status}`);
-      }
-
-      const blob = await resp.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const baseName = file.name.replace(/\.pdf$/i, '');
-      a.download = `${baseName}_watermarked.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url);
-        a.remove();
-      }, 1000);
-
-      alert(`✅ PDF muvaffaqiyatli tayyorlandi va yuklab olindi! (${file.name})`);
-    } catch (err) {
-      alert("❌ Watermark qo'yishda xatolik: " + err.message);
-    } finally {
-      if (btn) btn.disabled = false;
-      if (btnText) btnText.textContent = originalText;
-      input.value = '';
     }
   },
 

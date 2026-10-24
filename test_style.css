@@ -18,8 +18,8 @@
   --liquid-glass-hover: linear-gradient(145deg, rgba(255, 255, 255, 0.94) 0%, rgba(255, 255, 255, 0.74) 100%);
   --liquid-glass-border: 1px solid rgba(255, 255, 255, 0.88);
   --liquid-glass-specular: inset 0 1.5px 2px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 1px 0 rgba(0, 0, 0, 0.03);
-  --liquid-glass-shadow: 0 16px 38px -6px rgba(15, 23, 42, 0.09), 0 4px 14px -2px rgba(15, 23, 42, 0.04);
-  --liquid-glass-blur: blur(30px) saturate(190%) contrast(105%);
+  --liquid-glass-shadow: 0 8px 24px -4px rgba(15, 23, 42, 0.06);
+  --liquid-glass-blur: blur(12px);
 
   --bg-main: #F2F5FD;
   --bg-card: var(--liquid-glass-bg);
@@ -37,7 +37,7 @@
   --radius-lg: 22px;
   --radius-xl: 30px;
   --radius-full: 9999px;
-  --font: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 
   /* Telegram Safe Areas (Dinamik & Moslashuvchan) */
   --tg-safe-top: max(
@@ -60,8 +60,8 @@ body.dark-mode {
   --liquid-glass-hover: linear-gradient(145deg, rgba(38, 48, 72, 0.82) 0%, rgba(22, 32, 55, 0.72) 100%);
   --liquid-glass-border: 1px solid rgba(255, 255, 255, 0.13);
   --liquid-glass-specular: inset 0 1.5px 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 1px 0 rgba(0, 0, 0, 0.35);
-  --liquid-glass-shadow: 0 16px 42px -6px rgba(0, 0, 0, 0.6), 0 4px 14px -2px rgba(0, 0, 0, 0.4);
-  --liquid-glass-blur: blur(30px) saturate(190%) contrast(105%);
+  --liquid-glass-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.4);
+  --liquid-glass-blur: blur(12px);
 
   --bg-main: #070913;
   --bg-card: var(--liquid-glass-bg);
@@ -91,6 +91,7 @@ body {
   overflow-x: hidden;
   line-height: 1.4;
   transition: background-color 0.25s ease, color 0.25s ease;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* =========================================
@@ -518,17 +519,32 @@ body {
   z-index: 0;
   overflow: hidden;
   transition: opacity 0.4s ease;
+  transform: translateZ(0);
 }
 
 .ambient-mesh-orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(48px);
-  -webkit-filter: blur(48px);
-  will-change: transform, opacity;
+  filter: blur(36px);
+  -webkit-filter: blur(36px);
+  will-change: transform;
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
   transform: translateZ(0);
+}
+
+/* Mobil qurilmalarda silliq 60-120fps scroll uchun fondagi og'ir animatsiyani statik qilish va og'ir blur qatlamlarini yengillashtirish */
+@media (max-width: 900px), (prefers-reduced-motion: reduce) {
+  .ambient-mesh-orb {
+    animation: none !important;
+    opacity: 0.7 !important;
+    filter: blur(28px) !important;
+    -webkit-filter: blur(28px) !important;
+  }
+  .section-group {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
 }
 
 /* Light mode (default) */
@@ -648,52 +664,242 @@ body.keyboard-open .admin-compact-dock {
   border: 1px solid rgba(124, 58, 237, 0.4);
 }
 
-.esse-question-box {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-  margin-bottom: 12px;
+/* 37-savol: Esse katakchasiga o'xshash kattaroq, chetlari yonib turuvchi (Glowing Neon) katakchalar */
+.q37-glow-box {
+  width: 100% !important;
+  height: 56px !important;
+  border-radius: 14px !important;
+  border: 2.5px solid #8B5CF6 !important;
+  background: rgba(139, 92, 246, 0.06) !important;
+  box-shadow: 0 0 16px rgba(139, 92, 246, 0.4), inset 0 0 8px rgba(139, 92, 246, 0.12) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  transition: all 0.25s ease !important;
+  animation: q37GlowPulse 2.4s infinite alternate ease-in-out !important;
 }
 
-.esse-input {
+body.dark-mode .q37-glow-box {
+  background: rgba(139, 92, 246, 0.12) !important;
+  border-color: #A78BFA !important;
+  box-shadow: 0 0 20px rgba(167, 139, 250, 0.48), inset 0 0 10px rgba(167, 139, 250, 0.2) !important;
+}
+
+@keyframes q37GlowPulse {
+  0% {
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.3), inset 0 0 5px rgba(139, 92, 246, 0.08);
+    border-color: #8B5CF6;
+  }
+  100% {
+    box-shadow: 0 0 22px rgba(139, 92, 246, 0.6), 0 0 36px rgba(139, 92, 246, 0.22), inset 0 0 10px rgba(139, 92, 246, 0.18);
+    border-color: #A78BFA;
+  }
+}
+
+.q37-glow-input {
   width: 100% !important;
+  height: 100% !important;
   text-align: center !important;
-  font-weight: 700 !important;
+  font-size: 22px !important;
+  font-weight: 800 !important;
+  color: #7C3AED !important;
+  border: none !important;
+  background: transparent !important;
+  outline: none !important;
+  letter-spacing: 1px !important;
+}
+
+body.dark-mode .q37-glow-input {
+  color: #C4B5FD !important;
+}
+
+.q37-glow-input::placeholder,
+.q37-glow-input::-webkit-input-placeholder {
+  text-align: center !important;
+  color: rgba(124, 58, 237, 0.45) !important;
+  font-weight: 600 !important;
   font-size: 15px !important;
-  color: #7c3aed;
+  letter-spacing: 0 !important;
+}
+
+body.dark-mode .q37-glow-input::placeholder,
+body.dark-mode .q37-glow-input::-webkit-input-placeholder {
+  color: rgba(196, 181, 253, 0.45) !important;
+}
+
+/* 37-savol Juftlik (Xato -> To'g'ri) Neon Glow Katakchalari */
+.q37-pair-box-xato {
+  height: 52px !important;
+  width: 100% !important;
+  border-radius: 13px !important;
+  border: 2.2px solid #EF4444 !important;
+  background: rgba(239, 68, 68, 0.06) !important;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.35), inset 0 0 6px rgba(239, 68, 68, 0.1) !important;
+  display: flex !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+  transition: all 0.2s ease !important;
+}
+
+.q37-pair-box-togri {
+  height: 52px !important;
+  width: 100% !important;
+  border-radius: 13px !important;
+  border: 2.2px solid #10B981 !important;
+  background: rgba(16, 185, 129, 0.06) !important;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.35), inset 0 0 6px rgba(16, 185, 129, 0.1) !important;
+  display: flex !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+  transition: all 0.2s ease !important;
+}
+
+.q37-pair-input-xato {
+  width: 100% !important;
+  height: 100% !important;
+  text-align: center !important;
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  color: #EF4444 !important;
   border: none !important;
   background: transparent !important;
   outline: none !important;
 }
 
+.q37-pair-input-togri {
+  width: 100% !important;
+  height: 100% !important;
+  text-align: center !important;
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  color: #10B981 !important;
+  border: none !important;
+  background: transparent !important;
+  outline: none !important;
+}
+
+.esse-card-wrap {
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+body.dark-mode .esse-card-wrap {
+  background: var(--bg-card, #1E293B) !important;
+  border-color: #334155 !important;
+}
+
+.esse-input {
+  width: 100% !important;
+  text-align: center !important;
+  font-weight: 800 !important;
+  font-size: 24px !important;
+  color: #7c3aed !important;
+  border: none !important;
+  background: transparent !important;
+  outline: none !important;
+  letter-spacing: 1px;
+}
+
 .esse-input::placeholder {
   text-align: center;
-  color: rgba(100, 116, 139, 0.5);
-  font-weight: 500;
-  font-size: 13.5px;
-  opacity: 0.75;
+  color: rgba(124, 58, 237, 0.4);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0;
+  opacity: 0.85;
 }
 
 .esse-input::-webkit-input-placeholder {
   text-align: center;
-  color: rgba(100, 116, 139, 0.5);
-  font-weight: 500;
-  font-size: 13.5px;
-  opacity: 0.75;
+  color: rgba(124, 58, 237, 0.4);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0;
+  opacity: 0.85;
 }
 
 body.dark-mode .esse-input {
-  color: #c4b5fd;
+  color: #c4b5fd !important;
 }
 
 body.dark-mode .esse-input::placeholder {
-  color: rgba(167, 139, 250, 0.45);
+  color: rgba(196, 181, 253, 0.4);
 }
 
 body.dark-mode .esse-input::-webkit-input-placeholder {
-  color: rgba(167, 139, 250, 0.45);
+  color: rgba(196, 181, 253, 0.4);
+}
+
+/* Mobil klaviatura yopish paneli ("Ptichka" / Tayyor paneli) */
+.keyboard-dismiss-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100000;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 8px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
+  transform: translateZ(0);
+  will-change: bottom, transform;
+}
+
+body.dark-mode .keyboard-dismiss-bar {
+  background: rgba(15, 23, 42, 0.96);
+  border-top-color: rgba(255, 255, 255, 0.18);
+}
+
+.keyboard-dismiss-info {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #F8FAFC;
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keyboard-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10B981;
+  box-shadow: 0 0 8px #10B981;
+  flex-shrink: 0;
+}
+
+.btn-dismiss-keyboard {
+  background: linear-gradient(135deg, #10B981, #059669);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 13.5px;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.35);
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 0.1s ease, filter 0.15s ease;
+}
+
+.btn-dismiss-keyboard:active {
+  transform: scale(0.96);
+  filter: brightness(1.1);
 }
 
 .esse-hint-text {
@@ -970,10 +1176,8 @@ body.dark-mode .esse-input::-webkit-input-placeholder {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  backdrop-filter: var(--liquid-glass-blur);
-  -webkit-backdrop-filter: var(--liquid-glass-blur);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03), inset 0 1px 1px rgba(255, 255, 255, 0.2);
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .question-card.answered {
@@ -1002,9 +1206,7 @@ body.dark-mode .esse-input::-webkit-input-placeholder {
   min-width: 36px;
   border-radius: 11px;
   border: 1.2px solid var(--border);
-  background: var(--liquid-glass-bg);
-  backdrop-filter: var(--liquid-glass-blur);
-  -webkit-backdrop-filter: var(--liquid-glass-blur);
+  background: var(--bg-card);
   color: var(--text-main);
   font-size: 14px;
   font-weight: 800;
@@ -1013,7 +1215,7 @@ body.dark-mode .esse-input::-webkit-input-placeholder {
   justify-content: center;
   cursor: pointer;
   box-shadow: inset 0 1px 1.5px rgba(255, 255, 255, 0.3);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.1s ease, background 0.15s ease, color 0.15s ease;
 }
 
 .option-btn:active {
@@ -2382,6 +2584,11 @@ body.dark-mode .kb-key.kb-nav-next {
     max-width: 440px !important;
     margin: 0 auto;
   }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 

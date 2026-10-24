@@ -226,4 +226,92 @@ def test_submission_with_essay_calculation():
     details = sub["details"]
     assert "45" in details
     assert details["45"]["type"] == "essay"
+    assert details["45"]["status"] == "essay"
     assert details["45"]["score"] == 65.0
+    assert sub["correct_count"] == 49
+    assert sub["total_count"] == 49
+    assert sub["test_score"] == 75.0
+    assert sub["essay_score"] == 65.0
+
+
+def test_rasch_ali_vs_vali_and_zero_one_two_rules():
+    from rasch_engine import evaluate_rasch_scores, N_ITEMS
+    import numpy as np
+
+    assert N_ITEMS == 49
+    # 30 ta talaba va 49 ta savol matritsasi:
+    # 1..20 savollar juda oson (deyarli hamma yechgan)
+    # 21..49 savollar juda qiyin (kamchilik yechgan)
+    rng = np.random.default_rng(42)
+    N = 30
+    M = np.zeros((N, 49), dtype=int)
+    for n in range(N):
+        # Oson savollar (0..19): 85% ehtimol bilan yechiladi
+        M[n, :20] = (rng.random(20) < 0.85).astype(int)
+        # Qiyin savollar (20..48): 15% ehtimol bilan yechiladi
+        M[n, 20:] = (rng.random(29) < 0.15).astype(int)
+
+    # Maxsus o'quvchilar:
+    # Student 0 (Zero): 0 ta to'g'ri
+    M[0, :] = 0
+    # Student 1 (One): 1 ta to'g'ri
+    M[1, :] = 0
+    M[1, 0] = 1
+    # Student 2 (Two): 2 ta to'g'ri
+    M[2, :] = 0
+    M[2, :2] = 1
+    # Student 3 (Ali): 20 ta oson savolni topgan
+    M[3, :] = 0
+    M[3, :20] = 1
+    # Student 4 (Vali): 20 ta qiyin savolni topgan
+    M[4, :] = 0
+    M[4, 29:49] = 1
+    # Student 5 (All): 49 ta to'g'ri
+    M[5, :] = 1
+
+    student_ids = [1000 + i for i in range(N)]
+    essay_scores = {sid: 50.0 for sid in student_ids}
+    essay_scores[1000] = 60.0  # 0 ta to'g'ri ishlagan bo'lsa ham 0.0 chiqishi shart
+    essay_scores[1005] = 75.0  # 49 ta to'g'ri + 75 esse -> 75.0 (A+)
+
+    responses_matrix = [
+        {
+            "student_id": student_ids[i],
+            "responses": M[i].tolist(),
+            "essay_score": essay_scores[student_ids[i]],
+        }
+        for i in range(N)
+    ]
+
+    res = evaluate_rasch_scores(responses_matrix)
+    st_map = {s["student_id"]: s for s in res["students"]}
+
+    # 1) 0 ta to'g'ri -> 0.0 ball va "—"
+    s_zero = st_map[1000]
+    assert s_zero["raw_score"] == 0
+    assert s_zero["test_score"] == 0.0
+    assert s_zero["final_score"] == 0.0
+    assert s_zero["grade"] == "—"
+
+    # 2) 1 va 2 ta to'g'ri -> sertifikat berilmaydi ("—") va silliq past ball
+    s_one = st_map[1001]
+    s_two = st_map[1002]
+    assert s_one["grade"] == "—"
+    assert s_two["grade"] == "—"
+    assert 0.0 < s_one["test_score"] < s_two["test_score"] < 25.0
+
+    # 3) Ali (20 ta oson) vs Vali (20 ta qiyin)
+    s_ali = st_map[1003]
+    s_vali = st_map[1004]
+    assert s_ali["raw_score"] == 20
+    assert s_vali["raw_score"] == 20
+    assert s_vali["test_score"] > s_ali["test_score"] + 7.0  # Vali Alidan ancha yuqori ball oladi (~59 vs ~48)
+    assert 46.0 <= s_ali["test_score"] <= 51.0
+    assert 56.0 <= s_vali["test_score"] <= 63.0
+
+    # 4) 49 ta to'g'ri (ko'p odam qatnashgan qiyin testda) -> 75.0 balldan oshadi, lekin daraja A+ dan oshmaydi!
+    s_all = st_map[1005]
+    assert s_all["test_score"] > 75.0
+    assert s_all["final_score"] > 75.0
+    assert s_all["grade"] == "A+"
+

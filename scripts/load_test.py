@@ -25,7 +25,12 @@ import math
 import asyncio
 import argparse
 import urllib.parse
+import hmac
+import hashlib
+import json
 from typing import List, Dict, Any, Optional
+
+from core.config import BOT_TOKEN
 
 try:
     import aiohttp
@@ -79,8 +84,21 @@ class LoadTestRunner:
                 clean_err = error_body.strip().replace("\n", " ")[:200]
                 self.first_error_per_endpoint[endpoint_name] = f"HTTP {status}: {clean_err}"
 
+    def _create_init_data(self, user_id: int) -> str:
+        now = int(time.time())
+        user_str = json.dumps({"id": user_id, "first_name": f"VirtualUser{user_id}"}, separators=(",", ":"))
+        data = {
+            "auth_date": str(now),
+            "user": user_str
+        }
+        secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode("utf-8"), hashlib.sha256).digest()
+        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(data.items()))
+        calc_hash = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+        data["hash"] = calc_hash
+        return urllib.parse.urlencode(data)
+
     async def simulate_user_flow(self, session: aiohttp.ClientSession, user_id: int, test_id: int):
-        init_data = f"user=%7B%22id%22%3A{user_id}%2C%22first_name%22%3A%22VirtualUser{user_id}%22%7D"
+        init_data = self._create_init_data(user_id)
         headers = {
             "Content-Type": "application/json",
             "X-Telegram-User-Id": str(user_id),
@@ -157,14 +175,8 @@ class LoadTestRunner:
         except Exception as e:
             await self._record("submit", 599, time.monotonic() - t0, str(e))
 
-    def seed_local_sqlite(self, num_phase1: int, num_phase2: int):
-        """Faqat lokal SQLite da virtual foydalanuvchilar va test tayyorlash."""
-        db_url = os.getenv("DATABASE_URL", "").strip()
-        if db_url and ("postgres" in db_url or "supabase" in db_url or "neon" in db_url):
-            print("⚠️ Production DATABASE_URL aniqlandi: load_test bazaga ulanmadi.")
-            return
-
-        os.environ["DATABASE_URL"] = ""
+    def seed_test_users(self, num_phase1: int, num_phase2: int):
+        """Virtual test foydalanuvchilarini bazaga tayyorlash."""
         try:
             import test_db
             conn = test_db.get_connection()
@@ -180,12 +192,32 @@ class LoadTestRunner:
                         (uid, f"Virtual Student {uid}", "+998901234567", f"vuser_{uid}", "approved", now_ts)
                     )
                 cur.execute("DELETE FROM submissions WHERE user_tg_id >= 900000000 AND user_tg_id <= 900020000")
+                cur.execute("DELETE FROM submission_drafts WHERE user_tg_id >= 900000000 AND user_tg_id <= 900020000")
+                cur.execute("DELETE FROM user_test_drafts WHERE user_tg_id >= 900000000 AND user_tg_id <= 900020000")
                 conn.commit()
-                print(f"✅ Lokal SQLite: {len(all_uids)} ta test foydalanuvchisi tayyorlandi.")
+                print(f"✅ Baza: {len(all_uids)} ta test foydalanuvchisi tayyorlandi.")
             finally:
                 test_db._close_conn(conn)
         except Exception as e:
-            print(f"Lokal SQLite seeding ogohlantirish: {e}")
+            print(f"Seeding ogohlantirish: {e}")
+
+    def cleanup_test_users(self):
+        """Testdan so'ng virtual foydalanuvchilarni tozalash."""
+        try:
+            import test_db
+            conn = test_db.get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM submissions WHERE user_tg_id >= 900000000 AND user_tg_id <= 900020000")
+                cur.execute("DELETE FROM submission_drafts WHERE user_tg_id >= 900000000 AND user_tg_id <= 900020000")
+                cur.execute("DELETE FROM user_test_drafts WHERE user_tg_id >= 900000000 AND user_tg_id <= 900020000")
+                cur.execute("DELETE FROM users WHERE tg_id >= 900000000 AND tg_id <= 900020000")
+                conn.commit()
+                print("🧹 Test foydalanuvchilari bazadan tozalandi.")
+            finally:
+                test_db._close_conn(conn)
+        except Exception as e:
+            print(f"Tozalashda ogohlantirish: {e}")
 
     async def run(self, num_phase1: int = 100, num_phase2: int = 30):
         print(f"\n🚀 YUKLAMA SINOVI BOSHLANDI: {self.base_url}")
@@ -196,21 +228,17 @@ class LoadTestRunner:
         initial_rss = get_current_rss_mb()
         print(f"Boshlang'ich RSS xotira: {initial_rss:.1f} MB")
 
-        # Lokal SQLite ga tayyorgarlik
-        self.seed_local_sqlite(num_phase1, num_phase2)
+        self.seed_test_users(num_phase1, num_phase2)
 
-        timeout = aiohttp.ClientTimeout(total=15)
-        conn = aiohttp.TCPConnector(limit=50, limit_per_host=40, ssl=False)
+        timeout = aiohttp.ClientTimeout(total=20)
+        conn = aiohttp.TCPConnector(limit=100, limit_per_host=100, ssl=False)
         async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
-            # Mavjud faol test ID sini aniqlash
-            target_test_id = 1
+            target_test_id = 11
             try:
-                async with session.get(f"{self.base_url}/api/app/active-tests") as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        tests = data.get("tests", [])
-                        if tests and isinstance(tests, list) and len(tests) > 0:
-                            target_test_id = int(tests[0].get("id", 1))
+                import test_db
+                tests = test_db.get_all_tests()
+                if tests:
+                    target_test_id = tests[0]["id"]
             except Exception:
                 pass
 
@@ -316,6 +344,7 @@ class LoadTestRunner:
             if not passed_errors:
                 print(f"  - 5xx Xatolik darajasi {err_rate:.2f}% >= 1.0%")
 
+        self.cleanup_test_users()
         print("=" * 60 + "\n")
 
 

@@ -3,9 +3,9 @@
  */
 
 const TestApp = {
-  testId: 1,
-  testCode: 'TEST-01',
-  testTitle: 'Ona tili Blok Test',
+  testId: null,
+  testCode: '',
+  testTitle: 'Ona tili Milliy Sertifikat Testi',
   subject: 'Ona tili',
   userTgId: 0,
   userFullname: 'Foydalanuvchi',
@@ -13,9 +13,214 @@ const TestApp = {
   minSubmitInfo: null,
   minSubmitTimerInterval: null,
   isAdmin: false,
+  q37Mode: 'xato_togri', // 'xato_togri' (Xato -> To'g'ri) yoki 'punct' (1 katakli tinish belgisi)
+  _activeQ37Field: 'xato',
 
   // Foydalanuvchi belgilagan javoblar
   answers: {},
+  cachedActiveTests: null,
+
+  showTestSelectScreen() {
+    const sel = document.getElementById('test-select-screen');
+    const app = document.getElementById('test-app');
+    if (sel) sel.style.display = 'block';
+    if (app) app.style.display = 'none';
+    const err = document.getElementById('select-code-error');
+    if (err) err.style.display = 'none';
+    const inp = document.getElementById('manual-test-code-input');
+    if (inp) {
+      inp.value = this.testCode || '';
+      setTimeout(() => inp.focus(), 150);
+    }
+    this.fetchActiveTestsForSelection();
+  },
+
+  async fetchActiveTestsForSelection() {
+    const wrap = document.getElementById('active-tests-list-wrap');
+    if (!wrap) return;
+    const tgU = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) || null;
+    const uid = this.userTgId || (tgU ? tgU.id : 0);
+    const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
+    try {
+      this._activeTestsFetchPromise = fetch(`/api/app/active-tests?tg_id=${uid}&init_data=${encodeURIComponent(initData)}`, {
+        headers: {
+          'X-Telegram-Init-Data': initData,
+          'X-Telegram-User-Id': String(uid)
+        }
+      });
+      const res = await this._activeTestsFetchPromise;
+      const d = await res.json();
+      if (d && d.tests && Array.isArray(d.tests)) {
+        this.cachedActiveTests = d.tests;
+        if (d.tests.length === 0) {
+          wrap.innerHTML = '<div style="text-align: center; padding: 16px; color: var(--text-muted); font-size: 13px;">Hozirda faol testlar mavjud emas</div>';
+          return;
+        }
+        let html = '';
+        d.tests.forEach(t => {
+          const isSubmitted = Boolean(t.already_submitted);
+          html += `
+            <div onclick="${isSubmitted ? `alert('Siz ushbu testni topshirgansiz!')` : `TestApp.startTestWithCode('${t.test_code}')`}" style="background: var(--bg-card); border: 1.5px solid var(--border-color, #E2E8F0); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: transform 0.1s ease; opacity: ${isSubmitted ? '0.6' : '1'};">
+              <div>
+                <div style="font-size: 14px; font-weight: 800; color: var(--text-main);">${t.title || 'Ona tili Testi'}</div>
+                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">
+                  Test kodi: <b style="color: #2563EB;">#${t.test_code}</b> • ${t.subject || 'Ona tili'}
+                </div>
+              </div>
+              <div>
+                ${isSubmitted ? `
+                  <span style="font-size: 11px; font-weight: 700; color: #10B981; background: rgba(16,185,129,0.1); padding: 4px 8px; border-radius: 6px;">Topshirilgan</span>
+                ` : `
+                  <span style="display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 800; color: #2563EB; background: rgba(37,99,235,0.08); padding: 6px 12px; border-radius: 8px;">
+                    Boshlash ➔
+                  </span>
+                `}
+              </div>
+            </div>
+          `;
+        });
+        wrap.innerHTML = html;
+      }
+    } catch (e) {
+      wrap.innerHTML = '<div style="text-align: center; padding: 16px; color: var(--text-muted); font-size: 13px;">Faol testlar ro\'yxatini yuklab bo\'lmadi</div>';
+    }
+  },
+
+  async submitEnteredCode() {
+    const inp = document.getElementById('manual-test-code-input');
+    const code = (inp ? inp.value : '').trim().toUpperCase().replace('#', '');
+    const err = document.getElementById('select-code-error');
+    if (!code) {
+      if (err) {
+        err.textContent = "Iltimos, test kodini kiriting!";
+        err.style.display = 'block';
+      }
+      return;
+    }
+    await this.startTestWithCode(code);
+  },
+
+  async startTestWithCode(testCode) {
+    const err = document.getElementById('select-code-error');
+    if (err) err.style.display = 'none';
+
+    const btn = document.getElementById('btn-start-test');
+    let origBtnHtml = '';
+    if (btn) {
+      origBtnHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `
+        <svg class="spin-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation: spin 0.8s linear infinite; margin-right: 6px;">
+          <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+          <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+        </svg>
+        <span>Tekshirilmoqda...</span>
+      `;
+    }
+
+    const resetBtn = () => {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = origBtnHtml || `<span>Testni boshlash</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+      }
+    };
+
+    let found = null;
+    // 1. Agar xotirada faol testlar allaqachon bo'lsa (0ms ichida darhol ochish)
+    if (this.cachedActiveTests && Array.isArray(this.cachedActiveTests)) {
+      found = this.cachedActiveTests.find(t => String(t.test_code).toUpperCase() === String(testCode).toUpperCase());
+    }
+
+    // 2. Agar hali yuklanmagan bo'lsa, to'g'ridan-to'g'ri ultra-tezkor RAM API orqali tekshirish (~5ms)
+    if (!found) {
+      const tgU = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) || null;
+      const uid = this.userTgId || (tgU ? tgU.id : 0);
+      const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
+      try {
+        const res = await fetch(`/api/app/check-code?code=${encodeURIComponent(testCode)}&tg_id=${uid}&init_data=${encodeURIComponent(initData)}`, {
+          headers: {
+            'X-Telegram-Init-Data': initData,
+            'X-Telegram-User-Id': String(uid)
+          }
+        });
+        const d = await res.json();
+        if (d && d.success && d.test) {
+          found = d.test;
+        } else if (d && d.message) {
+          resetBtn();
+          if (err) {
+            err.textContent = d.message;
+            err.style.display = 'block';
+          } else {
+            alert(d.message);
+          }
+          return;
+        }
+      } catch (e) {
+        // Fallback: active-tests yakunlanishini kutamiz
+        if (this._activeTestsFetchPromise) {
+          try {
+            await this._activeTestsFetchPromise;
+            if (this.cachedActiveTests) {
+              found = this.cachedActiveTests.find(t => String(t.test_code).toUpperCase() === String(testCode).toUpperCase());
+            }
+          } catch(err2) {}
+        }
+      }
+    }
+
+    if (!found) {
+      resetBtn();
+      if (err) {
+        err.textContent = `⚠️ #${testCode} raqamli test topilmadi yoki hozir faol emas!`;
+        err.style.display = 'block';
+      } else {
+        alert(`⚠️ #${testCode} raqamli test topilmadi!`);
+      }
+      return;
+    }
+
+    if (found.already_submitted) {
+      resetBtn();
+      alert("Siz ushbu testni allaqachon topshirgansiz!\n\nNatijalarni ko'rish uchun 'Mening natijalarim' bo'limiga o'ting.");
+      return;
+    }
+
+    this.testId = found.id;
+    this.testCode = found.test_code;
+    this.testTitle = found.title || `#${found.test_code} Test`;
+    this.subject = found.subject || 'Ona tili';
+    this.q37Mode = found.q37_mode || 'xato_togri';
+    this.renderQuestions();
+    this.renderMapGrid();
+
+    const titleEl = document.getElementById('test-title-display');
+    if (titleEl) {
+      titleEl.textContent = `Test #${this.testCode}`;
+    }
+
+    const sel = document.getElementById('test-select-screen');
+    const app = document.getElementById('test-app');
+    if (sel) sel.style.display = 'none';
+    if (app) app.style.display = 'block';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    this.restoreAnswersFromStorage();
+    this.fetchDraftFromBackend();
+    this.updateProgress();
+
+    // Pastki yakunlash tugmasini test topshirishga tayyor holatga keltirish
+    const mainSubmitBtn = document.getElementById('btn-submit-test');
+    if (mainSubmitBtn) {
+      mainSubmitBtn.disabled = false;
+      mainSubmitBtn.style.opacity = '1';
+      mainSubmitBtn.style.cursor = 'pointer';
+      mainSubmitBtn.classList.remove('already-submitted');
+      mainSubmitBtn.innerHTML = 'Testni yakunlash';
+    }
+
+    resetBtn();
+  },
 
   init() {
     if (window.BM_LOGO_B64) {
@@ -73,8 +278,10 @@ const TestApp = {
     this.setTheme(savedTheme === 'dark');
 
     // 2. URL parametrlardan test ma'lumotlarini olish
+    const hasExplicitParam = params.has('test_code') || params.has('test_id');
+
     if (params.has('test_code')) this.testCode = params.get('test_code');
-    if (params.has('test_id')) this.testId = parseInt(params.get('test_id')) || 1;
+    if (params.has('test_id')) this.testId = parseInt(params.get('test_id'), 10);
     if (params.has('title')) this.testTitle = params.get('title');
     if (params.has('subject')) this.subject = params.get('subject');
 
@@ -85,34 +292,52 @@ const TestApp = {
     const userEl = document.getElementById('user-welcome-text');
 
     if (titleEl) {
-      titleEl.textContent = this.testCode ? `#${this.testCode} test` : this.testTitle;
+      titleEl.textContent = this.testCode ? `Test #${this.testCode}` : 'Test';
     }
     if (codeEl) codeEl.textContent = `KOD: #${this.testCode}`;
     if (subjectEl) subjectEl.textContent = this.subject;
     if (userEl) userEl.textContent = `Ishtirokchi: ${this.userFullname}`;
 
-    // 3. Savollarni render qilish
-    this.renderQuestions();
-    this.renderMapGrid();
-    this.updateProgress();
+    if (hasExplicitParam) {
+      // 3. Faqat test kodi kiritilgan holatdagina savollar va xaritani render qilish
+      this.renderQuestions();
+      this.renderMapGrid();
+      this.updateProgress();
 
-    // 3.1. Agar telefon o'chib yongan yoki sahifa yangilangan bo'lsa, javoblarni xotiradan tiklash
-    this.restoreAnswersFromStorage();
-    this.fetchDraftFromBackend();
+      const sel = document.getElementById('test-select-screen');
+      const app = document.getElementById('test-app');
+      if (sel) sel.style.display = 'none';
+      if (app) app.style.display = 'block';
+
+      // 3.1. Agar telefon o'chib yongan yoki sahifa yangilangan bo'lsa, javoblarni xotiradan tiklash
+      this.restoreAnswersFromStorage();
+      this.fetchDraftFromBackend();
+    } else {
+      // Test kodi kiritilmagan bo'lsa, kod so'rash ekrani ko'rsatiladi
+      this.showTestSelectScreen();
+    }
 
     // 4. Mavzuga mos kirish animatsiyasini ishga tushirish
     this.runIntroAnimation();
+    this.initKeyboardDismissToolbar();
 
-    // 5. Allaqachon topshirganlikni va 45 daqiqalik cheklovni tekshirish
-    if (this.userTgId) {
+    // 5. Agar to'g'ridan-to'g'ri test ochilgan bo'lsa (hasExplicitParam), test holatini tekshirish
+    if (hasExplicitParam && this.userTgId) {
+      const tgU = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) || null;
+      const uid = this.userTgId || (tgU ? tgU.id : 0);
       var initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
-      fetch('/api/app/active-tests?init_data=' + encodeURIComponent(initData), {
-        headers: { 'X-Telegram-Init-Data': initData }
+      fetch(`/api/app/active-tests?tg_id=${uid}&init_data=` + encodeURIComponent(initData), {
+        headers: {
+          'X-Telegram-Init-Data': initData,
+          'X-Telegram-User-Id': String(uid)
+        }
       })
         .then(function(res) {
-          if (res.status === 403 || res.status === 401) {
+          if (res.status === 403) {
             return res.json().then(function(d) {
-              TestApp.showRegistrationRequiredModal(d && d.message ? d.message : "⚠️ Iltimos, avval botda ro'yxatdan o'ting!");
+              if (d && (d.status === 'not_registered' || d.status === 'pending' || d.status === 'rejected')) {
+                TestApp.showRegistrationRequiredModal(d.message || "⚠️ Iltimos, avval botda ro'yxatdan o'ting!");
+              }
               return null;
             });
           }
@@ -120,7 +345,7 @@ const TestApp = {
         })
         .then(function(d) {
           if (!d) return;
-          if (d.status === 'not_registered' || d.status === 'pending' || d.status === 'rejected' || !d.success) {
+          if (d.status === 'not_registered' || d.status === 'pending' || d.status === 'rejected') {
             TestApp.showRegistrationRequiredModal(d.message || "⚠️ Iltimos, avval botda ro'yxatdan o'ting!");
             return;
           }
@@ -313,11 +538,52 @@ const TestApp = {
       part2.style.display = 'none';
     }
 
-    // 3. 36-39 Yopiq Savollar (1 ta variantli — bitta ochiq qator)
+    // 3. 36-39 Yopiq Savollar (37-savol test sozlamasiga ko'ra Xato -> To'g'ri yoki 1 katakli + Tinish belgilari)
     if (part3) {
       let html3 = '';
+      const punctSyms = [':', '—', ',', ';', '.', '?', '!', '...', '«»', '()'];
       for (let q = 36; q <= 39; q++) {
         const key = String(q);
+        if (q === 37) {
+          const isPairMode = (this.q37Mode || 'xato_togri') === 'xato_togri';
+          html3 += `
+            <div class="open-question-row" id="qrow-37" style="flex-direction: column; align-items: stretch; gap: 8px; padding: 12px; border: 1.5px solid rgba(37, 99, 235, 0.25); background: linear-gradient(135deg, rgba(37, 99, 235, 0.03), rgba(16, 185, 129, 0.03));">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <div class="savol-badge" style="min-width: auto; padding: 4px 10px;">37-savol</div>
+                <span style="font-size: 11px; font-weight: 800; color: var(--text-muted);">
+                  ${isPairMode ? "❌ Xato ➔ ✅ To'g'ri" : "✍️ Tinish belgisi / Javob"}
+                </span>
+              </div>
+
+              ${isPairMode ? `
+                <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
+                  <div style="flex: 1; min-width: 0;">
+                    <div style="font-size: 11px; font-weight: 800; color: #EF4444; margin-bottom: 4px;">❌ Xato</div>
+                    <div class="savol-input-box q37-pair-box-xato" id="box-37-xato">
+                      <input type="text" class="savol-input open-native-input q37-pair-input-xato" id="input-37-xato" placeholder="Xato (masalan, :)" autocomplete="off" autocapitalize="none" onfocus="TestApp._activeQ37Field='xato'" oninput="TestApp.handleQ37PairInput()">
+                    </div>
+                  </div>
+
+                  <div style="padding-top: 18px; color: #2563EB; font-weight: 900; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                  </div>
+
+                  <div style="flex: 1; min-width: 0;">
+                    <div style="font-size: 11px; font-weight: 800; color: #10B981; margin-bottom: 4px;">✅ To'g'ri</div>
+                    <div class="savol-input-box q37-pair-box-togri" id="box-37-togri">
+                      <input type="text" class="savol-input open-native-input q37-pair-input-togri" id="input-37-togri" placeholder="To'g'ri (masalan, —)" autocomplete="off" autocapitalize="none" onfocus="TestApp._activeQ37Field='togri'" oninput="TestApp.handleQ37PairInput()">
+                    </div>
+                  </div>
+                </div>
+              ` : `
+                <div class="savol-input-box q37-glow-box" id="box-37">
+                  <input type="text" class="savol-input open-native-input q37-glow-input" id="input-37" placeholder="Tinish belgisi yoki javobni kiriting..." autocomplete="off" autocapitalize="none" onfocus="TestApp._activeQ37Field='single'" oninput="TestApp.handleOpenInput('37', this.value)">
+                </div>
+              `}
+            </div>
+          `;
+          continue;
+        }
         html3 += `
           <div class="open-question-row" id="qrow-${key}">
             <div class="savol-badge">${key}-savol</div>
@@ -357,7 +623,7 @@ const TestApp = {
   },
 
   getTotalQuestionsCount() {
-    return 35 + 4 + 10 + 1; // 35 variantli + 4 ochiq (36-39) + 10 juft ochiq (40a-44b) + 1 esse (45) = 50
+    return 35 + 4 + 10; // 35 variantli + 4 ochiq (36-39) + 10 juft ochiq (40a-44b) = 49 (45-Esse test savollari soniga kirmaydi)
   },
 
   // ----------------------------------------------------
@@ -372,9 +638,19 @@ const TestApp = {
   saveAnswersToStorage() {
     try {
       if (!this.testId) return;
-      // 36-39 savollar (1 ta variantli)
+      // 36-39 savollar (1 ta variantli; 37-savol Xato -> To'g'ri yoki 1 katakli)
       for (let q = 36; q <= 39; q++) {
         const key = String(q);
+        if (q === 37 && (this.q37Mode || 'xato_togri') === 'xato_togri') {
+          const xInput = document.getElementById('input-37-xato');
+          const tInput = document.getElementById('input-37-togri');
+          const xVal = xInput && xInput.value !== undefined ? xInput.value.trim() : (this.answers['37_xato'] || '');
+          const tVal = tInput && tInput.value !== undefined ? tInput.value.trim() : (this.answers['37_togri'] || '');
+          this.answers['37_xato'] = xVal;
+          this.answers['37_togri'] = tVal;
+          this.answers['37'] = (xVal && tVal) ? `${xVal} -> ${tVal}` : '';
+          continue;
+        }
         const input = document.getElementById(`input-${key}`);
         if (input && input.value !== undefined) {
           this.answers[key] = input.value.trim();
@@ -401,7 +677,11 @@ const TestApp = {
         this.answers['45_text'] = input45Text.value.trim();
       }
       const key = this.getStorageKey();
-      localStorage.setItem(key, JSON.stringify(this.answers));
+      const storagePayload = {
+        answers: this.answers,
+        saved_at: Date.now() // 1 soatlik (3600s) avtomatik o'chish uchun timestamp
+      };
+      localStorage.setItem(key, JSON.stringify(storagePayload));
       this.syncDraftToBackend();
     } catch (e) {
       console.warn('Storage save error:', e);
@@ -419,10 +699,28 @@ const TestApp = {
       const key = this.getStorageKey();
       const raw = localStorage.getItem(key);
       if (!raw) return;
-      const saved = JSON.parse(raw);
-      if (!saved || typeof saved !== 'object') return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
 
-      this.answers = Object.assign({}, saved);
+      // 1 SOATLIK (3600000 ms) MUDDATNI TEKSHIRISH
+      const ONE_HOUR_MS = 60 * 60 * 1000;
+      let savedAnswers = null;
+
+      if (parsed.saved_at) {
+        if (Date.now() - parsed.saved_at > ONE_HOUR_MS) {
+          // 1 soatdan oshgan, javoblarni tozalash va yangidan boshlash
+          this.clearAnswersFromStorage();
+          this.answers = {};
+          return;
+        }
+        savedAnswers = parsed.answers || {};
+      } else if (parsed.answers) {
+        savedAnswers = parsed.answers;
+      } else {
+        savedAnswers = parsed;
+      }
+
+      this.answers = Object.assign({}, savedAnswers);
 
       // 1-35 variantli savollarni tiklash
       for (let q = 1; q <= 35; q++) {
@@ -439,6 +737,31 @@ const TestApp = {
       // 36-39 (1 ta variantli) yopiq savollar
       for (let q = 36; q <= 39; q++) {
         const fieldKey = String(q);
+        if (q === 37 && (this.q37Mode || 'xato_togri') === 'xato_togri') {
+          let xVal = this.answers['37_xato'] || '';
+          let tVal = this.answers['37_togri'] || '';
+          if ((!xVal && !tVal) && this.answers['37']) {
+            const parts = String(this.answers['37']).split(/\s*(?:->|➔|→|=>)\s*/);
+            if (parts.length === 2) {
+              xVal = parts[0].trim();
+              tVal = parts[1].trim();
+              this.answers['37_xato'] = xVal;
+              this.answers['37_togri'] = tVal;
+            }
+          }
+          const xInput = document.getElementById('input-37-xato');
+          const tInput = document.getElementById('input-37-togri');
+          const xBox = document.getElementById('box-37-xato');
+          const tBox = document.getElementById('box-37-togri');
+          if (xInput) xInput.value = xVal;
+          if (tInput) tInput.value = tVal;
+          if (xBox) xBox.classList.toggle('filled', xVal.length > 0);
+          if (tBox) tBox.classList.toggle('filled', tVal.length > 0);
+          const isBothFilled = Boolean(xVal.length > 0 && tVal.length > 0);
+          this.answers['37'] = isBothFilled ? `${xVal} -> ${tVal}` : '';
+          this.updateMapItem('37', isBothFilled);
+          continue;
+        }
         const val = this.answers[fieldKey];
         const input = document.getElementById(`input-${fieldKey}`);
         const box = document.getElementById(`box-${fieldKey}`);
@@ -623,6 +946,18 @@ const TestApp = {
     // 36-39 (1 ta variantli) yopiq savollar inputlari va qutilarini tozalash
     for (let q = 36; q <= 39; q++) {
       const fieldKey = String(q);
+      if (q === 37 && (this.q37Mode || 'xato_togri') === 'xato_togri') {
+        const xInput = document.getElementById('input-37-xato');
+        const tInput = document.getElementById('input-37-togri');
+        const xBox = document.getElementById('box-37-xato');
+        const tBox = document.getElementById('box-37-togri');
+        if (xInput) xInput.value = '';
+        if (tInput) tInput.value = '';
+        if (xBox) xBox.classList.remove('filled');
+        if (tBox) tBox.classList.remove('filled');
+        this.updateMapItem('37', false);
+        continue;
+      }
       const input = document.getElementById(`input-${fieldKey}`);
       if (input) input.value = '';
       const box = document.getElementById(`box-${fieldKey}`);
@@ -685,6 +1020,60 @@ const TestApp = {
     this.saveAnswersToStorage();
   },
 
+  handleQ37PairInput() {
+    const xInput = document.getElementById('input-37-xato');
+    const tInput = document.getElementById('input-37-togri');
+    const xVal = xInput ? xInput.value.trim() : '';
+    const tVal = tInput ? tInput.value.trim() : '';
+    this.answers['37_xato'] = xVal;
+    this.answers['37_togri'] = tVal;
+    const isBothFilled = Boolean(xVal.length > 0 && tVal.length > 0);
+    this.answers['37'] = isBothFilled ? `${xVal} -> ${tVal}` : '';
+
+    const xBox = document.getElementById('box-37-xato');
+    const tBox = document.getElementById('box-37-togri');
+    if (xBox) xBox.classList.toggle('filled', xVal.length > 0);
+    if (tBox) tBox.classList.toggle('filled', tVal.length > 0);
+
+    this.updateMapItem('37', isBothFilled);
+    this.updateProgress();
+
+    clearTimeout(this._inputSaveTimer);
+    this._inputSaveTimer = setTimeout(() => {
+      this.saveAnswersToStorage();
+    }, 150);
+  },
+
+  insertQ37Punct(sym) {
+    const isPairMode = (this.q37Mode || 'xato_togri') === 'xato_togri';
+    if (isPairMode) {
+      const xInput = document.getElementById('input-37-xato');
+      const tInput = document.getElementById('input-37-togri');
+      let target = (this._activeQ37Field === 'togri') ? tInput : xInput;
+      if (!target) target = xInput;
+      if (target === xInput && xInput && xInput.value.trim() && tInput && !tInput.value.trim() && this._activeQ37Field !== 'xato') {
+        target = tInput;
+      }
+      if (target) {
+        target.value = (target.value ? target.value + ' ' : '') + sym;
+        this.handleQ37PairInput();
+        if (target === xInput && tInput && !tInput.value.trim()) {
+          this._activeQ37Field = 'togri';
+          tInput.focus();
+        } else {
+          target.focus();
+        }
+      }
+    } else {
+      const inp = document.getElementById('input-37');
+      if (inp) {
+        inp.value = (inp.value ? inp.value + ' ' : '') + sym;
+        this.handleOpenInput('37', inp.value);
+        inp.focus();
+      }
+    }
+  },
+
   handleOpenInput(fieldKey, val) {
     this.answers[fieldKey] = (val || '').trim();
 
@@ -701,6 +1090,86 @@ const TestApp = {
     this._inputSaveTimer = setTimeout(() => {
       this.saveAnswersToStorage();
     }, 150);
+  },
+
+  handleEsseInput(el) {
+    if (!el) return;
+    let val = el.value.replace(/[^0-9]/g, '');
+    if (val !== '') {
+      let num = parseInt(val, 10);
+      if (num > 75) num = 75;
+      val = String(num);
+    }
+    el.value = val;
+    this.handleOpenInput('45', val);
+  },
+
+  initKeyboardDismissToolbar() {
+    const bar = document.getElementById('keyboard-dismiss-bar');
+    const btn = document.getElementById('btn-dismiss-keyboard');
+    const label = document.getElementById('keyboard-focus-label');
+    if (!bar || !btn) return;
+
+    let activeInput = null;
+
+    const updatePosition = () => {
+      if (!activeInput || bar.style.display === 'none') return;
+      if (window.visualViewport) {
+        const offset = window.innerHeight - (window.visualViewport.height + window.visualViewport.offsetTop);
+        bar.style.bottom = `${Math.max(0, offset)}px`;
+      } else {
+        bar.style.bottom = '0px';
+      }
+    };
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updatePosition);
+      window.visualViewport.addEventListener('scroll', updatePosition);
+    }
+
+    const dismiss = (e) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+      }
+      activeInput = null;
+      bar.style.display = 'none';
+    };
+
+    btn.addEventListener('pointerdown', dismiss);
+    btn.addEventListener('touchstart', dismiss);
+    btn.addEventListener('click', dismiss);
+
+    document.addEventListener('focusin', (e) => {
+      const target = e.target;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        activeInput = target;
+        let txt = "Javob yozilmoqda";
+        if (target.id === 'manual-test-code-input') {
+          txt = "Test kodini kiritish";
+        } else if (target.id === 'input-45') {
+          txt = "45-savol: Esse bali (0 - 75)";
+        } else if (target.id && target.id.startsWith('input-')) {
+          const qKey = target.id.replace('input-', '');
+          txt = `${qKey}-savol javobi`;
+        }
+        if (label) label.textContent = txt;
+        bar.style.display = 'flex';
+        updatePosition();
+      }
+    });
+
+    document.addEventListener('focusout', (e) => {
+      setTimeout(() => {
+        if (!document.activeElement || (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA')) {
+          activeInput = null;
+          bar.style.display = 'none';
+        }
+      }, 120);
+    });
   },
 
 
@@ -809,24 +1278,18 @@ const TestApp = {
       }
     }
 
-    // 45 Esse
-    const val45 = this.answers['45'] !== undefined ? this.answers['45'] : ((document.getElementById('input-45') || {}).value || '');
-    if ((val45 || '').trim().length > 0) {
-      answeredQuestions++;
-    }
-
     const total = this.getTotalQuestionsCount();
-    const remaining = total - answeredQuestions;
-    const percent = Math.round((answeredQuestions / total) * 100);
+    const remaining = Math.max(0, total - answeredQuestions);
+    const percent = Math.min(100, Math.round((answeredQuestions / total) * 100));
 
     const countEl = document.getElementById('answered-counter');
     const fillEl = document.getElementById('progress-bar-fill');
     const dockText = document.getElementById('dock-answered-text');
     const dockSub = document.getElementById('dock-unanswered-text');
 
-    if (countEl) countEl.textContent = `${answeredQuestions} / ${total}`;
+    if (countEl) countEl.textContent = `${answeredQuestions} ta belgilandi`;
     if (fillEl) fillEl.style.width = `${percent}%`;
-    if (dockText) dockText.textContent = `${answeredQuestions} / ${total} ta belgilandi (${percent}%)`;
+    if (dockText) dockText.textContent = `${answeredQuestions} ta belgilandi (${percent}%)`;
     if (dockSub) dockSub.textContent = remaining === 0 ? "Barcha savollar to'ldirildi!" : `${remaining} ta savol qoldi`;
   },
 
@@ -843,8 +1306,10 @@ const TestApp = {
     // 1-bosqichga o'tkazish ("Testni yakunlaysizmi? Ha / Yo'q")
     const step1 = document.getElementById('confirm-step-1');
     const step2 = document.getElementById('confirm-step-2');
+    const stepLoad = document.getElementById('confirm-step-loading');
     if (step1) step1.style.display = 'block';
     if (step2) step2.style.display = 'none';
+    if (stepLoad) stepLoad.style.display = 'none';
 
     const modal = document.getElementById('confirm-modal');
     if (modal) modal.classList.add('open');
@@ -873,15 +1338,13 @@ const TestApp = {
         if ((this.answers[key] || '').trim().length > 0) answered++;
       }
     }
-    if ((this.answers['45'] || '').trim().length > 0) answered++;
+    const esseVal = (this.answers['45'] || '').trim();
 
     const total = this.getTotalQuestionsCount();
-    const empty = total - answered;
+    const empty = Math.max(0, total - answered);
 
     const mAnswered = document.getElementById('m-stat-answered');
     const mEmpty = document.getElementById('m-stat-empty');
-    if (mAnswered) mAnswered.textContent = answered;
-    if (mEmpty) mEmpty.textContent = empty;
     if (mAnswered) mAnswered.textContent = answered;
     if (mEmpty) mEmpty.textContent = empty;
 
@@ -894,7 +1357,7 @@ const TestApp = {
     const titleEl = document.getElementById('confirm-step-2-title');
     const descEl = document.getElementById('confirm-step-2-desc');
 
-    if (answered === 0) {
+    if (answered === 0 && !esseVal) {
       // 0 ta belgilangan bo'lsa: QAT'IY TO'SIQ!
       if (zeroWarn) zeroWarn.style.display = 'block';
       if (partialWarn) partialWarn.style.display = 'none';
@@ -918,7 +1381,8 @@ const TestApp = {
         iconEl.innerHTML = '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>';
       }
       if (titleEl) titleEl.textContent = 'Javoblaringiz holati';
-      if (descEl) descEl.textContent = `Siz 55 ta savoldan ${answered} tasini belgiladingiz, ${empty} tasini belgilanmagan qoldirdingiz.`;
+      const esseText = esseVal ? ` Esse bali: ${esseVal} ball.` : ` Esse bali kiritilmagan (0 ball).`;
+      if (descEl) descEl.textContent = `Test savollaridan ${answered} tasi belgilandi.${esseText}`;
       if (finalBtn) {
         finalBtn.disabled = false;
         finalBtn.style.opacity = '1';
@@ -930,13 +1394,17 @@ const TestApp = {
 
     if (step1) step1.style.display = 'none';
     if (step2) step2.style.display = 'block';
+    const stepLoad = document.getElementById('confirm-step-loading');
+    if (stepLoad) stepLoad.style.display = 'none';
   },
 
   backToSubmitStep1() {
     const step1 = document.getElementById('confirm-step-1');
     const step2 = document.getElementById('confirm-step-2');
+    const stepLoad = document.getElementById('confirm-step-loading');
     if (step1) step1.style.display = 'block';
     if (step2) step2.style.display = 'none';
+    if (stepLoad) stepLoad.style.display = 'none';
   },
 
   openMinSubmitModal() {
@@ -1058,6 +1526,16 @@ const TestApp = {
     // 36-39 savollar (1 ta variantli) va 40+ savollar (a va b) qiymatlarini to'g'ridan-to'g'ri DOM dan olib yakuniy tekshirish
     for (let q = 36; q <= 39; q++) {
       const key = String(q);
+      if (q === 37 && (this.q37Mode || 'xato_togri') === 'xato_togri') {
+        const xInput = document.getElementById('input-37-xato');
+        const tInput = document.getElementById('input-37-togri');
+        const xVal = xInput && xInput.value !== undefined ? xInput.value.trim() : (this.answers['37_xato'] || '');
+        const tVal = tInput && tInput.value !== undefined ? tInput.value.trim() : (this.answers['37_togri'] || '');
+        this.answers['37_xato'] = xVal;
+        this.answers['37_togri'] = tVal;
+        this.answers['37'] = (xVal && tVal) ? `${xVal} -> ${tVal}` : '';
+        continue;
+      }
       const input = document.getElementById(`input-${key}`);
       if (input && input.value !== undefined) {
         this.answers[key] = input.value.trim();
@@ -1072,6 +1550,10 @@ const TestApp = {
           this.answers[key] = input.value.trim();
         }
       }
+    }
+    const essayInput = document.getElementById('input-45');
+    if (essayInput && essayInput.value !== undefined) {
+      this.answers['45'] = essayInput.value.trim();
     }
 
     // Xavfsizlik: 0 ta belgilangan bo'lsa topshirishga mutlaqo ruxsat bermaslik
@@ -1088,9 +1570,10 @@ const TestApp = {
         if ((this.answers[key] || '').trim().length > 0) answered++;
       }
     }
+    const esseAnswered = (this.answers['45'] || '').trim().length > 0;
 
     const totalQuestions = this.getTotalQuestionsCount();
-    if (answered === 0 && !this.isAdmin) {
+    if (answered === 0 && !esseAnswered && !this.isAdmin) {
       alert(`Siz birorta ham savolga javob belgilamadingiz (0/${totalQuestions})!\n\nBo'sh testni topshirib bo'lmaydi. Iltimos, savollarni ishlab, javoblarni belgilang!`);
       this.closeConfirmSubmitModal();
       return;
@@ -1099,98 +1582,132 @@ const TestApp = {
     if (this._isSubmitting) return;
     this._isSubmitting = true;
 
-    const submitBtn = document.getElementById('btn-final-submit');
-    const backBtn = document.getElementById('btn-confirm-back');
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Amalga oshirilmoqda...';
-    }
-    if (backBtn) {
-      backBtn.disabled = true;
-    }
-
+    const answersSnapshot = Object.assign({}, this.answers);
     const payload = {
       test_id: this.testId,
       test_code: this.testCode,
       user_tg_id: this.userTgId,
       fullname: this.userFullname,
-      answers: this.answers
+      answers: answersSnapshot
     };
 
-    try {
-      const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
-      const response = await fetch('/api/submit-test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Telegram-Init-Data': initData,
-          'X-Telegram-User-Id': String(this.userTgId || '')
-        },
-        body: JSON.stringify(Object.assign({}, payload, { init_data: initData }))
-      });
-
-      const result = await response.json();
-
-      if (response.status === 429) {
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = '<span>Oxirgi yakunlash</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left:6px;"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>';
-        }
-        if (backBtn) backBtn.disabled = false;
-        alert(result.message || "Iltimos, biroz kuting! So'rovingiz navbatda qayta ishlanmoqda...");
-        return;
-      }
-
-      this.closeConfirmSubmitModal();
-
-      if (result.success && result.data) {
-        this.clearAnswersFromStorage();
-        this.showResultModal(result.data);
-      } else {
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = '<span>Oxirgi yakunlash</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left:6px;"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>';
-        }
-        if (backBtn) backBtn.disabled = false;
-
-        if (result.error_code === 'EARLY_SUBMISSION_BLOCKED') {
-          if (!this.minSubmitInfo) this.minSubmitInfo = {};
-          this.minSubmitInfo.can_submit = false;
-          if (result.remaining_seconds !== undefined) {
-            this.minSubmitInfo.remaining_seconds = result.remaining_seconds;
-          }
-          if (result.unlock_time) {
-            this.minSubmitInfo.unlock_time_str = result.unlock_time;
-          }
-          this.startMinSubmitTimer();
-          this.openMinSubmitModal();
-          return;
-        }
-        if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.showAlert) {
-          window.Telegram.WebApp.showAlert(result.message || 'Javoblarni yuborishda xatolik!');
-        } else {
-          alert(result.message || 'Javoblarni yuborishda xatolik yuz berdi!');
-        }
-      }
-    } catch (e) {
-      console.error('Submit error:', e);
-      this.closeConfirmSubmitModal();
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = '<span>Oxirgi yakunlash</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left:6px;"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>';
-      }
-      if (backBtn) backBtn.disabled = false;
-      alert('Tarmoq xatoligi yoki serverga ulanishda muammo yuz berdi. Iltimos, qayta urinib ko\'ring.');
-    } finally {
+    // 1. O'rtada 2 soniyalik dumaloq aylanma animatsiyani ko'rsatish
+    const step1 = document.getElementById('confirm-step-1');
+    const step2 = document.getElementById('confirm-step-2');
+    const stepLoad = document.getElementById('confirm-step-loading');
+    const progBar = document.getElementById('submit-spin-progress');
+    if (step1) step1.style.display = 'none';
+    if (step2) step2.style.display = 'none';
+    if (stepLoad) stepLoad.style.display = 'block';
+    if (progBar) {
+      progBar.style.transition = 'none';
+      progBar.style.width = '0%';
       setTimeout(() => {
-        this._isSubmitting = false;
-        if (backBtn) backBtn.disabled = false;
-      }, 1500);
+        progBar.style.transition = 'width 1.9s cubic-bezier(0.22, 1, 0.36, 1)';
+        progBar.style.width = '100%';
+      }, 30);
     }
+
+    const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
+    const requestBody = JSON.stringify(Object.assign({}, payload, { init_data: initData }));
+    const requestHeaders = {
+      'Content-Type': 'application/json',
+      'X-Telegram-Init-Data': initData,
+      'X-Telegram-User-Id': String(this.userTgId || '')
+    };
+
+    let serverResultData = null;
+    let blockedEarlyResult = null;
+    let hardErrorResult = null;
+
+    // 2. Orqa fonda darhol navbatga yuborishni boshlaymiz (animatsiya aylanayotgan 2 soniya ichida paralel ketadi)
+    const bgSubmitPromise = (async () => {
+      let maxRetries = 4;
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          const response = await fetch('/api/submit-test', {
+            method: 'POST',
+            headers: requestHeaders,
+            body: requestBody,
+            keepalive: true
+          });
+
+          const result = await response.json();
+
+          if (response.status === 429 || response.status >= 500) {
+            const waitMs = ((result && result.retry_after) ? Number(result.retry_after) * 1000 : 800 * (attempt + 1));
+            await new Promise(r => setTimeout(r, waitMs));
+            continue;
+          }
+
+          if (result && result.success) {
+            this.clearAnswersFromStorage();
+            serverResultData = result.data || null;
+            const resModal = document.getElementById('result-modal');
+            if (resModal && resModal.classList.contains('open') && serverResultData && serverResultData.is_late) {
+              this.showResultModal(serverResultData);
+            }
+            break;
+          } else {
+            if (result && result.error_code === 'EARLY_SUBMISSION_BLOCKED') {
+              blockedEarlyResult = result;
+            } else {
+              hardErrorResult = result || { message: 'Javoblarni yuborishda xatolik!' };
+            }
+            break;
+          }
+        } catch (err) {
+          console.warn(`Submit retry #${attempt + 1}:`, err);
+          if (attempt < maxRetries - 1) {
+            await new Promise(r => setTimeout(r, 900 * (attempt + 1)));
+          }
+        }
+      }
+    })();
+
+    // 3. Aniq 2 soniya (2000ms) dumaloq animatsiya aylangach, natija modalini ochamiz (server band bo'lsa ham kutib qolmaydi!)
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    this.closeConfirmSubmitModal();
+    this._isSubmitting = false;
+
+    if (blockedEarlyResult) {
+      if (!this.minSubmitInfo) this.minSubmitInfo = {};
+      this.minSubmitInfo.can_submit = false;
+      if (blockedEarlyResult.remaining_seconds !== undefined) {
+        this.minSubmitInfo.remaining_seconds = blockedEarlyResult.remaining_seconds;
+      }
+      if (blockedEarlyResult.unlock_time) {
+        this.minSubmitInfo.unlock_time_str = blockedEarlyResult.unlock_time;
+      }
+      this.startMinSubmitTimer();
+      this.openMinSubmitModal();
+      return;
+    }
+
+    if (hardErrorResult) {
+      if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.showAlert) {
+        window.Telegram.WebApp.showAlert(hardErrorResult.message || 'Javoblarni yuborishda xatolik!');
+      } else {
+        alert(hardErrorResult.message || 'Javoblarni yuborishda xatolik yuz berdi!');
+      }
+      return;
+    }
+
+    this.showResultModal(serverResultData || {
+      test_id: this.testId,
+      test_code: this.testCode,
+      fullname: this.userFullname,
+      is_published: false,
+      is_late: false,
+      queued: true
+    }, { keepStorage: !serverResultData });
   },
 
-  showResultModal(data) {
-    this.clearAnswersFromStorage();
+  showResultModal(data, opts) {
+    if (!opts || !opts.keepStorage) {
+      this.clearAnswersFromStorage();
+    }
     const mainSubmitBtn = document.getElementById('btn-submit-test');
     if (mainSubmitBtn) {
       mainSubmitBtn.disabled = true;
@@ -1206,7 +1723,7 @@ const TestApp = {
     const titleEl = modal.querySelector('.result-title');
     const gradeContainer = document.getElementById('result-grade-container');
     const detailsGrid = modal.querySelector('.result-details-grid');
-    const noteEl = modal.querySelector('.result-actions div');
+    const noteEl = document.getElementById('result-note-box') || modal.querySelector('.result-actions div');
     const analysisBtn = document.getElementById('btn-open-analysis');
 
     if (nameEl) nameEl.textContent = data.fullname || this.userFullname;
@@ -1250,14 +1767,14 @@ const TestApp = {
           </span>
           <div style="text-align: left;">
             <div style="font-size: 11px; text-transform: uppercase; font-weight: 800; color: #D97706; letter-spacing: 0.5px;">Holat</div>
-            <div style="font-size: 16px; font-weight: 800; color: #B45309;">Jarayonda (Kutilmoqda)...</div>
+            <div style="font-size: 16px; font-weight: 800; color: #B45309;">Qabul qilindi (Navbatda)...</div>
           </div>
         `;
       }
       if (detailsGrid) detailsGrid.style.display = 'none';
       if (analysisBtn) analysisBtn.style.display = 'none';
       if (noteEl) {
-        noteEl.innerHTML = `<b>Eslatma:</b> Javoblaringiz muvaffaqiyatli saqlandi. Test hozirda davom etmoqda. Admin testni to'xtatib, <b>Rasch modeli (JMLE)</b> asosida tahlil o'tkazgach, to'g'ri ishlangan savollar soni, ball va Milliy sertifikat darajangiz botingizga shaxsiy xabar qilib yuboriladi!`;
+        noteEl.innerHTML = `<b>Eslatma:</b> Javoblaringiz darhol qabul qilindi va tizim navbatiga qo'shildi. Saqlangani haqida hoziroq <b>Telegram botga tasdiq xabari boradi!</b> Admin testni yakunlab, <b>Rasch modeli (JMLE)</b> asosida tahlil o'tkazgach, yakuniy ball va darajangiz botga yuboriladi.`;
       }
     } else {
       if (titleEl) titleEl.textContent = "Test Yakunlandi!";
@@ -1275,7 +1792,10 @@ const TestApp = {
       if (gradeVal) {
         const grade = data.grade || '—';
         const score = (data.score !== undefined && data.score !== null) ? `${data.score} ball` : '';
-        gradeVal.textContent = `${grade} ${score ? `(${score})` : ''}`;
+        const tSc = (data.test_score !== undefined) ? `Test: ${data.test_score}` : '';
+        const eSc = (data.essay_score !== undefined) ? `Esse: ${data.essay_score}` : '';
+        const subText = (tSc || eSc) ? ` [${tSc}${tSc && eSc ? ', ' : ''}${eSc}]` : '';
+        gradeVal.textContent = `${grade} ${score ? `(${score})` : ''}${subText}`;
       }
     }
 
@@ -1301,7 +1821,9 @@ const TestApp = {
     const details = data.details;
 
     Object.keys(details).forEach(key => {
+      if (key === '45' || key === '_meta') return;
       const item = details[key];
+      if (!item || typeof item !== 'object' || item.status === 'essay') return;
       const isCorrect = item.status === 'correct';
       const isUnanswered = item.status === 'unanswered';
       

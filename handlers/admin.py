@@ -1301,21 +1301,39 @@ async def adm_legacy_users_redirect_cb(call: CallbackQuery):
     await call.answer("Tezkor ko'rsatkichlar uchun /stats buyrug'idan foydalaning!", show_alert=True)
 
 # 4. Adminlar boshqaruvi
+def _build_manage_admins_view(admins: List[Dict[str, Any]], viewer_id: int) -> Tuple[str, InlineKeyboardMarkup]:
+    text = "👑 <b>Adminlar ro'yxati:</b>\n\n"
+    rows = []
+    for idx, a in enumerate(admins, 1):
+        tg_id_val = int(a["tg_id"])
+        is_super = " (Bosh Admin)" if tg_id_val == int(ADMIN_ID) else ""
+        fname = html.escape(str(a.get("fullname") or "Admin"))
+        text += f"<b>{idx}. {fname}</b> — <code>{tg_id_val}</code>{is_super}\n"
+        if viewer_id == int(ADMIN_ID) and tg_id_val != int(ADMIN_ID):
+            rows.append([
+                InlineKeyboardButton(
+                    text=f"🗑 O'chirish: {a.get('fullname', 'Admin')} ({tg_id_val})",
+                    callback_data=f"adm_del_admin_{tg_id_val}"
+                )
+            ])
+
+    if viewer_id == int(ADMIN_ID):
+        text += "\n💡 <i>Adminni o'chirish uchun uning ismidagi 🗑 tugmasini bosing (uning chatidagi barcha admin xabarlari ham o'chiriladi).</i>"
+        rows.append([InlineKeyboardButton(text="➕ Yangi admin qo'shish", callback_data="admin_add_new_prompt")])
+    rows.append([InlineKeyboardButton(text="🔙 Admin Menyuga qaytish", callback_data="admin_back_to_menu")])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @admin_router.callback_query(F.data == "admin_manage_admins")
-async def admin_manage_admins_cb(call: CallbackQuery):
+async def admin_manage_admins_cb(call: CallbackQuery, state: FSMContext = None):
+    if state:
+        await state.clear()
     if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
+        await call.answer("⛔️ Sizda adminlik huquqi yo'q!", show_alert=True)
         return
 
     admins = await test_db.db(test_db.get_all_admins)
-    text = "👑 <b>Adminlar ro'yxati:</b>\n\n"
-    for idx, a in enumerate(admins, 1):
-        is_super = " (Bosh Admin)" if a["tg_id"] == ADMIN_ID else ""
-        text += f"<b>{idx}. {a.get('fullname', 'Admin')}</b> — <code>{a['tg_id']}</code>{is_super}\n"
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Yangi admin qo'shish", callback_data="admin_add_new_prompt")],
-        [InlineKeyboardButton(text="🔙 Admin Menyuga qaytish", callback_data="admin_back_to_menu")]
-    ])
+    text, kb = _build_manage_admins_view(admins, call.from_user.id)
 
     try:
         await call.message.edit_text(text, reply_markup=kb)
@@ -1323,10 +1341,132 @@ async def admin_manage_admins_cb(call: CallbackQuery):
         await call.message.answer(text, reply_markup=kb)
     await call.answer()
 
+
+@admin_router.callback_query(F.data.startswith("adm_del_admin_"))
+async def admin_delete_admin_prompt_cb(call: CallbackQuery):
+    if call.from_user.id != int(ADMIN_ID):
+        await call.answer("⛔️ Faqat Bosh Admin boshqa adminlarni o'chirishi mumkin!", show_alert=True)
+        return
+
+    try:
+        target_tg_id = int(call.data.replace("adm_del_admin_", "").strip())
+    except ValueError:
+        await call.answer("⚠️ Noto'g'ri ID!", show_alert=True)
+        return
+
+    if target_tg_id == int(ADMIN_ID):
+        await call.answer("⛔️ Bosh Adminni o'chirib bo'lmaydi!", show_alert=True)
+        return
+
+    admins = await test_db.db(test_db.get_all_admins)
+    target_admin = next((a for a in admins if int(a["tg_id"]) == target_tg_id), None)
+    fname = html.escape(str(target_admin.get("fullname", "Admin"))) if target_admin else "Admin"
+
+    text = (
+        f"⚠️ <b>Adminni o'chirishni tasdiqlaysizmi?</b>\n\n"
+        f"👤 <b>Admin:</b> {fname}\n"
+        f"🆔 <b>Telegram ID:</b> <code>{target_tg_id}</code>\n\n"
+        f"🗑 <i>Tasdiqlasangiz, ushbu foydalanuvchidan adminlik huquqi olib tashlanadi va unga admin sifatida yuborilgan barcha xabarlar uning chatidan butunlay o'chiriladi!</i>"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ha, adminni va xabarlarini o'chirish", callback_data=f"adm_confirm_del_admin_{target_tg_id}")],
+        [InlineKeyboardButton(text="🔙 Bekor qilish", callback_data="admin_manage_admins")]
+    ])
+    try:
+        await call.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        await call.message.answer(text, reply_markup=kb)
+    await call.answer()
+
+
+async def _purge_removed_admin_chat_messages(target_tg_id: int, msg_ids: List[int]) -> int:
+    """O'chirilgan adminning chatidagi barcha qayd etilgan admin xabarlarini o'chiradi
+    va klaviaturasini oddiy o'quvchi menyusiga qaytaradi."""
+    deleted_count = 0
+    unique_ids = sorted(list({int(m) for m in msg_ids if m and int(m) > 0}), reverse=True)
+
+    # 1. Saqlangan barcha admin message_id larni 100 tadan guruhlab tezkor o'chirish
+    for i in range(0, len(unique_ids), 100):
+        chunk = unique_ids[i:i + 100]
+        try:
+            await bot.delete_messages(chat_id=target_tg_id, message_ids=chunk)
+            deleted_count += len(chunk)
+        except Exception:
+            for mid in chunk:
+                try:
+                    await bot.delete_message(chat_id=target_tg_id, message_id=mid)
+                    deleted_count += 1
+                except Exception:
+                    pass
+
+    # 2. Foydalanuvchining pastki Reply klaviaturasidan "👨‍🏫 Admin Panel" tugmasini olib tashlash
+    try:
+        await bot.send_message(
+            chat_id=target_tg_id,
+            text="ℹ️ <b>Bosh menyu yangilandi.</b>",
+            reply_markup=main_menu_kb(target_tg_id)
+        )
+    except Exception:
+        pass
+
+    return deleted_count
+
+
+@admin_router.callback_query(F.data.startswith("adm_confirm_del_admin_"))
+async def admin_confirm_delete_admin_cb(call: CallbackQuery):
+    if call.from_user.id != int(ADMIN_ID):
+        await call.answer("⛔️ Faqat Bosh Admin boshqa adminlarni o'chirishi mumkin!", show_alert=True)
+        return
+
+    try:
+        target_tg_id = int(call.data.replace("adm_confirm_del_admin_", "").strip())
+    except ValueError:
+        await call.answer("⚠️ Noto'g'ri ID!", show_alert=True)
+        return
+
+    if target_tg_id == int(ADMIN_ID):
+        await call.answer("⛔️ Bosh Adminni o'chirib bo'lmaydi!", show_alert=True)
+        return
+
+    # 1. Bazadan adminni o'chirish va RAM keshni darhol tozalash
+    await test_db.db(test_db.remove_admin, target_tg_id)
+    # Throttling middleware admin ro'yxatini ham yangilash
+    try:
+        from core.bot import throttling_middleware
+        throttling_middleware.admin_ids.discard(target_tg_id)
+    except Exception:
+        pass
+
+    # 2. Unga admin sifatida yuborilgan barcha xabarlar ro'yxatini olish va chatidan o'chirish
+    msg_ids = await test_db.db(test_db.pop_admin_messages, target_tg_id)
+    asyncio.create_task(_purge_removed_admin_chat_messages(target_tg_id, msg_ids))
+
+    await call.answer(f"✅ Admin ({target_tg_id}) o'chirildi va chatidagi admin xabarlari tozalanmoqda!", show_alert=True)
+
+    admins = await test_db.db(test_db.get_all_admins)
+    text, kb = _build_manage_admins_view(admins, call.from_user.id)
+    text = (
+        f"✅ <b>Admin <code>{target_tg_id}</code> muvaffaqiyatli o'chirildi!</b>\n"
+        f"🧹 <i>Uning chatidagi barcha admin xabarlari ({len(msg_ids)} ta) avtomatik tozalandi.</i>\n\n"
+        + text
+    )
+    try:
+        await call.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        await call.message.answer(text, reply_markup=kb)
+
+
 @admin_router.callback_query(F.data.in_(["admin_back_to_menu", "admin_panel_back"]))
 async def admin_back_to_menu_cb(call: CallbackQuery, state: FSMContext = None):
     if state:
         await state.clear()
+    if not (await test_db.db(test_db.is_admin, call.from_user.id, ADMIN_ID)):
+        await call.answer("⛔️ Sizda adminlik huquqi yo'q!", show_alert=True)
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        return
     text = (
         "⚙️ <b>ADMIN BOSHQARUV PANELI</b>\n\n"
         "Quyidagi bo'limlardan birini tanlang 👇"
@@ -1360,6 +1500,9 @@ async def admin_add_new_prompt_cb(call: CallbackQuery, state: FSMContext):
 
 @admin_router.message(AddAdminState.tg_id_or_user)
 async def admin_save_new_admin(message: Message, state: FSMContext):
+    if message.from_user.id != int(ADMIN_ID):
+        await state.clear()
+        return
     try:
         new_tg_id = int(message.text.strip())
         user_info = await test_db.db(test_db.get_user, new_tg_id)
@@ -1367,13 +1510,36 @@ async def admin_save_new_admin(message: Message, state: FSMContext):
         username = user_info["username"] if user_info else ""
 
         await test_db.db(test_db.add_admin, new_tg_id, fullname, username, added_by=message.from_user.id)
+        try:
+            from core.bot import throttling_middleware
+            throttling_middleware.admin_ids.add(new_tg_id)
+        except Exception:
+            pass
         await state.clear()
+
+        # Yangi tayinlangan adminga xabar yuborish (TrackedBot uning message_id sini avtomatik saqlaydi)
+        if new_tg_id != int(ADMIN_ID):
+            try:
+                await bot.send_message(
+                    chat_id=new_tg_id,
+                    text=(
+                        f"👑 <b>Tabriklaymiz, {html.escape(fullname)}!</b>\n\n"
+                        f"Siz <b>Bosh Admin</b> tomonidan bot administratori etib tayinlandingiz.\n"
+                        f"Pastdagi <b>👨‍🏫 Admin Panel</b> yoki <b>⚙️ Admin boshqaruv</b> tugmalari orqali tizimni boshqarishingiz mumkin."
+                    ),
+                    reply_markup=main_menu_kb(new_tg_id)
+                )
+            except Exception:
+                pass
+
+        admins = await test_db.db(test_db.get_all_admins)
+        list_text, list_kb = _build_manage_admins_view(admins, message.from_user.id)
         await message.answer(
             f"✅ <b>Yangi admin tayinlandi!</b>\n\n"
-            f"👤 <b>Ism:</b> {fullname}\n"
+            f"👤 <b>Ism:</b> {html.escape(fullname)}\n"
             f"🆔 <b>Telegram ID:</b> <code>{new_tg_id}</code>\n\n"
-            f"Endi ushbu foydalanuvchi ham Admin Panelga kira oladi.",
-            reply_markup=admin_menu_kb()
+            + list_text,
+            reply_markup=list_kb
         )
     except ValueError:
         await message.answer("⚠️ Iltimos, to'g'ri Telegram ID (raqam) kiriting:")
@@ -2318,13 +2484,14 @@ async def admin_eval_prompt_cb(call: CallbackQuery):
 def build_detailed_tahlil_text(sub: dict, test: dict) -> str:
     """O'quvchi uchun to'g'ri va noto'g'ri ishlangan savollar tahlili matni."""
     name = sub.get("fullname") or "O'quvchi"
-    score = sub.get("score", 0.0)
-    grade = sub.get("grade") or test_db.calculate_grade(score)
+    scores_meta = test_db.extract_submission_scores(sub)
+    score = scores_meta["final_score"]
+    test_sc = scores_meta["test_score"]
+    essay_sc = scores_meta["essay_score"]
+    grade = scores_meta["grade"]
     corr = sub.get("correct_count", 0)
-    total = sub.get("total_count", 55) or 55
-    incorr = max(0, total - corr)
     code = sub.get("test_code", test.get("test_code", ""))
-    test_title = test.get("title", "Matematika Testi")
+    test_title = test.get("title", "Ona tili Testi")
     yt_url = (test.get("youtube_url") or "").strip()
 
     details = {}
@@ -2348,8 +2515,14 @@ def build_detailed_tahlil_text(sub: dict, test: dict) -> str:
     incorrect_keys = []
     unanswered_keys = []
     for k in sorted(details.keys(), key=sort_key):
+        if str(k) in ("45", "_meta"):
+            continue
         item = details[k]
+        if not isinstance(item, dict):
+            continue
         st = item.get("status")
+        if st == "essay":
+            continue
         if st == "correct":
             correct_keys.append(str(k))
         elif st == "partial":
@@ -2366,13 +2539,15 @@ def build_detailed_tahlil_text(sub: dict, test: dict) -> str:
     text = (
         f"📊 <b>SAVOLLAR TAHLILI — «{test_title}»</b> (<code>#{code}</code>)\n\n"
         f"👤 <b>O'quvchi:</b> {name}\n"
-        f"🎖 <b>Milliy Sertifikat darajasi:</b> <b>{grade}</b> ({score} ball)\n"
-        f"✅ <b>To'g'ri ishlangan:</b> {corr} / {total} ta band\n"
+        f"✅ <b>To'g'ri javoblar:</b> {corr} ta\n"
+        f"📝 <b>Test bali:</b> {test_sc} ball\n"
+        f"✍️ <b>Esse bali:</b> {essay_sc} ball\n"
+        f"🎯 <b>Yakuniy ball:</b> <b>{score} ball</b>\n"
+        f"🎖 <b>Milliy Sertifikat darajasi:</b> <b>{grade}</b>\n"
     )
     if partial_keys:
-        text += f"⚠️ <b>Qisman to'g'ri (30% ball):</b> {len(partial_keys)} ta band\n"
+        text += f"⚠️ <b>Qisman to'g'ri (30% ball):</b> {len(partial_keys)} ta\n"
     text += (
-        f"❌ <b>Noto'g'ri / qoldirilgan:</b> {incorr} ta\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"✅ <b>TO'G'RI ISHLANGAN SAVOLLAR ({len(correct_keys)} ta):</b>\n"
         f"<code>{corr_str}</code>\n"
@@ -2397,40 +2572,28 @@ def build_detailed_tahlil_text(sub: dict, test: dict) -> str:
 def build_student_result_message(sub: dict, test: dict, eval_type: str = "rasch") -> tuple:
     """O'quvchi uchun natija matni va video tahlil / mini ilova tugmalarini shakllantirish."""
     name = sub.get("fullname") or "O'quvchi"
-    score = sub.get("score", 0.0)
-    grade = sub.get("grade") or test_db.calculate_grade(score)
+    scores_meta = test_db.extract_submission_scores(sub)
+    score = scores_meta["final_score"]
+    test_sc = scores_meta["test_score"]
+    essay_sc = scores_meta["essay_score"]
+    grade = scores_meta["grade"]
     corr = sub.get("correct_count", 0)
-    total = sub.get("total_count", 55) or 55
-    incorr = max(0, total - corr)
     code = sub.get("test_code", test.get("test_code", ""))
-    test_title = test.get("title", "Matematika Testi")
+    test_title = test.get("title", "Ona tili Testi")
     yt_url = (test.get("youtube_url") or "").strip()
 
-    if eval_type == "rasch":
-        msg_text = (
-            f"📢 <b>DIQQAT! TEST NATIJALARI E'LON QILINDI!</b>\n\n"
-            f"Hurmatli <b>{name}</b>, sizning <b>«{test_title}»</b> (<code>#{code}</code>) testi bo'yicha rasmiy natijangiz:\n\n"
-            f"{tg_e('star_premium', '🧮')} <b>Baholash tizimi:</b> Rasch Modeli (JMLE)\n"
-            f"{tg_e('star_gold', '🎖')} <b>Milliy Sertifikat darajangiz:</b> <b>{grade}</b> ({score} ball)\n"
-            f"{tg_e('success', '✅')} <b>To'g'ri ishlangan:</b> {corr} ta band\n"
-            f"{tg_e('error', '❌')} <b>Noto'g'ri / belgilanmagan:</b> {incorr} ta\n"
-            f"{tg_e('order', '📊')} <b>Jami savollar:</b> {total} ta\n"
-            f"{tg_e('clock', '🕒')} <b>E'lon vaqti:</b> {format_uzb_time()}\n\n"
-            f"💡 <i>Qaysi savollaringiz to'g'ri yoki noto'g'ri ekanligini ko'rish uchun quyidagi <b>«📊 Test tahlili»</b> tugmasini bosing:</i>\n\n"
-            f"🏆 <i>Ishtirokingiz uchun tashakkur!</i>"
-        )
-    else:
-        msg_text = (
-            f"📢 <b>DIQQAT! TEST NATIJALARI E'LON QILINDI!</b>\n\n"
-            f"Hurmatli <b>{name}</b>, sizning <b>«{test_title}»</b> (<code>#{code}</code>) testi bo'yicha rasmiy natijangiz:\n\n"
-            f"{tg_e('star_premium', '📋')} <b>Baholash turi:</b> Standart (To'g'ri javoblar soni)\n"
-            f"{tg_e('success', '✅')} <b>To'g'ri javoblar:</b> {corr} / {total} ta\n"
-            f"{tg_e('error', '❌')} <b>Noto'g'ri javoblar:</b> {incorr} ta\n"
-            f"{tg_e('star_gold', '🎯')} <b>To'plangan ball:</b> {score} ball\n"
-            f"{tg_e('clock', '🕒')} <b>E'lon vaqti:</b> {format_uzb_time()}\n\n"
-            f"💡 <i>Qaysi savollaringiz to'g'ri yoki noto'g'ri ekanligini ko'rish uchun quyidagi <b>«📊 Test tahlili»</b> tugmasini bosing:</i>\n\n"
-            f"🏆 <i>Ishtirokingiz uchun tashakkur!</i>"
-        )
+    msg_text = (
+        f"📢 <b>DIQQAT! TEST NATIJALARI E'LON QILINDI!</b>\n\n"
+        f"Hurmatli <b>{name}</b>, sizning <b>«{test_title}»</b> (<code>#{code}</code>) testi bo'yicha rasmiy natijangiz:\n\n"
+        f"{tg_e('success', '✅')} <b>To'g'ri javoblar:</b> {corr} ta\n"
+        f"📝 <b>Test bali:</b> {test_sc} ball\n"
+        f"✍️ <b>Esse bali:</b> {essay_sc} ball\n"
+        f"{tg_e('star_gold', '🎯')} <b>Yakuniy ball:</b> <b>{score} ball</b>\n"
+        f"{tg_e('star_premium', '🎖')} <b>Milliy Sertifikat darajasi:</b> <b>{grade}</b>\n"
+        f"{tg_e('clock', '🕒')} <b>E'lon vaqti:</b> {format_uzb_time()}\n\n"
+        f"💡 <i>Qaysi savollaringiz to'g'ri yoki noto'g'ri ekanligini ko'rish uchun quyidagi <b>«📊 Test tahlili»</b> tugmasini bosing:</i>\n\n"
+        f"🏆 <i>Ishtirokingiz uchun tashakkur!</i>"
+    )
 
     kb_rows = [
         [InlineKeyboardButton(text="📊 Test tahlili", callback_data=f"user_req_tahlil_{test['id']}")]
@@ -2440,7 +2603,7 @@ def build_student_result_message(sub: dict, test: dict, eval_type: str = "rasch"
     else:
         kb_rows.append([InlineKeyboardButton(text="🎬 Video tahlil (mavjud emas)", callback_data="no_video_analysis")])
 
-    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{get_webapp_url()}/app.html?tab=tests"))])
+    kb_rows.append([InlineKeyboardButton(text="📱 Natijalarim (Mini App)", web_app=WebAppInfo(url=f"{get_webapp_url()}/results.html"))])
 
     return msg_text, InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
@@ -2737,19 +2900,23 @@ async def admin_test_rasch_eval(call: CallbackQuery):
         f"🧮 <b>Rasch Modeli (JMLE) Baholash Natijalari</b>\n\n"
         f"📖 <b>Test:</b> {test['title']} (<code>#{test['test_code']}</code>)\n"
         f"👥 <b>Talabalar:</b> {meta.get('n_students', meta.get('num_students', len(students)))} nafar\n"
-        f"❓ <b>Elementlar:</b> {meta.get('n_items', meta.get('num_items', len(items)))} ta (55 ta band)\n"
+        f"❓ <b>Test elementlari:</b> {meta.get('n_items', meta.get('num_items', len(items)))} ta\n"
         f"🔄 <b>Iteratsiyalar:</b> {meta.get('iterations', 0)} (Konvergensiya: {meta.get('converged', True)})\n\n"
         f"{noisy_summary}"
         f"{status_note}"
-        f"🏆 <b>O'quvchilar darajalari va yakuniy ballari (0-100):</b>\n"
+        f"🏆 <b>O'quvchilar darajalari va yakuniy ballari (75 ballik shkala):</b>\n"
     )
 
     for idx, s in enumerate(students[:25], 1):
         sid = s.get('student_id')
         u = await test_db.db(test_db.get_user, sid) if sid else None
         name = u['fullname'] if u else f"ID: {sid}"
-        theta_val = s.get('theta', 0.0)
-        text += f"<b>{idx}. {name}</b>: <b>{s['final_score']} ball</b> [🎖 <b>{s['grade']}</b>] (θ={theta_val:+.2f})\n"
+        theta_val = s.get('theta_logit', s.get('theta', 0.0))
+        test_sc = s.get('test_score', s.get('final_score', 0.0))
+        essay_sc = s.get('essay_score', 0.0)
+        raw_c = s.get('raw_score', 0)
+        outfit_flag = " ⚠️(tasodif)" if s.get('is_outfit') else ""
+        text += f"<b>{idx}. {name}</b>: <b>{s['final_score']} ball</b> [🎖 <b>{s['grade']}</b>] (To'g'ri: {raw_c} ta | Test: {test_sc} | Esse: {essay_sc} | θ={theta_val:+.2f}{outfit_flag})\n"
 
     if len(students) > 25:
         text += f"\n<i>...va yana {len(students) - 25} nafar talaba.</i>"
@@ -2789,7 +2956,7 @@ async def admin_item_diag_cb(call: CallbackQuery):
 
     text = (
         f"🔍 <b>«{test['title']}» — Savollar Sifati va Shovqin Tahlili</b>\n\n"
-        f"👥 <b>Ishtirokchilar:</b> {n_students} nafar | ❓ <b>Jami elementlar:</b> 55 ta band\n\n"
+        f"👥 <b>Ishtirokchilar:</b> {n_students} nafar | ❓ <b>Jami test elementlari:</b> {len(items)} ta\n\n"
     )
 
     if noisy:
@@ -2803,7 +2970,7 @@ async def admin_item_diag_cb(call: CallbackQuery):
             text += f"• <b>{it['item_label']}</b>: {solved}/{n_students} kishi yechgan | Ball: <b>{score_pts}</b> | Infit: <code>{infit}</code>, Outfit: <code>{outfit}</code>\n"
         text += f"\nℹ️ <i>Eslatma: Ushbu savollarni to'g'ri topgan o'quvchilarga ball to'liq berilgan.</i>\n\n"
     else:
-        text += f"✨ <b>SHOVQINLI SAVOLLAR:</b>\nHech qanday shovqinli savol aniqlanmadi. Barcha 55 ta savol Rasch modeliga ideal mos tushgan!\n\n"
+        text += f"✨ <b>SHOVQINLI SAVOLLAR:</b>\nHech qanday shovqinli savol aniqlanmadi. Barcha test savollari Rasch modeliga ideal mos tushgan!\n\n"
 
     text += f"🔥 <b>ENG QIYIN 5 TA SAVOL (Eng yuqori ball):</b>\n"
     for it in hardest:
@@ -2849,8 +3016,10 @@ async def admin_test_res_text(call: CallbackQuery):
     text += f"👥 <b>Jami ishtirokchilar:</b> {len(results)} nafar | 🕒 {format_uzb_time()}\n\n"
 
     for idx, row in enumerate(results[:30], 1):
-        grade = test_db.calculate_grade(row["score"])
-        text += f"<b>{idx}. {row['fullname']}</b> — <b>{row['score']} ball</b> [🎖 {grade}] ({row['correct_count']} ta to'g'ri)\n"
+        grade = row.get("grade") or test_db.calculate_grade(row["score"], row.get("correct_count"))
+        test_sc = row.get("test_score", row["score"])
+        essay_sc = row.get("essay_score", 0.0)
+        text += f"<b>{idx}. {row['fullname']}</b> — <b>{row['score']} ball</b> [🎖 {grade}] (To'g'ri: {row['correct_count']} ta | Test: {test_sc} | Esse: {essay_sc})\n"
 
     if len(results) > 30:
         text += f"\n<i>...va yana {len(results) - 30} nafar ishtirokchi (barchasini ko'rish uchun PDF yuklab oling).</i>"

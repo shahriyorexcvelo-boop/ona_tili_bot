@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Mening Natijalarim — Ona tili Rasch Test</title>
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Non-blocking Google Fonts with Native System Font Fallback -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap" media="print" onload="this.media='all'">
+  <style>
+    :root {
+      --bg: #F8FAFC;
+      --bg-card: #FFFFFF;
+      --text: #0F172A;
+      --text-muted: #64748B;
+      --primary: #2563EB;
+      --primary-hover: #1D4ED8;
+      --primary-light: rgba(37, 99, 235, 0.08);
+      --success: #10B981;
+      --success-light: rgba(16, 185, 129, 0.1);
+      --danger: #EF4444;
+      --danger-light: rgba(239, 68, 68, 0.1);
+      --warning: #F59E0B;
+      --warning-light: rgba(245, 158, 11, 0.1);
+      --border: #E2E8F0;
+      --radius: 16px;
+      --shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+      --safe-top: var(--tg-content-safe-area-inset-top, 0px);
+      --safe-bottom: var(--tg-content-safe-area-inset-bottom, 0px);
+    }
+    .dark-mode {
+      --bg: #0F172A;
+      --bg-card: #1E293B;
+      --text: #F1F5F9;
+      --text-muted: #94A3B8;
+      --border: #334155;
+      --shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+      --primary-light: rgba(37, 99, 235, 0.2);
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding-top: var(--safe-top);
+      padding-bottom: calc(var(--safe-bottom) + 24px);
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+    .container {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 14px 16px;
+    }
+    /* HEADER */
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0 16px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .brand-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      object-fit: cover;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .header-title {
+      font-size: 17px;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.3px;
+    }
+    .header-sub {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-icon {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-icon:active {
+      transform: scale(0.95);
+    }
+
+    /* CARD STYLES */
+    .result-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      cursor: pointer;
+    }
+    .result-card:active {
+      transform: scale(0.99);
+    }
+    .card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .card-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1.3;
+    }
+    .badge-code {
+      background: var(--primary-light);
+      color: var(--primary);
+      font-weight: 800;
+      font-size: 11.5px;
+      padding: 4px 8px;
+      border-radius: 8px;
+      white-space: nowrap;
+    }
+    .card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px dashed var(--border);
+    }
+    .meta-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* STATS GRID IN CARD */
+    .card-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .stat-pill {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 8px 10px;
+      text-align: center;
+    }
+    .stat-pill-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-bottom: 2px;
+    }
+    .stat-pill-value {
+      font-size: 14px;
+      font-weight: 900;
+      color: var(--text);
+    }
+    .stat-pill.success .stat-pill-value {
+      color: var(--success);
+    }
+    .stat-pill.primary .stat-pill-value {
+      color: var(--primary);
+    }
+
+    /* CARD BUTTON */
+    .btn-card-action {
+      width: 100%;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.15s ease;
+    }
+    .btn-card-action:hover {
+      background: var(--primary-hover);
+    }
+    .btn-card-action.pending {
+      background: var(--warning-light);
+      color: var(--warning);
+      border: 1px solid var(--warning);
+      cursor: default;
+    }
+
+    /* EMPTY STATE */
+    .empty-state {
+      text-align: center;
+      padding: 48px 16px;
+    }
+    .empty-icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 16px;
+      color: var(--text-muted);
+      opacity: 0.6;
+    }
+    .empty-title {
+      font-size: 16px;
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+    .empty-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      max-width: 320px;
+      margin: 0 auto 20px;
+      line-height: 1.45;
+    }
+    .btn-primary-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--primary);
+      color: white;
+      padding: 12px 22px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 800;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+    }
+
+    /* FULL ANALYSIS PAGE */
+    #analysis-page {
+      display: none;
+    }
+    .analysis-top-nav {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .btn-back {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .analysis-hero-card {
+      background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(16, 185, 129, 0.08));
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .analysis-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .q-item-card {
+      background: var(--bg-card);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .q-item-card.correct {
+      border-color: rgba(16, 185, 129, 0.4);
+      background: var(--success-light);
+    }
+    .q-item-card.wrong {
+      border-color: rgba(239, 68, 68, 0.4);
+      background: var(--danger-light);
+    }
+    .q-item-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .q-badge-num {
+      color: var(--text-muted);
+    }
+    .q-ans-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+    }
+    .q-ans-val {
+      font-weight: 800;
+      font-size: 13px;
+    }
+    .q-ans-val.user {
+      color: var(--text);
+    }
+    .q-ans-val.correct-key {
+      color: var(--success);
+    }
+
+    /* FILTER BUTTONS */
+    .filter-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .filter-tab {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .filter-tab.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+
+    /* SKELETON */
+    .skeleton-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 14px;
+      animation: pulse 1.2s infinite;
+    }
+    .skeleton-line {
+      height: 12px;
+      background: var(--border);
+      border-radius: 6px;
+      margin-bottom: 10px;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 0.3; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    
+    <!-- ==================== 1. TESTLAR RO'YXATI EKRANI ==================== -->
+    <div id="results-list-page">
+      <header class="app-header">
+        <div class="brand-wrap">
+          <img src="/img/bm_logo.png?v=20261021_v1" class="brand-logo" alt="Logo">
+          <div>
+            <h1 class="header-title">Mening Natijalarim</h1>
+            <div class="header-sub">Ona tili va adabiyot testlari</div>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button type="button" class="btn-icon" onclick="ResultsApp.fetchMyResults(true)" title="Yangilash">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+            </svg>
+          </button>
+          <button type="button" class="btn-icon" onclick="ResultsApp.toggleTheme()" title="Mavzu">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div id="submissions-container">
+        <!-- Yuklanmoqda... Skeleton -->
+        <div class="skeleton-card">
+          <div class="skeleton-line" style="width: 60%; height: 16px;"></div>
+          <div class="skeleton-line" style="width: 40%;"></div>
+          <div class="skeleton-line" style="width: 90%; height: 36px; margin-top: 14px;"></div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-line" style="width: 50%; height: 16px;"></div>
+          <div class="skeleton-line" style="width: 35%;"></div>
+          <div class="skeleton-line" style="width: 90%; height: 36px; margin-top: 14px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 2. KENGAYTIRILGAN KALITLAR TAHLILI EKRANI ==================== -->
+    <div id="analysis-page">
+      <div class="analysis-top-nav">
+        <button type="button" class="btn-back" onclick="ResultsApp.closeAnalysis()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          <span>Natijalarim</span>
+        </button>
+        <div style="flex: 1; text-align: right;">
+          <span id="analysis-test-code-badge" class="badge-code">#102</span>
+        </div>
+      </div>
+
+      <div class="analysis-hero-card">
+        <h2 id="analysis-test-title" style="font-size: 16px; font-weight: 900; margin-bottom: 6px;">Ona tili Testi</h2>
+        <div id="analysis-meta-time" style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Topshirilgan vaqt: —</div>
+        
+        <div class="card-stats" style="grid-template-columns: repeat(2, 1fr); gap: 8px;">
+          <div class="stat-pill success">
+            <div class="stat-pill-label">To'g'ri javoblar</div>
+            <div class="stat-pill-value" id="stat-analysis-correct">0 ta</div>
+          </div>
+          <div class="stat-pill">
+            <div class="stat-pill-label">Daraja</div>
+            <div class="stat-pill-value" id="stat-analysis-grade" style="font-size: 13px;">—</div>
+          </div>
+          <div class="stat-pill">
+            <div class="stat-pill-label">Test bali</div>
+            <div class="stat-pill-value" id="stat-analysis-test-score">0 ball</div>
+          </div>
+          <div class="stat-pill">
+            <div class="stat-pill-label">Esse bali</div>
+            <div class="stat-pill-value" id="stat-analysis-essay-score">0 ball</div>
+          </div>
+          <div class="stat-pill primary" style="grid-column: 1 / -1;">
+            <div class="stat-pill-label">Yakuniy ball (Test + Esse) / 2</div>
+            <div class="stat-pill-value" id="stat-analysis-score">0 ball</div>
+          </div>
+        </div>
+
+        <div id="analysis-yt-wrap" style="display: none; margin-top: 10px;">
+          <a id="analysis-yt-link" href="#" target="_blank" class="btn-card-action" style="background: #EF4444;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+            <span>YouTube Video Tahlilni Ko'rish</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- FILTER TABS -->
+      <div class="filter-tabs">
+        <button type="button" class="filter-tab active" data-filter="all" onclick="ResultsApp.setFilter('all')">Barchasi</button>
+        <button type="button" class="filter-tab" data-filter="correct" onclick="ResultsApp.setFilter('correct')">To'g'ri (<span id="count-filter-correct">0</span>)</button>
+        <button type="button" class="filter-tab" data-filter="wrong" onclick="ResultsApp.setFilter('wrong')">Xatolar (<span id="count-filter-wrong">0</span>)</button>
+      </div>
+
+      <!-- SAVOLLAR GRID TAHLILI -->
+      <div id="analysis-questions-grid" class="analysis-grid">
+        <!-- Savollar bu yerga dinamik qo'shiladi -->
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const ResultsApp = {
+      userTgId: 0,
+      submissions: [],
+      currentAnalysis: null,
+      activeFilter: 'all',
+
+      init() {
+        const tg = window.Telegram && window.Telegram.WebApp;
+        if (tg) {
+          try {
+            tg.ready();
+            tg.expand();
+            if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+          } catch(e) {}
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const queryTgId = params.get('tg_id');
+        const tgU = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+        this.userTgId = (tgU && tgU.id) || (queryTgId ? parseInt(queryTgId, 10) : 0);
+
+        if (window.BM_LOGO_B64) {
+          document.querySelectorAll('.brand-logo').forEach(img => { img.src = window.BM_LOGO_B64; });
+        }
+
+        const savedTheme = localStorage.getItem('app_theme') || 'light';
+        this.setTheme(savedTheme === 'dark');
+
+        this.fetchMyResults();
+
+        // Agar URL da aniq bir test_id bo'lsa, to'g'ridan-to'g'ri o'sha test tahlilini ochish
+        const targetTestId = params.get('test_id');
+        if (targetTestId) {
+          this._targetTestId = parseInt(targetTestId, 10);
+        }
+      },
+
+      setTheme(isDark) {
+        if (isDark) {
+          document.documentElement.classList.add('dark-mode');
+          document.body.classList.add('dark-mode');
+          localStorage.setItem('app_theme', 'dark');
+        } else {
+          document.documentElement.classList.remove('dark-mode');
+          document.body.classList.remove('dark-mode');
+          localStorage.setItem('app_theme', 'light');
+        }
+      },
+
+      toggleTheme() {
+        const isDark = document.body.classList.contains('dark-mode');
+        this.setTheme(!isDark);
+      },
+
+      async fetchMyResults(isRefresh = false) {
+        const cont = document.getElementById('submissions-container');
+        if (!cont) return;
+
+        const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
+        const qs = `?tg_id=${this.userTgId}&init_data=${encodeURIComponent(initData)}`;
+
+        try {
+          const res = await fetch(`/api/app/my-results${qs}`, {
+            headers: { 'X-Telegram-Init-Data': initData }
+          });
+          const data = await res.json();
+
+          if (!data || !data.success || !Array.isArray(data.results)) {
+            cont.innerHTML = `
+              <div class="empty-state">
+                <div class="empty-title">Natijalarni yuklab bo'lmadi</div>
+                <div class="empty-desc">${data?.message || "Serverga ulanishda xatolik yuz berdi."}</div>
+                <button type="button" class="btn-primary-action" onclick="ResultsApp.fetchMyResults(true)">Qayta urinish</button>
+              </div>`;
+            return;
+          }
+
+          this.submissions = data.results;
+          this.renderSubmissions();
+
+          if (this._targetTestId) {
+            const match = this.submissions.find(s => Number(s.test_id) === Number(this._targetTestId));
+            if (match && match.results_published) {
+              this.openAnalysis(match.test_id);
+            }
+            this._targetTestId = null;
+          }
+        } catch (e) {
+          cont.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-title">Tarmoq xatosi</div>
+              <div class="empty-desc">${e.message || "Internet aloqasini tekshiring"}</div>
+              <button type="button" class="btn-primary-action" onclick="ResultsApp.fetchMyResults(true)">Qayta urinish</button>
+            </div>`;
+        }
+      },
+
+      formatDate(dtStr) {
+        if (!dtStr) return 'Noma\'lum';
+        try {
+          const d = new Date(dtStr);
+          if (isNaN(d.getTime())) return String(dtStr);
+          const day = String(d.getDate()).padStart(2, '0');
+          const monthNames = ["Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul", "Avgust", "Sentabr", "Oktabr", "Noyabr", "Dekabr"];
+          const month = monthNames[d.getMonth()] || '';
+          const hours = String(d.getHours()).padStart(2, '0');
+          const mins = String(d.getMinutes()).padStart(2, '0');
+          return `${day}-${month}, ${hours}:${mins}`;
+        } catch (e) {
+          return String(dtStr);
+        }
+      },
+
+      renderSubmissions() {
+        const cont = document.getElementById('submissions-container');
+        if (!cont) return;
+
+        if (this.submissions.length === 0) {
+          cont.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+              </div>
+              <div class="empty-title">Siz hali test topshirmagansiz</div>
+              <div class="empty-desc">Ona tili milliy sertifikat testlarini yechib, o'z bilim darajangizni tekshirib ko'ring.</div>
+              <a href="/index.html?tg_id=${this.userTgId}" class="btn-primary-action">
+                <span>Test yechishni boshlash</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+              </a>
+            </div>`;
+          return;
+        }
+
+        let html = '';
+        this.submissions.forEach(sub => {
+          const isPub = Boolean(sub.results_published);
+          const score = (typeof sub.score === 'number') ? sub.score.toFixed(1) : (sub.score || '0');
+          const testScore = (typeof sub.test_score === 'number') ? sub.test_score.toFixed(1) : (sub.test_score ?? score);
+          const essayScore = (typeof sub.essay_score === 'number') ? sub.essay_score.toFixed(1) : (sub.essay_score ?? '0');
+          const correct = sub.correct_count || 0;
+          const grade = sub.grade || (isPub ? '—' : 'Kutilmoqda');
+          const dateFormatted = this.formatDate(sub.submitted_at);
+
+          html += `
+            <div class="result-card" onclick="${isPub ? `ResultsApp.openAnalysis(${sub.test_id})` : ''}">
+              <div class="card-top">
+                <h3 class="card-title">${sub.test_title || 'Ona tili Milliy Sertifikat Testi'}</h3>
+                <span class="badge-code">#${sub.test_code || sub.test_id}</span>
+              </div>
+              <div class="card-meta">
+                <span class="meta-item">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  <span>${dateFormatted}</span>
+                </span>
+                <span class="meta-item" style="color: ${isPub ? 'var(--success)' : 'var(--warning)'}; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                  ${isPub ? `
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span>Natijalar e'lon qilingan</span>
+                  ` : `
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span>Natijalar hisoblanmoqda</span>
+                  `}
+                </span>
+              </div>
+
+              ${isPub ? `
+                <div class="card-stats" style="grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                  <div class="stat-pill success">
+                    <div class="stat-pill-label">To'g'ri javoblar</div>
+                    <div class="stat-pill-value">${correct} ta</div>
+                  </div>
+                  <div class="stat-pill">
+                    <div class="stat-pill-label">Daraja</div>
+                    <div class="stat-pill-value" style="font-size: 13px;">${grade}</div>
+                  </div>
+                  <div class="stat-pill">
+                    <div class="stat-pill-label">Test bali</div>
+                    <div class="stat-pill-value">${testScore} ball</div>
+                  </div>
+                  <div class="stat-pill">
+                    <div class="stat-pill-label">Esse bali</div>
+                    <div class="stat-pill-value">${essayScore} ball</div>
+                  </div>
+                  <div class="stat-pill primary" style="grid-column: 1 / -1;">
+                    <div class="stat-pill-label">Yakuniy ball</div>
+                    <div class="stat-pill-value">${score} ball</div>
+                  </div>
+                </div>
+                <button type="button" class="btn-card-action" onclick="event.stopPropagation(); ResultsApp.openAnalysis(${sub.test_id})">
+                  <span>Kalitlar tahlilini ko'rish</span>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </button>
+              ` : `
+                <div class="btn-card-action pending">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  <span>Natijalar admin tomonidan e'lon qilinishi kutilmoqda</span>
+                </div>
+              `}
+            </div>
+          `;
+        });
+
+        cont.innerHTML = html;
+      },
+
+      async openAnalysis(testId) {
+        const tg = window.Telegram && window.Telegram.WebApp;
+        if (tg && tg.BackButton) {
+          tg.BackButton.show();
+          tg.BackButton.onClick(ResultsApp.closeAnalysis);
+        }
+
+        document.getElementById('results-list-page').style.display = 'none';
+        const aPage = document.getElementById('analysis-page');
+        aPage.style.display = 'block';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+
+        const grid = document.getElementById('analysis-questions-grid');
+        grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 30px; color: var(--text-muted);">Tahlil ma\'lumotlari yuklanmoqda...</div>';
+
+        const initData = (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
+
+        try {
+          const res = await fetch('/api/app/compare-keys', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Telegram-Init-Data': initData
+            },
+            body: JSON.stringify({
+              test_id: testId,
+              tg_id: this.userTgId,
+              init_data: initData
+            })
+          });
+          const data = await res.json();
+
+          if (!data || !data.success) {
+            grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 30px; color: var(--danger); font-weight: 700;">${data?.message || 'Tahlilni ochishda xatolik!'}</div>`;
+            return;
+          }
+
+          this.currentAnalysis = data;
+          this.renderAnalysisDetails(data);
+        } catch (e) {
+          grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 30px; color: var(--danger);">Xatolik: ${e.message}</div>`;
+        }
+      },
+
+      closeAnalysis() {
+        const tg = window.Telegram && window.Telegram.WebApp;
+        if (tg && tg.BackButton) {
+          tg.BackButton.hide();
+        }
+        document.getElementById('analysis-page').style.display = 'none';
+        document.getElementById('results-list-page').style.display = 'block';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+
+      renderAnalysisDetails(data) {
+        document.getElementById('analysis-test-title').textContent = data.test_title || 'Ona tili Testi';
+        document.getElementById('analysis-test-code-badge').textContent = `#${data.test_code || ''}`;
+        document.getElementById('analysis-meta-time').textContent = `Topshirilgan: ${this.formatDate(data.submitted_at)}`;
+        document.getElementById('stat-analysis-correct').textContent = `${data.total_correct || 0} ta`;
+        const finalSc = (typeof data.score === 'number') ? data.score.toFixed(1) : (data.score || '0');
+        const testSc = (typeof data.test_score === 'number') ? data.test_score.toFixed(1) : (data.test_score ?? finalSc);
+        const essaySc = (typeof data.essay_score === 'number') ? data.essay_score.toFixed(1) : (data.essay_score ?? '0');
+        const tEl = document.getElementById('stat-analysis-test-score');
+        if (tEl) tEl.textContent = `${testSc} ball`;
+        const eEl = document.getElementById('stat-analysis-essay-score');
+        if (eEl) eEl.textContent = `${essaySc} ball`;
+        document.getElementById('stat-analysis-score').textContent = `${finalSc} ball`;
+        document.getElementById('stat-analysis-grade').textContent = data.grade || '—';
+
+        const ytWrap = document.getElementById('analysis-yt-wrap');
+        const ytLink = document.getElementById('analysis-yt-link');
+        if (data.youtube_url) {
+          ytWrap.style.display = 'block';
+          ytLink.href = data.youtube_url;
+        } else {
+          ytWrap.style.display = 'none';
+        }
+
+        let correctCount = 0;
+        let wrongCount = 0;
+        const results = data.results || {};
+
+        for (let k in results) {
+          if (k === '45' || k === '_meta') continue;
+          if (results[k].status === 'correct') {
+            correctCount++;
+          } else {
+            wrongCount++;
+          }
+        }
+
+        document.getElementById('count-filter-correct').textContent = correctCount;
+        document.getElementById('count-filter-wrong').textContent = wrongCount;
+
+        this.filterAndRenderGrid();
+      },
+
+      setFilter(filter) {
+        this.activeFilter = filter;
+        document.querySelectorAll('.filter-tab').forEach(t => {
+          t.classList.toggle('active', t.getAttribute('data-filter') === filter);
+        });
+        this.filterAndRenderGrid();
+      },
+
+      filterAndRenderGrid() {
+        if (!this.currentAnalysis) return;
+        const grid = document.getElementById('analysis-questions-grid');
+        const results = this.currentAnalysis.results || {};
+
+        let html = '';
+        const keys = Object.keys(results).filter(k => k !== '45' && k !== '_meta').sort((a, b) => {
+          const numA = parseInt(a, 10);
+          const numB = parseInt(b, 10);
+          if (numA !== numB) return numA - numB;
+          return a.localeCompare(b);
+        });
+
+        keys.forEach(k => {
+          const item = results[k];
+          const isCorrect = item.status === 'correct';
+
+          if (this.activeFilter === 'correct' && !isCorrect) return;
+          if (this.activeFilter === 'wrong' && isCorrect) return;
+
+          const cardClass = isCorrect ? 'correct' : 'wrong';
+          const statusIcon = isCorrect 
+            ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3" style="vertical-align:middle;"><polyline points="20 6 9 17 4 12"/></svg>` 
+            : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="3" style="vertical-align:middle;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+          const statusText = isCorrect ? 'To\'g\'ri' : 'Noto\'g\'ri';
+
+          html += `
+            <div class="q-item-card ${cardClass}">
+              <div class="q-item-top">
+                <span class="q-badge-num">#${k}</span>
+                <span style="font-size: 11px; display: inline-flex; align-items: center; gap: 3px;">${statusIcon} ${statusText}</span>
+              </div>
+              <div class="q-ans-row">
+                <span style="color: var(--text-muted);">Sizniki:</span>
+                <span class="q-ans-val user">${item.user || '—'}</span>
+              </div>
+              ${item.correct ? `
+                <div class="q-ans-row" style="margin-top: 2px;">
+                  <span style="color: var(--text-muted);">To'g'ri:</span>
+                  <span class="q-ans-val correct-key">${item.correct}</span>
+                </div>
+              ` : ''}
+            </div>
+          `;
+        });
+
+        grid.innerHTML = html || '<div style="grid-column: 1/-1; text-align: center; padding: 20px; color: var(--text-muted);">Savollar topilmadi</div>';
+      }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => ResultsApp.init());
+  </script>
+</body>
+</html>

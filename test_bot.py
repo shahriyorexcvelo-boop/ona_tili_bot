@@ -19,8 +19,7 @@ from core import (
     BOT_TOKEN, ADMIN_ID, PORT, WEBAPP_URL, get_webapp_url, log, bot, dp
 )
 from services import (
-    maintain_tunnel, schedule_checker,
-    supabase_keepalive_task, event_loop_lag_monitor, memory_rss_monitor
+    schedule_checker
 )
 from handlers import user_router, admin_router, create_web_app
 
@@ -125,41 +124,30 @@ async def main():
             else:
                 raise e
 
-    # 3. M1: Startup'da bloklangan foydalanuvchilarni o'chirish butunlay bekor qilindi (Data Preservation)
-
-    # 4. Fon rejimida HTTPS Tunnelni boshlash
-    _tunnel_task = asyncio.create_task(maintain_tunnel(current_port))
-
-    # 5. Avtomatik jadval tekshiruvchisini ishga tushirish
+    # 3. Avtomatik jadval tekshiruvchisini ishga tushirish
     _sched_task = asyncio.create_task(schedule_checker())
 
-    # 6. Global testlar keshini fonda har 30 soniyada yangilab turish (Zero-Block)
+    # 4. Global testlar keshini fonda har 30 soniyada yangilab turish (Zero-Block)
     _cache_refresher_task = asyncio.create_task(tests_cache_refresher())
 
-    # 7. Kuzatuv va Keep-Alive fon vazifalari
-    _supabase_keepalive_task = asyncio.create_task(supabase_keepalive_task())
-    _lag_monitor_task = asyncio.create_task(event_loop_lag_monitor())
-    _rss_monitor_task = asyncio.create_task(memory_rss_monitor())
-
-    # 8. Telegram Botni ishga tushirish (Webhook yoki Polling)
+    # 5. Telegram Botni ishga tushirish (Webhook yoki Polling)
     try:
         # Telegram rasmiy menyu buyruqlarini ro'yxatdan o'tkazish
         try:
             await bot.set_my_commands([
                 BotCommand(command="start", description="🚀 Botni ishga tushirish"),
-                BotCommand(command="app", description="📱 Test topshirish (Mini App)"),
+                BotCommand(command="app", description="📝 Test yechish (Mini App)"),
                 BotCommand(command="results", description="📊 Mening natijalarim"),
-                BotCommand(command="profile", description="👤 Shaxsiy profilim"),
                 BotCommand(command="help", description="ℹ️ Qo'llanma va yordam"),
             ])
-            log.info("✅ Telegram Bot rasmiy buyruqlar menyusi o'rnatildi (/start, /app, ...)")
+            log.info("✅ Telegram Bot rasmiy buyruqlar menyusi o'rnatildi (/start, /app, /results, /help)")
 
-            # Telegram pastki chat menyu tugmasini doimiy ravishda "Profil 👤" qilib o'rnatish
+            # Telegram pastki chat menyu tugmasini doimiy ravishda "Test yechish 📝" qilib o'rnatish
             try:
                 app_url = get_webapp_url()
-                menu_btn = MenuButtonWebApp(text="Profil 👤", web_app=WebAppInfo(url=f"{app_url.rstrip('/')}/app.html"))
+                menu_btn = MenuButtonWebApp(text="Test yechish 📝", web_app=WebAppInfo(url=f"{app_url.rstrip('/')}/index.html?v=20261022_v6_rasch"))
                 await bot.set_chat_menu_button(menu_button=menu_btn)
-                log.info(f"✅ Telegram Bot pastki menyu tugmasi 'Profil 👤' ({app_url}) qilib sozlandi!")
+                log.info(f"✅ Telegram Bot pastki menyu tugmasi 'Test yechish 📝' ({app_url}/index.html?v=20261022_v6_rasch) qilib sozlandi!")
             except Exception as me:
                 log.warning(f"Bot chat menyu tugmasini o'rnatishda ogohlantirish: {me}")
         except Exception as ce:
@@ -208,6 +196,12 @@ async def main():
 
 if __name__ == "__main__":
     try:
+        try:
+            import uvloop
+            uvloop.install()
+            log.info("⚡ uvloop (Ultra-Fast Cython Event Loop) faollashtirildi!")
+        except ImportError:
+            pass
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         log.info("Bot to'xtatildi.")

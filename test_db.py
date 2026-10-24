@@ -46,8 +46,9 @@ class DatabasePoolBusyError(Exception):
 _pg_pool = None
 _pool_connections = set()
 _conn_last_used = {}
-PG_POOL_MINCONN = int(os.getenv("PG_POOL_MINCONN", "1"))
-PG_POOL_MAXCONN = int(os.getenv("PG_POOL_MAXCONN", "5"))
+_is_local_pg = bool(DATABASE_URL and ("localhost" in DATABASE_URL or "127.0.0.1" in DATABASE_URL))
+PG_POOL_MINCONN = int(os.getenv("PG_POOL_MINCONN", "10" if _is_local_pg else "1"))
+PG_POOL_MAXCONN = int(os.getenv("PG_POOL_MAXCONN", "40" if _is_local_pg else "5"))
 
 # ── ASYNC DB HELPER (Non-blocking ThreadPoolExecutor) ──
 import asyncio
@@ -55,7 +56,7 @@ import functools
 from concurrent.futures import ThreadPoolExecutor
 
 # Chegaralangan ThreadPoolExecutor: thread soni pool hajmidan oshmasligi shart (executor <= pool - 1)
-_DB_DEFAULT_WORKERS = min(4, max(1, PG_POOL_MAXCONN - 1))
+_DB_DEFAULT_WORKERS = min(32 if _is_local_pg else 4, max(1, PG_POOL_MAXCONN - 1))
 _DB_EXECUTOR_WORKERS = int(os.getenv("DB_EXECUTOR_WORKERS", str(_DB_DEFAULT_WORKERS)))
 _DB_EXECUTOR_WORKERS = min(_DB_EXECUTOR_WORKERS, max(1, PG_POOL_MAXCONN - 1))
 _db_executor = ThreadPoolExecutor(max_workers=_DB_EXECUTOR_WORKERS, thread_name_prefix="db_pool_worker")
@@ -123,14 +124,46 @@ def _ensure_tests_cache_loaded():
         preload_all_tests_cache()
 
 # Kesh siyosati (M3): DB — yagona haqiqat manbai. 
-# 30 soniyalik Read-Through TTL bir nechta instance larda kesh nomutanosibligining oldini oladi.
-# Local yozish amallari darhol invalidate qiladi.
-CACHE_TTL_TESTS = 30.0       # Read-through RAM kesh TTL: 30 soniya (Mini App talabi)
-CACHE_TTL_USER_PROFILE = 5.0 # Foydalanuvchi profili va natijalari TTL: 5 soniya
-CACHE_TTL_USERS = 5.0       # 5 soniya
-CACHE_TTL_SETTINGS = 300.0  # 5 daqiqa
-CACHE_TTL_ADMINS = 300.0    # 5 daqiqa
+# L1 (Python RAM) + L2 (Redis) 2 bosqichli kesh arxitekturasi:
+# Local yozish amallari darhol L1 va L2 keshni invalidate qiladi.
+CACHE_TTL_TESTS = 30.0          # Read-through RAM kesh TTL: 30 soniya (Mini App talabi)
+CACHE_TTL_USER_PROFILE = 30.0   # Foydalanuvchi profili va natijalari TTL: 30 soniya
+CACHE_TTL_USERS = 60.0          # L1 RAM user kesh TTL: 60 soniya (o'zgarishda darhol invalidate bo'ladi)
+CACHE_TTL_REDIS_USER = 600      # L2 Redis user kesh TTL: 10 daqiqa
+CACHE_TTL_SETTINGS = 300.0      # 5 daqiqa
+CACHE_TTL_ADMINS = 300.0        # 5 daqiqa
 CACHE_TTL_ADMIN_DELETED = 300.0 # 5 daqiqa
+
+_redis_client = None
+_redis_init_attempted = False
+
+def _get_redis():
+    """L2 Redis kesh ulanishini qaytaradi (agar Redis o'rnatilgan bo'lsa). Xatolik bo'lsa L1 RAM bilan davom etadi."""
+    global _redis_client, _redis_init_attempted
+    if _redis_client is not None:
+        return _redis_client
+    if _redis_init_attempted:
+        return None
+    _redis_init_attempted = True
+    redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0").strip()
+    if not redis_url:
+        return None
+    try:
+        import redis
+        client = redis.Redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=0.5,
+            socket_timeout=0.5,
+            health_check_interval=30
+        )
+        client.ping()
+        _redis_client = client
+        print("🚀 [L2 Redis Kesh] Redis serverga muvaffaqiyatli ulandi!")
+        return _redis_client
+    except Exception:
+        _redis_client = None
+        return None
 
 def is_tests_cache_valid() -> bool:
     """RAM kesh yuklangan va TTL (45 soniya) muddati o'tmaganligini tekshirish."""
@@ -208,7 +241,7 @@ def invalidate_test_cache(test_id: Optional[int] = None):
             print(f"Error reloading tests cache in invalidate_test_cache: {e}")
 
 def invalidate_user_cache(tg_id: Optional[int] = None):
-    """Foydalanuvchi ma'lumotlari yangilanganda RAM keshni tozalash"""
+    """Foydalanuvchi ma'lumotlari yangilanganda L1 (RAM) va L2 (Redis) keshni tozalash"""
     with _RAM_CACHE_LOCK:
         if tg_id is not None:
             _CACHE_USERS.pop(int(tg_id), None)
@@ -223,6 +256,12 @@ def invalidate_user_cache(tg_id: Optional[int] = None):
             _USER_SUBMISSIONS_MAP_CACHE.clear()
             _USER_SUBMISSIONS_CACHE.clear()
             _USER_SUBMITTED_IDS_CACHE.clear()
+    try:
+        r = _get_redis()
+        if r is not None and tg_id is not None:
+            r.delete(f"ot:user:{int(tg_id)}")
+    except Exception:
+        pass
 
 def invalidate_settings_cache():
     with _RAM_CACHE_LOCK:
@@ -593,6 +632,17 @@ def _init_sqlite_tables_on_conn(conn):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_del_users_req ON admin_deleted_users(last_request_at)")
 
     cur.execute("""
+    CREATE TABLE IF NOT EXISTS admin_sent_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE(chat_id, message_id)
+    )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_sent_msg_chat ON admin_sent_messages(chat_id)")
+
+    cur.execute("""
     INSERT OR IGNORE INTO admins (tg_id, fullname, username, added_by, created_at)
     VALUES (8039427064, 'Bosh Admin', 'admin', 0, 1789300000)
     """)
@@ -798,6 +848,17 @@ def init_db():
             )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_del_users_req ON admin_deleted_users(last_request_at)")
+
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS admin_sent_messages (
+                id SERIAL PRIMARY KEY,
+                chat_id BIGINT NOT NULL,
+                message_id BIGINT NOT NULL,
+                created_at BIGINT NOT NULL,
+                UNIQUE (chat_id, message_id)
+            )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_sent_msg_chat ON admin_sent_messages(chat_id)")
 
             # Bosh adminni qo'shish (ON CONFLICT — PostgreSQL)
             cur.execute("""
@@ -1334,10 +1395,12 @@ def update_user_profile(tg_id: int, fullname: Optional[str] = None, phone: Optio
 def get_user(tg_id: int, include_deleted: bool = False) -> Optional[Dict[str, Any]]:
     if not tg_id or int(tg_id) <= 0:
         return None
+    uid = int(tg_id)
     now = time.time()
+    # 1. L1 RAM Kesh (0.001ms)
     with _RAM_CACHE_LOCK:
-        if int(tg_id) in _CACHE_USERS:
-            ts, val = _CACHE_USERS[int(tg_id)]
+        if uid in _CACHE_USERS:
+            ts, val = _CACHE_USERS[uid]
             ttl = CACHE_TTL_USERS if val is not None else 10.0
             if now - ts < ttl:
                 if val is not None:
@@ -1346,14 +1409,35 @@ def get_user(tg_id: int, include_deleted: bool = False) -> Optional[Dict[str, An
                     return dict(val)
                 return None
 
+    # 2. L2 Redis Kesh (~0.15ms, restartdan keyin ham saqlanadi)
+    r = _get_redis()
+    if r is not None:
+        try:
+            raw_cached = r.get(f"ot:user:{uid}")
+            if raw_cached:
+                res = json.loads(raw_cached)
+                with _RAM_CACHE_LOCK:
+                    _CACHE_USERS[uid] = (now, dict(res) if res else None)
+                if res and not include_deleted and res.get("deleted_at"):
+                    return None
+                return res
+        except Exception:
+            pass
+
+    # 3. L3 PostgreSQL baza
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute(f"SELECT * FROM users WHERE tg_id = {_ph()}", (tg_id,))
+        cur.execute(f"SELECT * FROM users WHERE tg_id = {_ph()}", (uid,))
         row = cur.fetchone()
         res = _row_to_dict(row)
         with _RAM_CACHE_LOCK:
-            _CACHE_USERS[int(tg_id)] = (now, dict(res) if res else None)
+            _CACHE_USERS[uid] = (now, dict(res) if res else None)
+        if r is not None and res:
+            try:
+                r.setex(f"ot:user:{uid}", CACHE_TTL_REDIS_USER, json.dumps(res, default=str))
+            except Exception:
+                pass
         if res and not include_deleted and res.get("deleted_at"):
             return None
         return res
@@ -1886,6 +1970,13 @@ def save_bulk_draft(user_tg_id: int, test_id: int, answers: Dict[str, str]) -> b
             """, [(user_tg_id, test_id, qk, av, now_ts) for qk, av in rows])
 
         conn.commit()
+        r = _get_redis()
+        if r is not None:
+            try:
+                # 1 soatlik (3600s) qoralama saqlash muddati
+                r.setex(f"ot:draft:{int(user_tg_id)}:{int(test_id)}", 3600, ans_json)
+            except Exception:
+                pass
         return True
     except Exception as e:
         try:
@@ -1898,25 +1989,45 @@ def save_bulk_draft(user_tg_id: int, test_id: int, answers: Dict[str, str]) -> b
         _close_conn(conn)
 
 
-def get_answer_drafts(user_tg_id: int, test_id: int) -> Dict[str, str]:
-    """Qoralama javoblarni olish (RealDictCursor ham, oddiy tuple ham ishlaydi)."""
+def get_answer_drafts(user_tg_id: int, test_id: int, max_age_seconds: int = 3600) -> Dict[str, str]:
+    """Qoralama javoblarni olish. Agar 1 soatdan (3600s) oshgan bo'lsa avtomatik tozalanadi."""
     if not user_tg_id or not test_id:
         return {}
+    r = _get_redis()
+    if r is not None:
+        try:
+            cached_raw = r.get(f"ot:draft:{int(user_tg_id)}:{int(test_id)}")
+            if cached_raw:
+                parsed = json.loads(cached_raw)
+                if isinstance(parsed, dict) and parsed:
+                    return parsed
+        except Exception:
+            pass
     conn = get_connection()
     try:
         cur = conn.cursor()
         ph = _ph()
-        cur.execute(f"SELECT answers_json FROM user_test_drafts WHERE user_tg_id = {ph} AND test_id = {ph}",
+        cur.execute(f"SELECT answers_json, updated_at FROM user_test_drafts WHERE user_tg_id = {ph} AND test_id = {ph}",
                     (user_tg_id, test_id))
         row = cur.fetchone()
         if row:
+            raw = None
+            up_at = None
             if isinstance(row, dict):
                 raw = row.get("answers_json")
+                up_at = row.get("updated_at")
             else:
                 try:
-                    raw = row["answers_json"]
-                except (KeyError, TypeError, IndexError):
                     raw = row[0]
+                    up_at = row[1] if len(row) > 1 else None
+                except Exception:
+                    raw = row[0]
+
+            # 1 soatdan (3600s) oshgan bo'lsa o'chirish
+            if up_at and (int(time.time()) - int(up_at) > max_age_seconds):
+                clear_answer_drafts(user_tg_id, test_id)
+                return {}
+
             if raw:
                 try:
                     res = json.loads(raw)
@@ -1925,19 +2036,34 @@ def get_answer_drafts(user_tg_id: int, test_id: int) -> Dict[str, str]:
                 except Exception:
                     pass
 
-        cur.execute(f"SELECT question_key, answer_val FROM submission_drafts WHERE user_tg_id = {ph} AND test_id = {ph}",
+        cur.execute(f"SELECT question_key, answer_val, updated_at FROM submission_drafts WHERE user_tg_id = {ph} AND test_id = {ph}",
                     (user_tg_id, test_id))
         out = {}
-        for r in cur.fetchall():
-            if isinstance(r, dict):
-                qk, av = r.get("question_key"), r.get("answer_val")
+        now_ts = int(time.time())
+        has_expired = False
+        for r_row in cur.fetchall():
+            if isinstance(r_row, dict):
+                qk, av = r_row.get("question_key"), r_row.get("answer_val")
+                s_up = r_row.get("updated_at")
             else:
                 try:
-                    qk, av = r["question_key"], r["answer_val"]
-                except (KeyError, TypeError, IndexError):
-                    qk, av = r[0], r[1]
+                    qk, av = r_row[0], r_row[1]
+                    s_up = r_row[2] if len(r_row) > 2 else None
+                except Exception:
+                    qk, av = r_row[0], r_row[1]
+                    s_up = None
+
+            if s_up and (now_ts - int(s_up) > max_age_seconds):
+                has_expired = True
+                break
+
             if qk:
                 out[str(qk)] = str(av or "")
+
+        if has_expired:
+            clear_answer_drafts(user_tg_id, test_id)
+            return {}
+
         return out
     except Exception as e:
         print(f"Error fetching answer drafts: {e}")
@@ -1947,9 +2073,15 @@ def get_answer_drafts(user_tg_id: int, test_id: int) -> Dict[str, str]:
 
 
 def clear_answer_drafts(user_tg_id: int, test_id: int) -> bool:
-    """Test topshirilgandan so'ng qoralamalarni tozalash."""
+    """Test topshirilgandan so'ng qoralamalarni Redis va bazadan tozalash."""
     if not user_tg_id or not test_id:
         return False
+    r = _get_redis()
+    if r is not None:
+        try:
+            r.delete(f"ot:draft:{int(user_tg_id)}:{int(test_id)}")
+        except Exception:
+            pass
     conn = get_connection()
     try:
         cur = conn.cursor()
@@ -2217,7 +2349,30 @@ def toggle_test_status(test_id: int) -> Optional[int]:
             return None
         d = _row_to_dict(row)
         new_status = 0 if d["is_active"] == 1 else 1
-        cur.execute(f"UPDATE tests SET is_active = {_ph()} WHERE id = {_ph()}", (new_status, test_id))
+        now_ts = int(time.time())
+        if new_status == 1:
+            # Qayta faollashtirilganda tugallanganlik (results_published, stopped_at) va eskirgan jadvalni tozalaymiz
+            cur.execute(
+                f"""UPDATE tests
+                    SET is_active = 1,
+                        results_published = 0,
+                        stopped_at = NULL,
+                        scheduled_date = NULL,
+                        scheduled_start = NULL,
+                        scheduled_end = NULL
+                    WHERE id = {_ph()}""",
+                (test_id,)
+            )
+            # Shu testni faol paytida topshirgan lekin xato bilan is_late=1 bo'lib qolganlarni tiklaymiz
+            cur.execute(
+                f"UPDATE submissions SET is_late = 0 WHERE test_id = {_ph()} AND is_late = 1",
+                (test_id,)
+            )
+        else:
+            cur.execute(
+                f"UPDATE tests SET is_active = 0, stopped_at = {_ph()} WHERE id = {_ph()}",
+                (now_ts, test_id)
+            )
         conn.commit()
         invalidate_test_cache(test_id)
         return new_status
@@ -2240,7 +2395,18 @@ def set_test_active_status(test_id: int, status: int) -> bool:
             )
         else:
             cur.execute(
-                f"UPDATE tests SET is_active = 1 WHERE id = {_ph()}",
+                f"""UPDATE tests
+                    SET is_active = 1,
+                        results_published = 0,
+                        stopped_at = NULL,
+                        scheduled_date = NULL,
+                        scheduled_start = NULL,
+                        scheduled_end = NULL
+                    WHERE id = {_ph()}""",
+                (test_id,)
+            )
+            cur.execute(
+                f"UPDATE submissions SET is_late = 0 WHERE test_id = {_ph()} AND is_late = 1",
                 (test_id,)
             )
         conn.commit()
@@ -2435,28 +2601,24 @@ def invalidate_admins_cache():
         _admin_cache.clear()
 
 def is_admin(tg_id: int, super_admin_id: int = 8039427064) -> bool:
-    try:
-        from core.config import get_config_admin_ids
-        cfg_ids = set(get_config_admin_ids())
-    except Exception:
-        cfg_ids = {8039427064, 1181227767}
-    if tg_id == super_admin_id or tg_id in cfg_ids or tg_id in {8039427064, 1181227767}:
+    if not tg_id:
+        return False
+    uid = int(tg_id)
+    if uid == int(super_admin_id) or uid == 8039427064:
         return True
     now = time.time()
-    cached = _admin_cache.get(tg_id)
+    cached = _admin_cache.get(uid)
     if cached and now < cached[1]:
         return cached[0]
 
-    conn = get_connection()
     try:
-        cur = conn.cursor()
-        cur.execute(f"SELECT tg_id FROM admins WHERE tg_id = {_ph()}", (tg_id,))
-        row = cur.fetchone()
-        is_adm = bool(row)
-        _admin_cache[tg_id] = (is_adm, now + CACHE_TTL_ADMINS)
+        admins = get_all_admins()
+        admin_ids = {int(a["tg_id"]) for a in admins if a and a.get("tg_id") is not None}
+        is_adm = uid in admin_ids
+        _admin_cache[uid] = (is_adm, now + CACHE_TTL_ADMINS)
         return is_adm
-    finally:
-        _close_conn(conn)
+    except Exception:
+        return False
 
 
 def add_admin(tg_id: int, fullname: str = "Admin", username: Optional[str] = None, added_by: int = 0) -> bool:
@@ -2521,6 +2683,60 @@ def get_all_admins() -> List[Dict[str, Any]]:
         with _RAM_CACHE_LOCK:
             _ALL_ADMINS_CACHE = (time.time(), admins)
         return admins
+    finally:
+        _close_conn(conn)
+
+
+def log_admin_message(chat_id: int, message_id: int) -> None:
+    """Adminlarga admin sifatida yuborilgan (yoki admin tomonidan yozilgan) xabar ID sini saqlaydi."""
+    if not chat_id or not message_id:
+        return
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        now = int(time.time())
+        if USE_POSTGRES:
+            cur.execute("""
+                INSERT INTO admin_sent_messages (chat_id, message_id, created_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (chat_id, message_id) DO NOTHING
+            """, (int(chat_id), int(message_id), now))
+        else:
+            cur.execute("""
+                INSERT OR IGNORE INTO admin_sent_messages (chat_id, message_id, created_at)
+                VALUES (?, ?, ?)
+            """, (int(chat_id), int(message_id), now))
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        _close_conn(conn)
+
+
+def pop_admin_messages(chat_id: int) -> List[int]:
+    """O'chirilgan admin chatidagi barcha saqlangan admin xabar ID larini qaytaradi va bazadan tozalaydi."""
+    if not chat_id:
+        return []
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT message_id FROM admin_sent_messages WHERE chat_id = {_ph()} ORDER BY message_id DESC",
+            (int(chat_id),)
+        )
+        rows = cur.fetchall()
+        msg_ids = []
+        for r in rows:
+            d = _row_to_dict(r)
+            mid = d.get("message_id")
+            if mid:
+                msg_ids.append(int(mid))
+        cur.execute(f"DELETE FROM admin_sent_messages WHERE chat_id = {_ph()}", (int(chat_id),))
+        conn.commit()
+        return msg_ids
+    except Exception as e:
+        print(f"Error popping admin messages: {e}")
+        return []
     finally:
         _close_conn(conn)
 
@@ -2858,16 +3074,101 @@ def normalize_punctuation_seq(s: str) -> str:
     t = re.sub(r'["“”«»]', '"', str(s))
     t = re.sub(r"[\u2018\u2019\u02BB\u02BC\u00B4`ʼʻ\‘\’\']", "'", t)
     t = re.sub(r"[\u2212\u2013\u2014\u2012\u2015\uFE63\uFF0D\u00ad]", "-", t)
+    t = t.replace("…", "...")
     t = re.sub(r"\s+", "", t)
     return t
 
 
+def parse_q37_pair(val: Any) -> Optional[Tuple[str, str]]:
+    """
+    37-savol kabi 'Xato -> To'g'ri' formatidagi juftlikni ajratib oladi.
+    Qo'llab-quvvatlanadigan formatlar:
+      1) dict: {"mode": "xato_togri", "xato": ":", "togri": "—", "ans": ": -> —"}
+      2) strelkali satr: ": -> —", ": ➔ —", ": → -"
+      3) qavsli izoh: ": — (: xato) (— to'g'ri)" yoki "(: xato) (- to'g'ri)"
+    """
+    if val is None:
+        return None
+    if isinstance(val, dict):
+        if val.get("mode") == "xato_togri":
+            x_val = str(val.get("xato") or "").strip()
+            t_val = str(val.get("togri") or "").strip()
+            if x_val or t_val:
+                return (x_val, t_val)
+        val = val.get("ans", val.get("answer", val.get("correct", val.get("user", ""))))
+
+    s = str(val or "").strip()
+    if not s:
+        return None
+
+    # 1. Qavsli izoh formati: masalan ": — (: xato) (— to'g'ri)"
+    m_paren = re.search(
+        r"\(\s*([^\(\)]+?)\s+xato\s*\)\s*\(\s*([^\(\)]+?)\s+to['\u2018\u2019\u02BB\u02BC`ʼʻ]?g['\u2018\u2019\u02BB\u02BC`ʼʻ]?ri\s*\)",
+        s,
+        flags=re.IGNORECASE
+    )
+    if m_paren:
+        return (m_paren.group(1).strip(), m_paren.group(2).strip())
+
+    # 2. Strelkali format: ": -> —", "xato ➔ to'g'ri", ": → -"
+    m_arrow = re.split(r"\s*(?:->|➔|→|=>|⟶)\s*", s, maxsplit=1)
+    if len(m_arrow) == 2:
+        left_p = m_arrow[0].strip()
+        right_p = m_arrow[1].strip()
+        # Agar o'ng qismda "(: xato)" kabi izoh qolgan bo'lsa tozalash
+        right_p = re.sub(r"\s*\([^)]*(?:xato|to['\u2018\u2019\u02BB\u02BC`ʼʻ]?g['\u2018\u2019\u02BB\u02BC`ʼʻ]?ri)[^)]*\)", "", right_p, flags=re.IGNORECASE).strip()
+        if left_p or right_p:
+            return (left_p, right_p)
+
+    return None
+
+
+def get_test_q37_mode(test_obj: Optional[Dict[str, Any]]) -> str:
+    """
+    Testdagi 37-savol qaysi rejimda yaratilganini qaytaradi:
+      - 'xato_togri': [Xato] ➔ [To'g'ri] (2 katakchali + tinish belgilari)
+      - 'punct': Oddiy / Tinish belgilari (1 katakchali + tinish belgilari)
+    """
+    if not test_obj:
+        return "xato_togri"
+    ans_dict = parse_answers_json(test_obj.get("answers_json") or test_obj.get("answers") or {})
+    q37 = ans_dict.get("37")
+    if isinstance(q37, dict):
+        mode = str(q37.get("mode") or "").strip()
+        if mode in ("xato_togri", "punct"):
+            return mode
+        if q37.get("xato") or q37.get("togri"):
+            return "xato_togri"
+    if parse_q37_pair(q37) is not None:
+        return "xato_togri"
+    if q37:
+        return "punct"
+    return "xato_togri"
+
+
+def _match_q37_single_part(u_part: str, c_part: str) -> bool:
+    """Xato -> To'g'ri juftligining bitta qismini (Xato yoki To'g'ri) solishtirish."""
+    u_p = str(u_part or "").strip()
+    c_p = str(c_part or "").strip()
+    if not u_p or not c_p:
+        return False
+    if is_punctuation_answer(u_p) or is_punctuation_answer(c_p):
+        return normalize_punctuation_seq(u_p) == normalize_punctuation_seq(c_p)
+    u_uz = normalize_uzbek_text(u_p)
+    c_uz = normalize_uzbek_text(c_p)
+    if u_uz == c_uz or u_uz.replace(" ", "") == c_uz.replace(" ", ""):
+        return True
+    u_no_tutuq = re.sub(r"['\s\-_.,:;\"`ʼʻ\(\)]", "", u_uz)
+    c_no_tutuq = re.sub(r"['\s\-_.,:;\"`ʼʻ\(\)]", "", c_uz)
+    return bool(u_no_tutuq and u_no_tutuq == c_no_tutuq)
+
+
 def check_punctuation_match(u_str: str, c_str: str) -> bool:
     """
-    Ona tili 37-savol kabi tinish belgilari savollarini to'liq va moslashuvchan tekshirish:
+    Ona tili 37-savol kabi tinish belgilari savollarini to'liq va tartibni buzmasdan tekshirish:
     Masalan: '“ , — , — : , ” .' kalitiga nisbatan o'quvchi tomonidan yozilgan
     turli formatdagi javoblarni (probelli, probelsiz, tire va qo'shtirnoq turlari, vergulli yoki vergulsiz)
-    100% to'g'ri deb qabul qiladi.
+    tartibi bir xil bo'lsa 100% to'g'ri deb qabul qiladi.
     """
     u_clean = normalize_punctuation_seq(u_str)
     c_clean = normalize_punctuation_seq(c_str)
@@ -2879,37 +3180,29 @@ def check_punctuation_match(u_str: str, c_str: str) -> bool:
     # 1. Oxiridagi nuqtasiz moslik (nuqta qo'yilgan yoki tushirib qoldirilgan)
     u_no_dot = u_clean[:-1] if u_clean.endswith(".") else u_clean
     c_no_dot = c_clean[:-1] if c_clean.endswith(".") else c_clean
-    if u_no_dot == c_no_dot:
+    if u_no_dot and u_no_dot == c_no_dot:
         return True
 
     # 2. Ketma-ket vergullarni birlashtirish
     u_no_sep = re.sub(r",+", ",", u_clean).strip(",")
     c_no_sep = re.sub(r",+", ",", c_clean).strip(",")
-    if u_no_sep == c_no_sep:
+    if u_no_sep and u_no_sep == c_no_sep:
         return True
 
     # 3. Tinish belgilari orasidagi qo'shimcha vergullarni normallashtirish (masalan: "-:" vs "-,:")
     u_collapse = re.sub(r"(?<=[^\w\s,]),(?=[^\w\s,])", "", u_clean)
     c_collapse = re.sub(r"(?<=[^\w\s,]),(?=[^\w\s,])", "", c_clean)
-    if u_collapse == c_collapse:
+    if u_collapse and u_collapse == c_collapse:
         return True
-    if u_collapse.rstrip(".") == c_collapse.rstrip("."):
+    if u_collapse.rstrip(".") and u_collapse.rstrip(".") == c_collapse.rstrip("."):
         return True
 
-    # 4. Vergulsiz strukturaviy belgilar ketma-ketligi (masalan: ", -, -, :, " vs ", -, - :, ")
+    # 4. Vergulsiz strukturaviy belgilar ketma-ketligi (faqat tartib bir xil bo'lsa!)
     u_no_comma = u_clean.replace(",", "")
     c_no_comma = c_clean.replace(",", "")
     if u_no_comma and u_no_comma == c_no_comma:
         return True
-    if u_no_comma and u_no_comma.rstrip(".") == c_no_comma.rstrip("."):
-        return True
-
-    # 5. Tire va ikki nuqta o'rin almashuvi yoki variantlari (masalan: ": -" vs ":-" vs "- :" vs "-:")
-    if set(c_no_comma) == {":", "-"} and set(u_no_comma) == {":", "-"}:
-        return True
-
-    # 6. Belgilar to'plami va uzunligi bir xil bo'lsa
-    if set(c_no_comma) == set(u_no_comma) and len(c_no_comma) == len(u_no_comma):
+    if u_no_comma and u_no_comma.rstrip(".") and u_no_comma.rstrip(".") == c_no_comma.rstrip("."):
         return True
 
     return False
@@ -2924,11 +3217,34 @@ def check_answer_match(user_ans: Any, correct_ans: Any) -> Tuple[bool, float, st
         - ratio: float (1.0 = 100% to'liq to'g'ri, 0.3 = 30% qisman, 0.0 = noto'g'ri)
         - status: str ("correct", "partial", "incorrect")
     """
+    raw_user = user_ans
+    raw_correct = correct_ans
+    if isinstance(user_ans, dict):
+        user_ans = user_ans.get("ans", user_ans.get("answer", user_ans.get("user", "")))
+    if isinstance(correct_ans, dict):
+        correct_ans = correct_ans.get("ans", correct_ans.get("answer", correct_ans.get("correct", "")))
     if user_ans is None or correct_ans is None:
         return (False, 0.0, "incorrect")
     u_str = str(user_ans).strip()
     c_str = str(correct_ans).strip()
     if not u_str or not c_str:
+        return (False, 0.0, "incorrect")
+
+    # 0-A. 37-savol kabi "Xato -> To'g'ri" (2 katakchali) savol tekshiruvi:
+    # Ham Xato katagi, ham To'g'ri katagi o'z o'rnida to'g'ri bo'lishi shart!
+    c_pair = parse_q37_pair(raw_correct) or parse_q37_pair(c_str)
+    u_pair = parse_q37_pair(raw_user) or parse_q37_pair(u_str)
+    if c_pair is not None:
+        c_xato, c_togri = c_pair
+        if u_pair is None:
+            # Agar o'quvchi eski usulda probel bilan ": —" yozgan bo'lsa
+            tokens = [t.strip() for t in u_str.split() if t.strip()]
+            if len(tokens) == 2:
+                u_pair = (tokens[0], tokens[1])
+        if u_pair is not None:
+            u_xato, u_togri = u_pair
+            if _match_q37_single_part(u_xato, c_xato) and _match_q37_single_part(u_togri, c_togri):
+                return (True, 1.0, "correct")
         return (False, 0.0, "incorrect")
 
     # 0. Tinish belgilari savoli tekshiruvi (masalan, 37-savol: "“ , — , — : , ” ." yoki ": -")
@@ -3047,7 +3363,13 @@ def ai_evaluate_open_answer(student_answer: str, correct_answer: str) -> bool:
             f"- O'quvchining javobi: {student_answer}"
         )
 
-        models = ["gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-2.0-flash"]
+        models = [
+            "gemini-flash-lite-latest",
+            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-pro-latest",
+        ]
         for m in models:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={gemini_key}"
@@ -3228,7 +3550,12 @@ def delete_submission(submission_id: int) -> bool:
 
 def get_key_and_score(q_data: Any, default_score: float) -> tuple:
     if isinstance(q_data, dict):
-        ans = str(q_data.get("ans", q_data.get("answer", "")))
+        ans = str(q_data.get("ans", q_data.get("answer", "")) or "").strip()
+        if not ans and q_data.get("mode") == "xato_togri":
+            x_v = str(q_data.get("xato") or "").strip()
+            t_v = str(q_data.get("togri") or "").strip()
+            if x_v or t_v:
+                ans = f"{x_v} -> {t_v}"
         try:
             score = float(q_data.get("score", q_data.get("ball", default_score)))
         except (ValueError, TypeError):
@@ -3239,7 +3566,18 @@ def get_key_and_score(q_data: Any, default_score: float) -> tuple:
 
 
 def calculate_grade(score: float, correct_count: Optional[int] = None) -> str:
-    if correct_count is not None and correct_count == 0 and score <= 0.0:
+    """
+    Rasmiy Milliy sertifikat 75 ballik baholash shkalasi:
+      - 0, 1, 2 ta to'g'ri ishlagan bo'lsa: sertifikat berilmaydi ("—")
+      - 70.0 – 75.0: A+ daraja
+      - 65.0 – 69.9: A daraja
+      - 60.0 – 64.9: B+ daraja
+      - 55.0 – 59.9: B daraja
+      - 50.0 – 54.9: C+ daraja
+      - 46.0 – 49.9: C daraja
+      - 46.0 dan past: —
+    """
+    if correct_count is not None and correct_count <= 2:
         return "—"
     if score <= 0.0:
         return "—"
@@ -3257,6 +3595,65 @@ def calculate_grade(score: float, correct_count: Optional[int] = None) -> str:
         return "C"
     else:
         return "—"
+
+
+def extract_submission_scores(sub: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Submission dict'dan {"test_score", "essay_score", "final_score", "grade"} ni xavfsiz ajratib olish.
+    45-savol (Esse) test savollariga kiritilmaydi, alohida essay_score sifatida qaytariladi.
+    """
+    final_score = float(sub.get("score") or 0.0)
+    raw_det = sub.get("details_json") or sub.get("details") or "{}"
+    det = {}
+    if isinstance(raw_det, dict):
+        det = raw_det
+    elif isinstance(raw_det, str) and raw_det.strip():
+        try:
+            det = json.loads(raw_det)
+        except Exception:
+            det = {}
+
+    meta = det.get("_meta", {}) if isinstance(det, dict) else {}
+    esse_item = det.get("45", {}) if isinstance(det, dict) else {}
+
+    essay_score = 0.0
+    if isinstance(meta, dict) and "essay_score" in meta:
+        try:
+            essay_score = float(meta["essay_score"] or 0.0)
+        except Exception:
+            essay_score = 0.0
+    elif isinstance(esse_item, dict):
+        try:
+            essay_score = float(esse_item.get("score", esse_item.get("user", 0.0)) or 0.0)
+        except Exception:
+            essay_score = 0.0
+
+    test_score = 0.0
+    if isinstance(meta, dict) and "test_score" in meta:
+        try:
+            test_score = float(meta["test_score"] or 0.0)
+        except Exception:
+            test_score = 0.0
+    elif isinstance(esse_item, dict) and "test_score" in esse_item:
+        try:
+            test_score = float(esse_item["test_score"] or 0.0)
+        except Exception:
+            test_score = 0.0
+    else:
+        if final_score > 0:
+            test_score = round(max(0.0, min(75.0, 2.0 * final_score - essay_score)), 1)
+
+    t_sc = round(test_score, 1)
+    e_sc = round(essay_score, 1)
+    f_sc = round(final_score, 1)
+    corr = sub.get("correct_count")
+    grade = meta.get("grade") if isinstance(meta, dict) and meta.get("grade") else calculate_grade(f_sc, correct_count=corr)
+    return {
+        "test_score": t_sc,
+        "essay_score": e_sc,
+        "final_score": f_sc,
+        "grade": grade,
+    }
 
 
 def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[str, str], is_late: int = 0) -> Dict[str, Any]:
@@ -3392,12 +3789,19 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
             }
 
     # Test qismi (1-44) bali — maksimal 75 ball shkalasiga o'tkaziladi
+    # 0 ta to'g'ri ishlagan bo'lsa: Tizim avtomatik ravishda 0.0 ball qo'yadi
     if correct_count == 0 or total_possible_score <= 0.0:
         test_score = 0.0
     else:
-        test_score = round((earned_score / total_possible_score) * 75.0, 1)
+        raw_ratio_75 = (earned_score / total_possible_score) * 75.0
+        if correct_count <= 2:
+            # 1-2 ta to'g'ri ishlagan bo'lsa: silliqlangan mutanosib past ball, sertifikat berilmaydi
+            test_score = round(min(25.0, max(1.0, raw_ratio_75)), 1)
+        else:
+            test_score = round(min(75.0, max(0.0, raw_ratio_75)), 1)
 
     # 45-savol: O'quvchi kiritgan halol tahminiy ESSE bali (0 dan 75 gacha)
+    # DIQQAT: 45 (Esse) test savollariga kiritilmaydi va "to'g'ri" deb sanalmaydi!
     raw_essay = user_answers.get("45", user_answers.get("essay_score", ""))
     essay_score = 0.0
     try:
@@ -3407,23 +3811,34 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
     except Exception:
         essay_score = 0.0
 
-    details["45"] = {
-        "num": "45-savol (Esse)", "type": "essay",
-        "user": str(essay_score), "correct": "Halol baholash (0 - 75)",
-        "status": "correct" if essay_score > 0 else "unanswered",
-        "score": essay_score,
-        "max_score": 75.0
-    }
-
     # Ona tili yakuniy bali: Test (max 75) va Esse (max 75) ning o'rta arifmetigi!
-    final_score = round((test_score + essay_score) / 2.0, 1)
-    max_total_score = 75.0
-    total_questions = len(details)
-
-    if correct_count == 0 and essay_score <= 0.0:
+    # 0 ta to'g'ri ishlagan bo'lsa: avtomatik 0.0 ball qo'yiladi (asossiz ball berilmaydi)
+    if correct_count == 0:
+        final_score = 0.0
         grade = "—"
     else:
+        final_score = round((test_score + essay_score) / 2.0, 1)
         grade = calculate_grade(final_score, correct_count=correct_count)
+
+    max_total_score = 75.0
+    # Test bandlari soni (45-esse kirmaydi: 35 + 4 + 10 = 49 ta band)
+    total_questions = 49
+
+    details["45"] = {
+        "num": "Esse bali", "type": "essay",
+        "user": str(essay_score), "correct": "75 balldan",
+        "status": "essay",
+        "score": essay_score,
+        "test_score": test_score,
+        "max_score": 75.0
+    }
+    details["_meta"] = {
+        "test_score": test_score,
+        "essay_score": essay_score,
+        "final_score": final_score,
+        "grade": grade,
+        "correct_count": correct_count,
+    }
 
     percentage = round((final_score / max_total_score) * 100.0, 1)
     rasch_theta = 0.0
@@ -3531,6 +3946,8 @@ def check_and_save_submission(test_id: int, user_tg_id: int, user_answers: Dict[
         "correct_count": correct_count,
         "incorrect_count": incorrect_count,
         "unanswered_count": unanswered_count,
+        "total_questions": total_questions,
+        "total_count": total_questions,
         "details": details,
         "submitted_at": now
     }
@@ -3569,14 +3986,22 @@ def get_user_submissions(user_tg_id: int) -> List[Dict[str, Any]]:
         if is_rejected:
             d["grade"] = "Bekor qilingan"
             d["score"] = 0
+            d["test_score"] = 0
+            d["essay_score"] = 0
             d["correct_count"] = 0
             d["incorrect_count"] = 0
             d["status_text"] = "Bekor qilingan"
         elif is_pub:
-            d["grade"] = calculate_grade(d.get("score", 0))
+            sc_info = extract_submission_scores(d)
+            d["test_score"] = sc_info["test_score"]
+            d["essay_score"] = sc_info["essay_score"]
+            d["score"] = sc_info["final_score"]
+            d["grade"] = sc_info["grade"]
         else:
             d["grade"] = "Kutilmoqda"
             d["score"] = None
+            d["test_score"] = None
+            d["essay_score"] = None
             d["correct_count"] = None
             d["total_count"] = None
             d["details_json"] = "{}"
@@ -3593,13 +4018,24 @@ def get_test_results_leaderboard(test_id: int) -> List[Dict[str, Any]]:
     try:
         cur = conn.cursor()
         cur.execute(f"""
-        SELECT fullname, phone, score, correct_count, submitted_at
+        SELECT fullname, phone, score, correct_count, details_json, submitted_at
         FROM submissions
         WHERE test_id = {_ph()} AND (is_late = 0 OR is_late IS NULL)
-        ORDER BY score DESC, submitted_at ASC
+        ORDER BY score DESC, correct_count DESC, submitted_at ASC
         """, (test_id,))
         rows = cur.fetchall()
-        return [_row_to_dict(r) for r in rows if r]
+        out = []
+        for r in rows:
+            if not r:
+                continue
+            d = _row_to_dict(r)
+            sc_info = extract_submission_scores(d)
+            d["test_score"] = sc_info["test_score"]
+            d["essay_score"] = sc_info["essay_score"]
+            d["score"] = sc_info["final_score"]
+            d["grade"] = sc_info["grade"]
+            out.append(d)
+        return out
     finally:
         _close_conn(conn)
 
@@ -3660,7 +4096,11 @@ def evaluate_test_rasch(test_id: int, auto_update_db: bool = False) -> Optional[
                 cur = conn.cursor()
                 for s in res["students"]:
                     student_id = s.get("student_id")
-                    final_score = s.get("final_score", 0.0)
+                    final_score = float(s.get("final_score", 0.0))
+                    test_score = float(s.get("test_score", final_score))
+                    essay_score = float(s.get("essay_score", 0.0))
+                    raw_score = int(s.get("raw_score", 0))
+                    grade = s.get("grade") or calculate_grade(final_score, raw_score)
                     cur.execute(f"""
                         SELECT id, details_json FROM submissions
                         WHERE test_id = {_ph()} AND (user_tg_id = {_ph()} OR id = {_ph()})
@@ -3673,17 +4113,43 @@ def evaluate_test_rasch(test_id: int, auto_update_db: bool = False) -> Optional[
                         try:
                             det = json.loads(det_raw) if det_raw else {}
                             for k, v in det.items():
+                                if k in ("_meta", "45") or not isinstance(v, dict):
+                                    continue
                                 if k in item_score_map:
                                     is_c = (v.get("status") == "correct")
                                     sc = item_score_map[k]
                                     v["score"] = sc if is_c else 0.0
                                     v["max_score"] = sc
+                            if "45" in det and isinstance(det["45"], dict):
+                                det["45"]["status"] = "essay"
+                                det["45"]["type"] = "essay"
+                                det["45"]["score"] = essay_score
+                                det["45"]["max_score"] = 75.0
+                            else:
+                                det["45"] = {
+                                    "num": "Esse",
+                                    "type": "essay",
+                                    "user": str(essay_score),
+                                    "correct": "75 ball",
+                                    "status": "essay",
+                                    "score": essay_score,
+                                    "max_score": 75.0
+                                }
+                            det["_meta"] = {
+                                "test_score": test_score,
+                                "essay_score": essay_score,
+                                "final_score": final_score,
+                                "grade": grade,
+                                "theta": s.get("theta_logit", 0.0),
+                                "outfit_mnsq": s.get("outfit_mnsq", 1.0),
+                                "is_outfit": bool(s.get("is_outfit", False)),
+                            }
                             new_det = json.dumps(det, ensure_ascii=False)
                             cur.execute(f"""
                                 UPDATE submissions
-                                SET score = {_ph()}, details_json = {_ph()}
+                                SET score = {_ph()}, correct_count = {_ph()}, details_json = {_ph()}
                                 WHERE id = {_ph()}
-                            """, (final_score, new_det, sub_id))
+                            """, (final_score, raw_score, new_det, sub_id))
                         except Exception:
                             cur.execute(
                                 f"UPDATE submissions SET score = {_ph()} WHERE id = {_ph()}",
@@ -3869,15 +4335,17 @@ def generate_test_results_pdf(test_id: int) -> Optional[str]:
         table_data = [[
             Paragraph("<b>O'rin</b>", header_cell_style),
             Paragraph("<b>Ism va Familiya</b>", header_cell_style),
-            Paragraph("<b>To'plangan Ball</b>", header_cell_style),
-            Paragraph("<b>Daraja</b>", header_cell_style),
             Paragraph("<b>To'g'ri</b>", header_cell_style),
-            Paragraph("<b>Topshirilgan Vaqt</b>", header_cell_style)
+            Paragraph("<b>Test Bali</b>", header_cell_style),
+            Paragraph("<b>Esse Bali</b>", header_cell_style),
+            Paragraph("<b>Yakuniy Ball</b>", header_cell_style),
+            Paragraph("<b>Daraja</b>", header_cell_style),
         ]]
 
         for rank, r in enumerate(results, 1):
-            dt = format_uzb_time(r["submitted_at"], "%d.%m %H:%M")
-            grade = calculate_grade(r["score"])
+            grade = r.get("grade") or calculate_grade(r["score"], r.get("correct_count"))
+            test_sc = r.get("test_score", r["score"])
+            essay_sc = r.get("essay_score", 0.0)
             fullname_clean = _clean_pdf_text(r["fullname"] or "Foydalanuvchi")
             if font_name == 'Helvetica':
                 fullname_clean = transliterate_cyrillic(fullname_clean)
@@ -3886,13 +4354,14 @@ def generate_test_results_pdf(test_id: int) -> Optional[str]:
             table_data.append([
                 Paragraph(f"<b>#{rank}</b>", cell_bold),
                 Paragraph(f"&nbsp;{fullname_clean}", cell_name_style),
+                Paragraph(f"{r['correct_count']} ta", cell_style),
+                Paragraph(f"{test_sc} ball", cell_style),
+                Paragraph(f"{essay_sc} ball", cell_style),
                 Paragraph(f"<b>{r['score']} ball</b>", cell_bold),
                 Paragraph(f"<b>{grade_clean}</b>", cell_style),
-                Paragraph(f"{r['correct_count']} ta", cell_style),
-                Paragraph(dt, cell_style)
             ])
 
-        col_widths = [45, 215, 80, 70, 55, 70]
+        col_widths = [40, 175, 55, 65, 65, 75, 60]
         t = Table(table_data, colWidths=col_widths, repeatRows=1)
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#EEF2FF")),
@@ -4054,9 +4523,8 @@ def update_test_keys(test_id: int, new_answers: Dict[str, Any],
                     "ratio": ratio
                 }
 
-            # 40 dan boshlab 2 qismli (a va b) yopiq savollar
-            end_q = 45 if any(f"45{s}" in correct_answers_raw or "45" in correct_answers_raw for s in ["a", "b"]) else 44
-            for q in range(40, end_q + 1):
+            # 40..44 (2 qismli a va b yopiq savollar)
+            for q in range(40, 45):
                 for sub_part in ["a", "b"]:
                     key = f"{q}{sub_part}"
                     q_raw = correct_answers_raw.get(key, "")
@@ -4087,12 +4555,52 @@ def update_test_keys(test_id: int, new_answers: Dict[str, Any],
                         "ratio": ratio
                     }
 
-            earned_score = round(earned_score, 1)
+            # 45-savol (ESSE — 0 dan 75 ballgacha, test savollari soniga kiritilmaydi)
+            essay_raw_val = user_answers.get("45", "")
+            essay_score = 0.0
+            if essay_raw_val is not None and str(essay_raw_val).strip() != "":
+                try:
+                    val_float = float(str(essay_raw_val).strip().replace(",", "."))
+                    essay_score = round(min(75.0, max(0.0, val_float)), 2)
+                except ValueError:
+                    essay_score = 0.0
+            details["45"] = {
+                "num": "Esse",
+                "type": "essay",
+                "user": str(essay_raw_val) if str(essay_raw_val).strip() != "" else "0",
+                "correct": "75 ball",
+                "status": "essay",
+                "score": essay_score,
+                "max_score": 75.0
+            }
+
+            if correct_count == 0:
+                test_score_75 = 0.0
+                final_score = 0.0
+            elif correct_count in (1, 2):
+                test_score_75 = round(correct_count * 7.5, 1)
+                final_score = round((test_score_75 + essay_score) / 2.0, 1)
+            else:
+                if total_possible_score > 0:
+                    test_score_75 = round((earned_score / total_possible_score) * 75.0, 1)
+                else:
+                    test_score_75 = round((correct_count / 49.0) * 75.0, 1)
+                test_score_75 = min(75.0, max(0.0, test_score_75))
+                final_score = round((test_score_75 + essay_score) / 2.0, 1)
+
+            grade = calculate_grade(final_score, correct_count)
+            details["_meta"] = {
+                "test_score": test_score_75,
+                "essay_score": essay_score,
+                "final_score": final_score,
+                "grade": grade,
+            }
+
             cur.execute(f"""
                 UPDATE submissions
                 SET score = {_ph()}, correct_count = {_ph()}, details_json = {_ph()}
                 WHERE id = {_ph()}
-            """, (earned_score, correct_count, json.dumps(details, ensure_ascii=False), sub_id))
+            """, (final_score, correct_count, json.dumps(details, ensure_ascii=False), sub_id))
             updated_count += 1
 
         conn.commit()
@@ -4222,13 +4730,14 @@ def recalculate_all_submissions_globally() -> int:
                         "status": status, "score": score, "max_score": q_score, "ratio": ratio
                     }
 
-                # 40 dan boshlab 2 qismli (a va b) yopiq savollar
-                end_q = 45 if any(f"45{s}" in answers_dict or "45" in answers_dict for s in ["a", "b"]) else 44
-                for q in range(40, end_q + 1):
+                # 40..44 (2 qismli a va b yopiq savollar)
+                total_possible_score = sum(v.get("max_score", 0.0) for v in details.values())
+                for q in range(40, 45):
                     for sub_part in ["a", "b"]:
                         key = f"{q}{sub_part}"
                         q_raw = answers_dict.get(key, "")
                         correct_ans, q_score = get_key_and_score(q_raw, default_score=1.5)
+                        total_possible_score += q_score
                         user_val = user_answers.get(key, "")
                         is_matched, ratio, _ = check_answer_match(user_val, correct_ans)
                         if not user_val or not str(user_val).strip():
@@ -4250,12 +4759,52 @@ def recalculate_all_submissions_globally() -> int:
                             "status": status, "score": score, "max_score": q_score, "ratio": ratio
                         }
 
-                earned_score = round(earned_score, 1)
+                # 45-savol (ESSE — 0 dan 75 ballgacha, test savollari soniga kiritilmaydi)
+                essay_raw_val = user_answers.get("45", "")
+                essay_score = 0.0
+                if essay_raw_val is not None and str(essay_raw_val).strip() != "":
+                    try:
+                        val_float = float(str(essay_raw_val).strip().replace(",", "."))
+                        essay_score = round(min(75.0, max(0.0, val_float)), 2)
+                    except ValueError:
+                        essay_score = 0.0
+                details["45"] = {
+                    "num": "Esse",
+                    "type": "essay",
+                    "user": str(essay_raw_val) if str(essay_raw_val).strip() != "" else "0",
+                    "correct": "75 ball",
+                    "status": "essay",
+                    "score": essay_score,
+                    "max_score": 75.0
+                }
+
+                if correct_count == 0:
+                    test_score_75 = 0.0
+                    final_score = 0.0
+                elif correct_count in (1, 2):
+                    test_score_75 = round(correct_count * 7.5, 1)
+                    final_score = round((test_score_75 + essay_score) / 2.0, 1)
+                else:
+                    if total_possible_score > 0:
+                        test_score_75 = round((earned_score / total_possible_score) * 75.0, 1)
+                    else:
+                        test_score_75 = round((correct_count / 49.0) * 75.0, 1)
+                    test_score_75 = min(75.0, max(0.0, test_score_75))
+                    final_score = round((test_score_75 + essay_score) / 2.0, 1)
+
+                grade = calculate_grade(final_score, correct_count)
+                details["_meta"] = {
+                    "test_score": test_score_75,
+                    "essay_score": essay_score,
+                    "final_score": final_score,
+                    "grade": grade,
+                }
+
                 cur.execute(f"""
                     UPDATE submissions
                     SET score = {_ph()}, correct_count = {_ph()}, details_json = {_ph()}
                     WHERE id = {_ph()}
-                """, (earned_score, correct_count, json.dumps(details, ensure_ascii=False), sub_id))
+                """, (final_score, correct_count, json.dumps(details, ensure_ascii=False), sub_id))
                 total_recalculated += 1
         conn.commit()
         return total_recalculated

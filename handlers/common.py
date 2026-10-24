@@ -162,14 +162,19 @@ async def send_test_card_to_user_chat(user_tg_id: int, test: Dict[str, Any]):
         dt = format_uzb_time(existing_sub["submitted_at"])
         is_published = await test_db.db(test_db.is_test_results_published, test["id"])
         if is_published:
-            grade = test_db.calculate_grade(existing_sub.get("score", 0))
-            score_val = existing_sub.get("score", 0)
+            scores_meta = test_db.extract_submission_scores(existing_sub)
+            grade = scores_meta["grade"]
+            score_val = scores_meta["final_score"]
+            test_sc = scores_meta["test_score"]
+            essay_sc = scores_meta["essay_score"]
             corr_val = existing_sub.get("correct_count", 0)
             text = (
                 f"{tg_e('warning', '⛔️')} <b>Siz ushbu testni topshirgansiz!</b>\n\n"
                 f"{tg_e('order', '📖')} <b>Test:</b> {test['title']}\n"
-                f"{tg_e('star_gold', '🎖')} <b>Milliy Sertifikat darajangiz:</b> <b>{grade}</b> ({score_val} ball)\n"
                 f"{tg_e('success', '✅')} <b>To'g'ri javoblar:</b> {corr_val} ta\n"
+                f"📝 <b>Test bali:</b> {test_sc} ball\n"
+                f"✍️ <b>Esse bali:</b> {essay_sc} ball\n"
+                f"{tg_e('star_gold', '🎖')} <b>Yakuniy ball:</b> <b>{score_val} ball</b> (Daraja: <b>{grade}</b>)\n"
                 f"{tg_e('clock', '🕒')} <b>Topshirilgan vaqt:</b> {dt}\n\n"
                 f"💡 <i>Test tahlilini ko'rish uchun quyidagi tugmani bosing:</i>"
             )
@@ -241,7 +246,7 @@ async def send_test_card_to_user_chat(user_tg_id: int, test: Dict[str, Any]):
     caption = (
         f"{tg_e('order', '📖')} <b>{test['title']}</b>\n"
         f"{tg_e('star_premium', '📌')} <b>Fan:</b> {test.get('subject', 'Ona tili')}\n"
-        f"{tg_e('chat_check', '❓')} <b>Savollar:</b> 55 ta (1-32 ABCD, 33-35 ABCDEF, 36a-45b Yozma)\n"
+        f"{tg_e('chat_check', '❓')} <b>Tuzilishi:</b> 1-32 ABCD, 33-35 ABCDEF, 36-44 Yozma + Esse (75 ball)\n"
         f"{time_info}"
         f"{tg_e('warning', '⚠️')} <i>Eslatma: Testni faqat 1 marta topshirish mumkin! Javoblaringizni belgilab bo'lgach, «Testni yakunlash» tugmasini bosing.</i>"
     )
@@ -595,11 +600,12 @@ async def notify_admins_test_results_published(test_id: int, publisher_tg_id: in
 def build_detailed_tahlil_text(sub: dict, test: dict) -> str:
     """O'quvchi uchun to'g'ri va noto'g'ri ishlangan savollar tahlili matni."""
     name = sub.get("fullname") or "O'quvchi"
-    score = sub.get("score", 0.0)
-    grade = sub.get("grade") or test_db.calculate_grade(score)
+    scores_meta = test_db.extract_submission_scores(sub)
+    score = scores_meta["final_score"]
+    test_sc = scores_meta["test_score"]
+    essay_sc = scores_meta["essay_score"]
+    grade = scores_meta["grade"]
     corr = sub.get("correct_count", 0)
-    total = sub.get("total_count", 55) or 55
-    incorr = max(0, total - corr)
     code = sub.get("test_code", test.get("test_code", ""))
     test_title = test.get("title", "Ona tili Testi")
     yt_url = (test.get("youtube_url") or "").strip()
@@ -625,8 +631,14 @@ def build_detailed_tahlil_text(sub: dict, test: dict) -> str:
     incorrect_keys = []
     unanswered_keys = []
     for k in sorted(details.keys(), key=sort_key):
+        if str(k) in ("45", "_meta"):
+            continue
         item = details[k]
+        if not isinstance(item, dict):
+            continue
         st = item.get("status")
+        if st == "essay":
+            continue
         if st == "correct":
             correct_keys.append(str(k))
         elif st == "partial":
@@ -643,13 +655,15 @@ def build_detailed_tahlil_text(sub: dict, test: dict) -> str:
     text = (
         f"📊 <b>SAVOLLAR TAHLILI — «{test_title}»</b> (<code>#{code}</code>)\n\n"
         f"👤 <b>O'quvchi:</b> {name}\n"
-        f"🎖 <b>Milliy Sertifikat darajasi:</b> <b>{grade}</b> ({score} ball)\n"
-        f"✅ <b>To'g'ri ishlangan:</b> {corr} / {total} ta band\n"
+        f"✅ <b>To'g'ri javoblar:</b> {corr} ta\n"
+        f"📝 <b>Test bali:</b> {test_sc} ball\n"
+        f"✍️ <b>Esse bali:</b> {essay_sc} ball\n"
+        f"🎯 <b>Yakuniy ball:</b> <b>{score} ball</b>\n"
+        f"🎖 <b>Milliy Sertifikat darajasi:</b> <b>{grade}</b>\n"
     )
     if partial_keys:
-        text += f"⚠️ <b>Qisman to'g'ri (30% ball):</b> {len(partial_keys)} ta band\n"
+        text += f"⚠️ <b>Qisman to'g'ri (30% ball):</b> {len(partial_keys)} ta\n"
     text += (
-        f"❌ <b>Noto'g'ri / qoldirilgan:</b> {incorr} ta\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"✅ <b>TO'G'RI ISHLANGAN SAVOLLAR ({len(correct_keys)} ta):</b>\n"
         f"<code>{corr_str}</code>\n"

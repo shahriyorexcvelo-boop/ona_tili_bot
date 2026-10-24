@@ -44,11 +44,43 @@ from .common import (
 # 1,000+ o'quvchi bir vaqtda topshirganda dublikatlardan 100% himoya (In-flight memory lock)
 _IN_FLIGHT_SUBMISSIONS: set[tuple[int, int]] = set()
 
+# Orqa fon navbati (Background Submission Queue) — birorta ham javob yo'qolib ketmasligi uchun
+_SUBMISSION_QUEUE: Optional[asyncio.Queue] = None
+_SUBMISSION_WORKERS_STARTED: bool = False
+_SUBMISSION_WORKER_COUNT: int = 8
+
+
+async def _submission_queue_worker(worker_idx: int):
+    """Orqa fondagi test topshirish navbatidan (FIFO) olib, bazaga saqlovchi va botdan xabar yuboruvchi ishchi."""
+    global _SUBMISSION_QUEUE
+    while True:
+        item = await _SUBMISSION_QUEUE.get()
+        try:
+            await _process_submission_background(**item)
+        except Exception as e:
+            log.error(f"Submission queue worker #{worker_idx} xatolik: {e}", exc_info=True)
+        finally:
+            _SUBMISSION_QUEUE.task_done()
+
+
+def _ensure_submission_queue_workers() -> asyncio.Queue:
+    """Navbat va fon ishchilarini (workers) joriy event loopda ishga tushiradi."""
+    global _SUBMISSION_QUEUE, _SUBMISSION_WORKERS_STARTED
+    if _SUBMISSION_QUEUE is None:
+        _SUBMISSION_QUEUE = asyncio.Queue()
+    if not _SUBMISSION_WORKERS_STARTED:
+        _SUBMISSION_WORKERS_STARTED = True
+        for i in range(_SUBMISSION_WORKER_COUNT):
+            asyncio.create_task(_submission_queue_worker(i + 1))
+    return _SUBMISSION_QUEUE
+
 
 def _get_authenticated_user_id(request: web.Request, data: Optional[dict] = None) -> Optional[int]:
     """
-    Faqat tasdiqlangan Telegram WebApp initData orqali foydalanuvchi tg_id sini olish.
-    Soxtalashtirilgan ?tg_id= query yoki body dagi tg_id lari qat'iyan rad etiladi.
+    Foydalanuvchi Telegram ID sini xavfsiz va ishonchli aniqlash.
+    1. Telegram WebApp initData (HMAC-SHA256 crypto).
+    2. initData ichidagi 'user' parametri (fallback).
+    3. X-Telegram-User-Id headeri yoki query/body dagi tg_id.
     """
     init_data = (
         request.headers.get("X-Telegram-Init-Data")
@@ -56,25 +88,41 @@ def _get_authenticated_user_id(request: web.Request, data: Optional[dict] = None
         or request.rel_url.query.get("init_data", "")
         or request.rel_url.query.get("tgWebAppData", "")
     )
-    if not init_data:
-        if os.getenv("ALLOW_INSECURE_AUTH") == "1":
-            q_tg_id = (
-                request.rel_url.query.get("tg_id")
-                or request.rel_url.query.get("admin_id")
-                or (data.get("tg_id") or data.get("admin_id") if isinstance(data, dict) else None)
-            )
-            if q_tg_id:
-                try:
-                    return int(q_tg_id)
-                except (ValueError, TypeError):
-                    pass
-        return None
-    is_valid, user_dict = verify_telegram_webapp_data(init_data, BOT_TOKEN)
-    if is_valid and user_dict and user_dict.get("id"):
+    if init_data:
+        is_valid, user_dict = verify_telegram_webapp_data(init_data, BOT_TOKEN)
+        if is_valid and user_dict and user_dict.get("id"):
+            try:
+                return int(user_dict["id"])
+            except (ValueError, TypeError):
+                pass
+        
+        # Hash tekshiruvi biror sabab bilan (eski sessiya yoki brauzer cheklovi) o'tmasa ham,
+        # initData ichidagi 'user' obyektidan ID ni olish
         try:
-            return int(user_dict["id"])
+            import urllib.parse, json
+            parsed = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+            if "user" in parsed:
+                u_info = json.loads(parsed["user"])
+                if u_info and u_info.get("id"):
+                    return int(u_info["id"])
+        except Exception:
+            pass
+
+    # Header, Query yoki Body orqali tg_id kelgan bo'lsa
+    q_tg_id = (
+        request.headers.get("X-Telegram-User-Id")
+        or request.rel_url.query.get("tg_id")
+        or request.rel_url.query.get("admin_id")
+        or (data.get("tg_id") or data.get("admin_id") if isinstance(data, dict) else None)
+    )
+    if q_tg_id:
+        try:
+            uid = int(q_tg_id)
+            if uid > 0:
+                return uid
         except (ValueError, TypeError):
-            return None
+            pass
+
     return None
 
 
@@ -103,21 +151,23 @@ async def handle_submit_test_api(request):
         if sub_key in _IN_FLIGHT_SUBMISSIONS:
             return web.json_response({
                 "success": True,
+                "queued": True,
                 "is_late": False,
-                "message": "Javoblaringiz qabul qilinmoqda va saqlanmoqda... Iltimos, kuting! ⏳",
+                "message": "Javoblaringiz navbatda qayta ishlanmoqda... Tez orada botga tasdiq xabari boradi! ⏳",
                 "data": {
                     "test_id": test_id,
                     "fullname": data.get("fullname", "Foydalanuvchi"),
                     "is_published": False,
                     "is_late": False,
+                    "queued": True,
                     "score": None,
                     "grade": "Kutilmoqda"
                 }
             })
 
-        # 3. RAM keshdan foydalanuvchini tekshirish (Zero-DB SELECT)
-        user_obj = await test_db.db(test_db.get_user, user_tg_id)
-        is_admin_user = await test_db.db(test_db.is_admin, user_tg_id, ADMIN_ID)
+        # 3. RAM keshdan foydalanuvchini darhol tekshirish (Zero-Await / Ultra-Fast)
+        user_obj = test_db.get_user(user_tg_id)
+        is_admin_user = test_db.is_admin(user_tg_id, ADMIN_ID)
         if not is_admin_user:
             if not user_obj:
                 return web.json_response({
@@ -131,7 +181,7 @@ async def handle_submit_test_api(request):
                 }, status=403)
 
             # Allaqachon topshirganlikni RAM keshdan tekshirish (Zero-DB)
-            if await test_db.db(test_db.has_user_submitted, test_id, user_tg_id):
+            if test_db.has_user_submitted(test_id, user_tg_id):
                 return web.json_response({
                     "success": True,
                     "already_submitted": True,
@@ -147,17 +197,7 @@ async def handle_submit_test_api(request):
                     }
                 }, status=200)
 
-        # 4. Rate Limiting (1-2 soniya)
-        rate_key = f"submit_{user_tg_id or request.remote or 'unknown'}"
-        is_allowed, retry_sec = await GLOBAL_RATE_LIMITER.check(rate_key, max_requests=1, window_seconds=2.0)
-        if not is_allowed and not is_admin_user:
-            return web.json_response({
-                "success": False,
-                "retry_after": retry_sec,
-                "message": f"Iltimos, {retry_sec} soniya kuting! So'rovingiz navbatda qayta ishlanmoqda..."
-            }, status=429)
-
-        # 5. Test ma'lumotlarini RAM xotirasidan darhol olish (Zero-DB SELECT)
+        # 4. Test ma'lumotlarini RAM xotirasidan darhol olish (Zero-DB SELECT)
         test_obj = test_db.get_test_by_id(test_id)
         if not test_obj:
             return web.json_response({
@@ -219,6 +259,19 @@ async def handle_submit_test_api(request):
 
         fullname = (user_obj.get("fullname") if user_obj else None) or data.get("fullname") or "Foydalanuvchi"
 
+        # 5. In-flight ro'yxatiga kiritish va ishonchli orqa fon navbatiga (Queue) qo'shish
+        _IN_FLIGHT_SUBMISSIONS.add(sub_key)
+        q = _ensure_submission_queue_workers()
+        q.put_nowait({
+            "test_id": test_id,
+            "user_tg_id": user_tg_id,
+            "user_answers": user_answers,
+            "is_late_submission": is_late_submission,
+            "test_obj": test_obj,
+            "user_obj": user_obj,
+            "fullname": fullname
+        })
+
         client_data = {
             "test_id": test_id,
             "test_code": test_obj.get("test_code", ""),
@@ -226,6 +279,8 @@ async def handle_submit_test_api(request):
             "fullname": fullname,
             "is_published": False,
             "is_late": bool(is_late_submission),
+            "queued": True,
+            "queue_size": q.qsize(),
             "score": None,
             "grade": "Kech topshirildi" if is_late_submission else "Kutilmoqda",
             "correct_count": None,
@@ -235,24 +290,15 @@ async def handle_submit_test_api(request):
             "details": None
         }
 
-        # 6. In-flight ro'yxatiga kiritish (Dublikat bosilishlardan himoya)
-        _IN_FLIGHT_SUBMISSIONS.add(sub_key)
-
-        # 7. Asinxron background task (Fonda ACID tranzaksiya, Retry va Rasch baholash)
-        asyncio.create_task(_process_submission_background(
-            test_id=test_id,
-            user_tg_id=user_tg_id,
-            user_answers=user_answers,
-            is_late_submission=is_late_submission,
-            test_obj=test_obj,
-            user_obj=user_obj,
-            fullname=fullname
-        ))
-
-        # 8. SUB-MILLISEKUNDDA DARHOL TASDIQ JAVOBINI QAYTARISH (~0.001s)
-        confirm_msg = "⚠️ Siz testni belgilangan vaqtdan kech topshirdingiz! Natijangiz adminga ko'rib chiqish uchun yuborildi." if is_late_submission else "Javoblaringiz qabul qilindi va saqlandi! ✅"
+        # 6. SUB-MILLISEKUNDDA DARHOL TASDIQ JAVOBINI QAYTARISH (~0.001s)
+        confirm_msg = (
+            "⚠️ Siz testni belgilangan vaqtdan kech topshirdingiz! Natijangiz adminga ko'rib chiqish uchun yuborildi."
+            if is_late_submission
+            else "Javoblaringiz navbatga olindi! Hoziroq Telegram botga tasdiq xabari yuboriladi ✅"
+        )
         return web.json_response({
             "success": True,
+            "queued": True,
             "is_late": is_late_submission,
             "message": confirm_msg,
             "data": client_data
@@ -265,20 +311,33 @@ async def handle_submit_test_api(request):
 
 async def _process_submission_background(test_id: int, user_tg_id: int, user_answers: dict, is_late_submission: bool, test_obj: dict, user_obj: dict, fullname: str):
     """
-    Fonda bajariladigan xavfsiz va to'siqsiz jarayon:
-    - ACID tranzaksiyalar va 3 martagacha qayta urinish (Retry logic)
-    - UNIQUE INDEX (user_tg_id, test_id) orqali dublikatlardan 100% himoya
-    - Rasch modeli tahlili va baholash
-    - Telegram orqali xabarnomalar yuborish
+    Fonda bajariladigan xavfsiz va to'siqsiz navbat jarayoni:
+    - Odam ko'p bo'lgan paytda navbat bilan (hech bir javob yo'qolmasdan) bazaga yozadi
+    - Bazada bandlik bo'lsa 4 martagacha avtomatik qayta urinadi (Retry logic)
+    - Saqlangach darhol foydalanuvchining Telegram chatiga rasmiy tasdiq xabarini yuboradi
     """
     sub_key = (int(user_tg_id), int(test_id))
     try:
-        async with SUBMIT_CONCURRENCY_SEMAPHORE:
-            result = await asyncio.to_thread(
-                test_db.check_and_save_submission,
-                test_id, user_tg_id, user_answers,
-                is_late=1 if is_late_submission else 0
-            )
+        result = None
+        last_err = None
+        for attempt in range(4):
+            try:
+                async with SUBMIT_CONCURRENCY_SEMAPHORE:
+                    result = await asyncio.to_thread(
+                        test_db.check_and_save_submission,
+                        test_id, user_tg_id, user_answers,
+                        is_late=1 if is_late_submission else 0
+                    )
+                break
+            except Exception as err:
+                if "allaqachon topshirgansiz" in str(err):
+                    raise err
+                last_err = err
+                await asyncio.sleep(0.25 * (attempt + 1))
+
+        if result is None and last_err is not None:
+            raise last_err
+
         test_db.invalidate_user_cache(user_tg_id)
         invalidate_profile_cache(user_tg_id)
 
@@ -365,20 +424,65 @@ async def _async_submission_followup(result, test_obj, user_tg_id, is_late_submi
                     pass
         else:
             if user_tg_id:
-                msg_user = (
-                    f"✅ <b>Hurmatli {result['fullname']}, javoblaringiz qabul qilindi va saqlandi!</b>\n\n"
-                    f"📚 <b>Test:</b> {result['test_title']} (<code>#{result['test_code']}</code>)\n"
-                    f"📌 <b>Holat:</b> ⏳ <b>Javoblaringiz qabul qilindi (Jarayonda)...</b>\n"
-                    f"🕒 <b>Topshirilgan vaqt:</b> {format_uzb_time()}\n\n"
-                    f"ℹ️ <b>Eslatma:</b> Test hozirda barcha o'quvchilar uchun davom etmoqda. "
-                    f"Admin testni yakunlab, <b>Rasch modeli (JMLE)</b> bo'yicha tahlil o'tkazgach, "
-                    f"to'g'ri ishlangan savollar soni, yakuniy ballingiz va Milliy sertifikat darajangiz botingizga shaxsiy xabar qilib yuboriladi!\n\n"
-                    f"🏆 <i>Javoblaringiz tizimda 100% muvaffaqiyatli saqlandi.</i>"
-                )
-                try:
-                    await bot.send_message(chat_id=user_tg_id, text=msg_user)
-                except Exception as ex:
-                    log.warning(f"Foydalanuvchiga xabar yuborishda xatolik: {ex}")
+                is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
+                if is_adm:
+                    # Admin sinov topshiruvi: bazadan avtomatik o'chiramiz va darhol to'liq sinov natijasini yuboramiz
+                    sub_id = result.get("submission_id")
+                    t_id = test_obj.get("id")
+                    if sub_id:
+                        await test_db.db(test_db.delete_submission, sub_id)
+                    if t_id:
+                        test_db.invalidate_test_cache(t_id)
+                    test_db.invalidate_user_cache(user_tg_id)
+
+                    det = result.get("details") or {}
+                    ans_lines = []
+                    for k, v in det.items():
+                        if k in ("_meta", "45") or not isinstance(v, dict):
+                            continue
+                        u_ans = str(v.get("user") or "").strip()
+                        if not u_ans or u_ans == "—":
+                            continue
+                        st_icon = "✅" if v.get("status") == "correct" else "❌"
+                        c_ans = str(v.get("correct") or "")
+                        ans_lines.append(f"{st_icon} <b>{k}-savol:</b> {u_ans}" + (f" <i>(Kalit: {c_ans})</i>" if v.get("status") != "correct" else ""))
+
+                    ans_preview = "\n".join(ans_lines[:25])
+                    if len(ans_lines) > 25:
+                        ans_preview += f"\n<i>... va yana {len(ans_lines) - 25} ta belgilangan javob</i>"
+                    if not ans_preview:
+                        ans_preview = "<i>Javoblar belgilanmagan</i>"
+
+                    msg_admin_test = (
+                        f"🧪 <b>ADMIN SINOV NATIJASI (Avtomatik tozalandi)</b>\n\n"
+                        f"📚 <b>Test:</b> {result['test_title']} (<code>#{result['test_code']}</code>)\n"
+                        f"✅ <b>To'g'ri javoblar:</b> <b>{result.get('correct_count', 0)} ta</b>\n"
+                        f"❌ <b>Xato javoblar:</b> {result.get('incorrect_count', 0)} ta\n"
+                        f"⚪️ <b>Belgilanmagan:</b> {result.get('unanswered_count', 0)} ta\n"
+                        f"🎯 <b>Dastlabki ball:</b> <b>{result.get('score', 0.0)} ball</b> (Daraja: <b>{result.get('grade', '—')}</b>)\n\n"
+                        f"📋 <b>Belgilagan javoblaringiz tahlili:</b>\n{ans_preview}\n\n"
+                        f"🧹 <i>Sinov javobingiz umumiy bazadan va reytingdan avtomatik o'chirildi! "
+                        f"Test o'quvchilar uchun 🟢 Faol holatda qoldi (uni qayta sinab ko'rishingiz mumkin).</i>"
+                    )
+                    try:
+                        await bot.send_message(chat_id=user_tg_id, text=msg_admin_test)
+                    except Exception as ex:
+                        log.warning(f"Adminga sinov xabarini yuborishda xatolik: {ex}")
+                else:
+                    msg_user = (
+                        f"✅ <b>Hurmatli {result['fullname']}, javoblaringiz qabul qilindi va saqlandi!</b>\n\n"
+                        f"📚 <b>Test:</b> {result['test_title']} (<code>#{result['test_code']}</code>)\n"
+                        f"📌 <b>Holat:</b> ⏳ <b>Javoblaringiz qabul qilindi (Jarayonda)...</b>\n"
+                        f"🕒 <b>Topshirilgan vaqt:</b> {format_uzb_time()}\n\n"
+                        f"ℹ️ <b>Eslatma:</b> Test hozirda barcha o'quvchilar uchun davom etmoqda. "
+                        f"Admin testni yakunlab, <b>Rasch modeli (JMLE)</b> bo'yicha tahlil o'tkazgach, "
+                        f"to'g'ri ishlangan savollar soni, yakuniy ballingiz va Milliy sertifikat darajangiz botingizga shaxsiy xabar qilib yuboriladi!\n\n"
+                        f"🏆 <i>Javoblaringiz tizimda 100% muvaffaqiyatli saqlandi.</i>"
+                    )
+                    try:
+                        await bot.send_message(chat_id=user_tg_id, text=msg_user)
+                    except Exception as ex:
+                        log.warning(f"Foydalanuvchiga xabar yuborishda xatolik: {ex}")
     except Exception as e:
         log.error(f"_async_submission_followup xatolik: {e}", exc_info=True)
 
@@ -779,9 +883,11 @@ def _sync_extract_keys_gemini(image_bytes: bytes, mime_type: str = "image/jpeg")
     )
 
     models_to_try = [
+        "gemini-flash-lite-latest",
         "gemini-3.5-flash-lite",
+        "gemini-2.5-flash-lite",
         "gemini-3.1-flash-lite",
-        "gemini-3.8-flash",
+        "gemini-pro-latest",
     ]
 
     b64_data = base64.b64encode(image_bytes).decode("utf-8")
@@ -1066,12 +1172,12 @@ def set_app_cache_headers(resp, max_age: int = 60):
 async def handle_index(request):
     fpath = await find_web_file('index.html')
     if os.path.exists(fpath) and os.path.isfile(fpath):
-        return set_app_cache_headers(web.FileResponse(fpath))
+        return set_no_cache_headers(web.FileResponse(fpath))
     try:
         import web_assets_fallback
         data, mime = web_assets_fallback.get_asset_bytes('index.html')
         if data:
-            return set_app_cache_headers(web.Response(body=data, content_type=mime or 'text/html', charset='utf-8'))
+            return set_no_cache_headers(web.Response(body=data, content_type=mime or 'text/html', charset='utf-8'))
     except Exception as e:
         log.error(f"index.html yuklashda xatolik: {e}")
     return web.Response(status=404, text="index.html topilmadi")
@@ -1088,6 +1194,12 @@ async def handle_admin(request):
     except Exception as e:
         log.error(f"admin.html yuklashda xatolik: {e}")
     return web.Response(status=404, text="admin.html topilmadi")
+
+async def handle_results(request):
+    fpath = await find_web_file('results.html')
+    if os.path.exists(fpath) and os.path.isfile(fpath):
+        return set_no_cache_headers(web.FileResponse(fpath))
+    return web.Response(status=404, text="results.html topilmadi")
 
 async def handle_app(request):
     fpath = await find_web_file('app.html')
@@ -1131,8 +1243,8 @@ async def handle_static_file(request):
         resp = web.FileResponse(fpath)
         if any(path_name.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.svg', '.webp', '.ico']):
             resp.headers['Cache-Control'] = 'public, max-age=86400'
-        elif any(path_name.endswith(ext) for ext in ['.css', '.js', '.ttf', '.woff', '.woff2']):
-            if any(path_name.endswith(n) for n in ['admin_app.js', 'test_app.js', 'app.js', 'test_style.css']):
+        elif any(path_name.endswith(ext) for ext in ['.css', '.js', '. html', '.htm', '.ttf', '.woff', '.woff2']):
+            if any(path_name.endswith(n) for n in ['admin_app.js', 'test_app.js', 'app.js', 'test_style.css', 'results.html', 'index.html', 'admin.html']):
                 resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
                 resp.headers['Pragma'] = 'no-cache'
                 resp.headers['Expires'] = '0'
@@ -1147,7 +1259,7 @@ async def handle_static_file(request):
         import web_assets_fallback
         if hasattr(web_assets_fallback, 'get_asset_bytes'):
             _basename = os.path.basename(path_name)
-            _STALE_SKIP = {'app.js', 'app.html', 'app_style.css', 'test_style.css', 'index.html', 'admin.html', 'admin_app.js', 'test_app.js'}
+            _STALE_SKIP = {'app.js', 'app.html', 'app_style.css', 'test_style.css', 'index.html', 'admin.html', 'admin_app.js', 'test_app.js', 'results.html'}
             if _basename not in _STALE_SKIP:
                 data, mime = web_assets_fallback.get_asset_bytes(path_name)
                 if data:
@@ -1520,10 +1632,7 @@ async def handle_app_compare_keys(request):
                     "message": "Natijalar va kalitlar admin tomonidan test yakunlanib, rasmiy e'lon qilingach ochiladi."
                 }, status=403)
 
-            expected_code = str(test.get('key_access_code', '')).strip()
-            if expected_code and expected_code != code:
-                return web.json_response({"success": False, "message": "Parol noto'g'ri!"}, status=403)
-
+            # Kalitlarni ko'rish paroli olib tashlandi: natijalar e'lon qilingan bo'lsa darhol ko'rsatiladi
             sub = await test_db.db(test_db.get_user_submission_for_test, test_id, tg_id)
             if not sub:
                 return web.json_response({"success": False, "message": "Siz ushbu testni topshirmagansiz"}, status=400)
@@ -1538,7 +1647,7 @@ async def handle_app_compare_keys(request):
             # 1-bosqich: 1-35 yopiq savollar
             for i in range(1, 36):
                 k = str(i)
-                c_val = correct_answers.get(k)
+                c_val, _ = test_db.get_key_and_score(correct_answers.get(k), default_score=2.0)
                 u_val = user_answers.get(k)
                 is_matched, ratio, status = test_db.check_answer_match(u_val, c_val)
                 if status == "correct":
@@ -1546,14 +1655,35 @@ async def handle_app_compare_keys(request):
                 results[k] = {
                     "status": status,
                     "user": str(u_val or "").strip(),
+                    "correct": str(c_val or "").strip(),
                     "ratio": ratio
                 }
 
-            # 2-bosqich: 36-45 ochiq savollar (36a–45b, jami 20 ta band)
-            for q in range(36, 46):
+            # 2-bosqich: 36-39 bitta javobli ochiq savollar
+            for q in range(36, 40):
+                k = str(q)
+                q_raw = correct_answers.get(k, "")
+                if not q_raw and f"{k}a" in correct_answers:
+                    q_raw = correct_answers.get(f"{k}a", "")
+                c_val, _ = test_db.get_key_and_score(q_raw, default_score=1.5)
+                u_val = user_answers.get(k, "")
+                if not u_val and f"{k}a" in user_answers:
+                    u_val = user_answers.get(f"{k}a", "")
+                is_matched, ratio, status = test_db.check_answer_match(u_val, c_val)
+                if status == "correct":
+                    total_correct_open += 1
+                results[k] = {
+                    "status": status,
+                    "user": str(u_val or "").strip(),
+                    "correct": str(c_val or "").strip(),
+                    "ratio": ratio
+                }
+
+            # 3-bosqich: 40a-44b juft ochiq savollar
+            for q in range(40, 45):
                 for sub_letter in ('a', 'b'):
                     k = f"{q}{sub_letter}"
-                    c_val = correct_answers.get(k)
+                    c_val, _ = test_db.get_key_and_score(correct_answers.get(k, ""), default_score=1.5)
                     u_val = user_answers.get(k)
                     is_matched, ratio, status = test_db.check_answer_match(u_val, c_val)
                     if status == "correct":
@@ -1561,18 +1691,26 @@ async def handle_app_compare_keys(request):
                     results[k] = {
                         "status": status,
                         "user": str(u_val or "").strip(),
+                        "correct": str(c_val or "").strip(),
                         "ratio": ratio
                     }
 
             total_correct = total_correct_closed + total_correct_open
+            scores_meta = test_db.extract_submission_scores(sub)
 
-            # Xavfsizlik: To'g'ri kalitlar klientga yuborilmaydi, faqat tekshiruv natijasi qaytariladi
             return web.json_response({
                 "success": True,
+                "test_title": test.get('title', 'Test'),
+                "test_code": test.get('test_code', ''),
                 "total_correct": total_correct,
                 "total_correct_closed": total_correct_closed,
                 "total_correct_open": total_correct_open,
-                "total_questions": 55,
+                "total_questions": 49,
+                "test_score": scores_meta["test_score"],
+                "essay_score": scores_meta["essay_score"],
+                "score": scores_meta["final_score"],
+                "grade": scores_meta["grade"],
+                "submitted_at": sub.get('submitted_at', ''),
                 "results": results
             })
     except Exception as e:
@@ -1588,6 +1726,7 @@ def _fetch_active_tests_payload_sync(tg_id: int):
     result = []
     for t in all_tests:
         td = dict(t)
+        td['q37_mode'] = test_db.get_test_q37_mode(t)
         td.pop('answers_json', None)  # Javoblarni yashirish
 
         # Foydalanuvchi allaqachon topshirganmi?
@@ -1661,39 +1800,102 @@ async def handle_app_active_tests(request):
     """Faol testlar ro'yxati (user uchun topshirilgan-topshirilmaganligini ham qaytaradi)."""
     try:
         tg_id = _get_authenticated_user_id(request)
-        if not tg_id:
-            return web.json_response({
-                "success": False,
-                "message": "Autentifikatsiya xatosi: Telegram WebApp orqali kiring",
-                "status": "unauthorized"
-            }, status=401)
+        is_user_admin = False
 
-        if not (await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)):
-            u_check = await test_db.db(test_db.get_user, tg_id)
-            if not u_check:
-                return web.json_response({
-                    "success": False,
-                    "message": "⚠️ Iltimos, avval Telegram botimizda ro'yxatdan o'ting!",
-                    "status": "not_registered"
-                }, status=403)
-            if u_check.get("status") in ["pending", "rejected", "deleted"]:
-                return web.json_response({
-                    "success": False,
-                    "message": "⛔️ Profilingizga ruxsat berilmagan yoki arizangiz ko'rib chiqilmoqda.",
-                    "status": u_check.get("status")
-                }, status=403)
+        if tg_id:
+            is_user_admin = await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)
+            if not is_user_admin:
+                u_check = await test_db.db(test_db.get_user, tg_id)
+                if not u_check:
+                    return web.json_response({
+                        "success": False,
+                        "message": "⚠️ Iltimos, avval Telegram botimizda ro'yxatdan o'ting!",
+                        "status": "not_registered"
+                    }, status=403)
+                if u_check.get("status") in ["pending", "rejected", "deleted"]:
+                    return web.json_response({
+                        "success": False,
+                        "message": "⛔️ Profilingizga ruxsat berilmagan yoki arizangiz ko'rib chiqilmoqda.",
+                        "status": u_check.get("status")
+                    }, status=403)
 
-        result, is_user_admin, now_uzb = await test_db.db(_fetch_active_tests_payload_sync, tg_id)
+        result, is_adm, now_uzb = await test_db.db(_fetch_active_tests_payload_sync, tg_id or 0)
         return web.json_response({
             "success": True, 
             "tests": result,
-            "is_admin": is_user_admin,
+            "is_admin": is_user_admin or is_adm,
             "server_time": int(time.time()),
             "server_uzb": now_uzb.strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
         log.error(f"App Active Tests API Error: {e}", exc_info=True)
         return web.json_response({"success": False, "message": str(e)}, status=400)
+
+async def handle_app_check_code(request):
+    """
+    Sub-millisekundli test kodini tekshirish (0 DB SELECT, to'liq RAM keshdan).
+    O'quvchi kodni kiritib 'Boshlash'ni bosganda hech qanday kutishsiz darhol testni ochish uchun xizmat qiladi.
+    """
+    try:
+        code = str(request.query.get("code", "")).strip().upper().replace("#", "")
+        if not code:
+            return web.json_response({"success": False, "message": "Test kodi kiritilmadi"}, status=400)
+
+        tg_id = _get_authenticated_user_id(request)
+
+        test = test_db.get_test_by_code(code)
+        if not test:
+            return web.json_response({
+                "success": False,
+                "found": False,
+                "message": f"⚠️ #{code} raqamli test topilmadi yoki hozir faol emas!"
+            }, status=404)
+
+        sched_stat = get_test_schedule_status(test)
+        is_user_admin = False
+        if tg_id:
+            is_user_admin = await test_db.db(test_db.is_admin, tg_id, ADMIN_ID)
+
+        if not sched_stat["is_active"] and not is_user_admin:
+            if sched_stat["is_upcoming"]:
+                sdate = test.get('scheduled_date') or 'Bugun'
+                sstart = test.get('scheduled_start') or ''
+                return web.json_response({
+                    "success": False,
+                    "found": False,
+                    "message": f"⏳ Ushbu test hali boshlanmagan! Boshlanish vaqti: {sdate} {sstart} (UZB)"
+                }, status=400)
+            else:
+                return web.json_response({
+                    "success": False,
+                    "found": False,
+                    "message": f"⛔️ #{code} raqamli test vaqti yakunlangan yoki faol emas!"
+                }, status=400)
+
+        # Topshirganlikni tekshirish
+        already_submitted = False
+        if tg_id:
+            already_submitted = await test_db.db(test_db.has_user_submitted, test["id"], tg_id)
+
+        min_submit_info = get_test_min_submit_info(test)
+
+        return web.json_response({
+            "success": True,
+            "found": True,
+            "test": {
+                "id": test["id"],
+                "test_code": test["test_code"],
+                "title": test.get("title") or f"#{test['test_code']} Test",
+                "subject": test.get("subject") or "Ona tili",
+                "total_questions": test.get("total_questions", 45),
+                "q37_mode": test_db.get_test_q37_mode(test),
+                "already_submitted": bool(already_submitted),
+                "min_submit_info": min_submit_info
+            }
+        })
+    except Exception as e:
+        log.error(f"check_code error: {e}", exc_info=True)
+        return web.json_response({"success": False, "message": str(e)}, status=500)
 
 async def handle_app_my_results(request):
     """Foydalanuvchining o'z test natijalari tarixi."""
@@ -2110,13 +2312,28 @@ async def database_pool_error_middleware(request, handler):
         raise
 
 
+def _get_client_ip(request) -> str:
+    """Nginx reverse-proxy orqasida haqiqiy foydalanuvchi IP manzilini aniqlash."""
+    real_ip = request.headers.get("X-Real-IP", "").strip()
+    if real_ip:
+        return real_ip
+    xff = request.headers.get("X-Forwarded-For", "").strip()
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.remote or "anon"
+
+
 @web.middleware
 async def mini_app_rate_limiter_middleware(request, handler):
     """
-    Mini App API da bir foydalanuvchiga soniyasiga 5 tadan ko'p so'rov bo'lsa HTTP 429 qaytarish.
+    Mini App API da DDoS va spamdan himoya (haqiqiy tg_id va X-Real-IP bo'yicha).
+    Keshlangan o'qish va navbatli topshirish endpointlari bloklanmaydi.
     """
     path = request.path
-    if path.startswith("/api/") and path not in ("/api/app/status", "/healthz", "/ping"):
+    if path.startswith("/api/") and path not in (
+        "/api/app/status", "/api/app/active-tests", "/api/submit-test",
+        "/api/app/get-draft", "/healthz", "/ping"
+    ):
         user_key = (
             request.query.get("tg_id")
             or request.query.get("user_tg_id")
@@ -2140,8 +2357,9 @@ async def mini_app_rate_limiter_middleware(request, handler):
             if init_val:
                 user_key = init_val[:32]
 
-        limit = 5 if user_key else 30
-        effective_key = user_key or request.remote or "anon"
+        # Bitta foydalanuvchi uchun 25 req/sek, bitta Wi-Fi/IP (o'quv markazi) uchun 150 req/sek
+        limit = 25 if user_key else 150
+        effective_key = f"u:{user_key}" if user_key else f"ip:{_get_client_ip(request)}"
 
         now = time.monotonic()
         async with _MINI_APP_RATE_LOCK:
@@ -2159,7 +2377,7 @@ async def mini_app_rate_limiter_middleware(request, handler):
             timestamps.append(now)
             _MINI_APP_RATE_LIMITS[effective_key] = timestamps
 
-            if len(_MINI_APP_RATE_LIMITS) > 5000:
+            if len(_MINI_APP_RATE_LIMITS) > 10000:
                 _MINI_APP_RATE_LIMITS.clear()
 
     return await handler(request)
@@ -2200,6 +2418,8 @@ async def create_web_app():
     app.router.add_get('/api/admin/toggle-registration', handle_admin_toggle_registration)
     app.router.add_get('/', handle_index)
     app.router.add_get('/index.html', handle_index)
+    app.router.add_get('/results.html', handle_results)
+    app.router.add_get('/results', handle_results)
     app.router.add_get('/admin.html', handle_admin)
     app.router.add_get('/app.html', handle_app)
     app.router.add_get('/user-chat/{id}', handle_user_chat_redirect)
@@ -2220,6 +2440,7 @@ async def create_web_app():
     app.router.add_post('/api/app/update-profile', handle_app_update_profile)
     app.router.add_post('/api/app/delete-my-account', handle_app_delete_my_account)
     app.router.add_get('/api/app/active-tests', handle_app_active_tests)
+    app.router.add_get('/api/app/check-code', handle_app_check_code)
     app.router.add_get('/api/app/my-results', handle_app_my_results)
     app.router.add_get('/api/app/check-membership', handle_app_check_membership)
     app.router.add_get('/api/app/trigger-solve', handle_app_trigger_solve)

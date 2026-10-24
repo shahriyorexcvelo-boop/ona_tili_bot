@@ -440,7 +440,7 @@ async def show_my_results(message: Message):
             btn_title = f"📊 #{t_code} tahlili" if t_code else f"📊 {t_title[:20]} tahlili"
             kb_rows.append([InlineKeyboardButton(text=btn_title, callback_data=f"user_req_tahlil_{s['test_id']}")])
 
-    kb_rows.append([make_webapp_button("📱 Barcha natijalar va tahlillar (Mini App)", f"{get_webapp_url()}/app.html?tab=tests&tg_id={message.from_user.id}")])
+    kb_rows.append([make_webapp_button("📊 Barcha natijalar va tahlillar (Mini App)", f"{get_webapp_url()}/results.html?tg_id={message.from_user.id}")])
 
     await message.answer(
         "📊 <b>Mening natijalarim va tahlillar</b>\n\n"
@@ -488,7 +488,7 @@ async def show_profile(message: Message):
             InlineKeyboardButton(text="✏️ Ismni o'zgartirish", callback_data="profile_edit_name"),
             InlineKeyboardButton(text="📞 Raqamni o'zgartirish", callback_data="profile_edit_phone")
         ],
-        [make_webapp_button("📱 Shaxsiy profil (Mini App)", f"{get_webapp_url()}/app.html?tg_id={message.from_user.id}")],
+        [make_webapp_button("📊 Mening natijalarim (Mini App)", f"{get_webapp_url()}/results.html?tg_id={message.from_user.id}")],
         [InlineKeyboardButton(text="🗑 Akkauntni o'chirish", callback_data="profile_delete_account")]
     ])
 
@@ -525,7 +525,7 @@ async def profile_show_details_handler(call: CallbackQuery):
             InlineKeyboardButton(text="✏️ Ismni o'zgartirish", callback_data="profile_edit_name"),
             InlineKeyboardButton(text="📞 Raqamni o'zgartirish", callback_data="profile_edit_phone")
         ],
-        [make_webapp_button("📱 Shaxsiy profil (Mini App)", f"{get_webapp_url()}/app.html?tg_id={call.from_user.id}")],
+        [make_webapp_button("📊 Mening natijalarim (Mini App)", f"{get_webapp_url()}/results.html?tg_id={call.from_user.id}")],
         [InlineKeyboardButton(text="🗑 Akkauntni o'chirish", callback_data="profile_delete_account")]
     ])
     try:
@@ -835,7 +835,7 @@ async def chat_member_joined_handler(event: ChatMemberUpdated):
 async def show_help(message: Message):
     contact_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✍️ Adminga murojaat (@eshmbetov)", url="https://t.me/eshmbetov")],
-        [make_webapp_button("📱 Ona tili Test (Mini App)", f"{get_webapp_url()}/app.html?tg_id={message.from_user.id}")]
+        [make_webapp_button("📝 Test yechish (Mini App)", f"{get_webapp_url()}/index.html?tg_id={message.from_user.id}")]
     ])
     await message.answer(
         "ℹ️ <b>YORDAM VA QO'LLAB-QUVVATLASH</b>\n\n"
@@ -855,11 +855,16 @@ show_about = show_help
 
 
 @user_router.message(Command("app"))
+@user_router.message(Command("test"))
 async def open_app_command(message: Message):
+    base_url = get_webapp_url()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [make_webapp_button("📝 Test yechishni boshlash", f"{base_url}/index.html?tg_id={message.from_user.id}", fallback_cb="open_app_info")]
+    ])
     await message.answer(
-        "📱 <b>RASH TEST Mini App tizimiga kirish:</b>\n\n"
-        "Quyidagi tugmani bosing 👇",
-        reply_markup=results_webapp_kb(message.from_user.id)
+        "📝 <b>ONA TILI — TEST TOPSHIRISH:</b>\n\n"
+        "Test kodini kiritib, javoblarni topshirish uchun quyidagi tugmani bosing 👇",
+        reply_markup=kb
     )
 
 
@@ -885,7 +890,7 @@ async def user_req_tahlil_cb(call: CallbackQuery, state: FSMContext):
     yt_url = (test.get("youtube_url") or "").strip()
     if yt_url:
         kb_rows.append([InlineKeyboardButton(text="🎬 Video tahlilni ko'rish (YouTube)", url=yt_url)])
-    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{get_webapp_url()}/app.html?tab=tests&tg_id={call.from_user.id}"))])
+    kb_rows.append([InlineKeyboardButton(text="📊 Natijalarimda ko'rish", web_app=WebAppInfo(url=f"{get_webapp_url()}/results.html?tg_id={call.from_user.id}"))])
 
     await call.message.answer(
         tahlil_text,
@@ -984,7 +989,7 @@ async def process_tahlil_code(message: Message, state: FSMContext):
     yt_url = (test.get("youtube_url") or "").strip()
     if yt_url:
         kb_rows.append([InlineKeyboardButton(text="🎬 Video tahlilni ko'rish (YouTube)", url=yt_url)])
-    kb_rows.append([InlineKeyboardButton(text="📱 Mini ilovada to'liq ko'rish", web_app=WebAppInfo(url=f"{get_webapp_url()}/app.html?tab=tests&tg_id={message.from_user.id}"))])
+    kb_rows.append([InlineKeyboardButton(text="📊 Natijalarimda ko'rish", web_app=WebAppInfo(url=f"{get_webapp_url()}/results.html?tg_id={message.from_user.id}"))])
 
     await message.answer(
         tahlil_text,

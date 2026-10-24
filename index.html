@@ -2,15 +2,12 @@
 <html lang="uz">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <title>ONA TILI VA ADABIYOT — Rasch Test Tizimi</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="preload" href="/test_style.css?v=20261024_v15_glow" as="style">
+  <link rel="stylesheet" href="/test_style.css?v=20261024_v15_glow">
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="/logo_data.js?v=20261020_v5_no45ab"></script>
-  <link rel="stylesheet" href="/test_style.css?v=20261020_v5_no45ab">
   <script>
     (function() {
       var saved = localStorage.getItem('app_theme') || 'light';
@@ -156,24 +153,87 @@
   </div>
 
   <!-- =========================================
-       ASOSIY KONTEYNER
+       TEST TANLASH / KOD KIRITISH EKRANI (STANDART BOSHLANG'ICH EKRAN)
        ========================================= -->
-  <div class="test-container" id="test-app">
+  <div class="test-container" id="test-select-screen" style="display: block; padding: 14px; max-width: 520px; margin: 0 auto; box-sizing: border-box;">
+    <header class="test-header" style="margin-bottom: 18px;">
+      <div class="header-top-row">
+        <div class="header-brand-wrap">
+          <img src="/img/bm_logo.png?v=20261021_v1" class="header-bm-logo" alt="Logo">
+          <div>
+            <h1 class="header-test-title" style="font-size: 16px;">Ona Tili va Adabiyot</h1>
+            <div style="font-size: 11px; color: var(--text-muted, #64748B); font-weight: 600;">Milliy sertifikat va Rasch tizimi</div>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button type="button" class="theme-toggle-btn" onclick="TestApp.toggleTheme()" title="Mavzu" aria-label="Mavzu" style="display: inline-flex; align-items: center; justify-content: center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div style="background: var(--bg-card, #FFFFFF); border: 1.5px solid var(--border-color, #E2E8F0); border-radius: 16px; padding: 18px 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); margin-bottom: 16px; box-sizing: border-box; width: 100%;">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+        <div style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 9px; background: rgba(37,99,235,0.1); color: #2563EB;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
+        </div>
+        <h2 style="font-size: 15.5px; font-weight: 800; color: var(--text-main, #0F172A); letter-spacing: -0.2px;">Test kodini kiriting</h2>
+      </div>
+      <p style="font-size: 12px; color: var(--text-muted, #64748B); margin-bottom: 14px; line-height: 1.45;">
+        O'qituvchi yoki guruhda e'lon qilingan test raqamini kiriting:
+      </p>
+
+      <!-- KOD KIRITISH MAYDONI (TO'LIQ ENI BO'YICHA) -->
+      <div style="margin-bottom: 10px;">
+        <input type="text" id="manual-test-code-input" inputmode="numeric" placeholder="Masalan: 102" style="width: 100%; height: 50px; border-radius: 12px; border: 2px solid var(--border-color, #CBD5E1); background: var(--bg-card, #FFFFFF); color: var(--text-main, #0F172A); font-size: 20px; font-weight: 800; text-align: center; letter-spacing: 2px; outline: none; box-sizing: border-box; transition: border-color 0.15s ease;" onfocus="this.style.borderColor='#2563EB'" onblur="this.style.borderColor=''" onkeydown="if(event.key==='Enter') TestApp.submitEnteredCode()">
+      </div>
+
+      <!-- BOSHLASH TUGMASI (PASTGA TUSHIRILGAN, TO'LIQ ENIDA) -->
+      <button type="button" id="btn-start-test" onclick="TestApp.submitEnteredCode()" style="width: 100%; height: 48px; background: linear-gradient(135deg, #2563EB, #1D4ED8); color: white; border: none; border-radius: 12px; font-weight: 800; font-size: 14.5px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(37,99,235,0.25); transition: transform 0.1s ease; box-sizing: border-box;">
+        <span>Testni boshlash</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="5 3 19 12 5 21 5 3"></polygon>
+        </svg>
+      </button>
+
+      <div id="select-code-error" style="display: none; font-size: 12px; color: #EF4444; font-weight: 700; margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2);"></div>
+    </div>
+
+    <!-- FAOL TESTLAR RO'YXATI -->
+    <div style="margin-top: 18px;">
+      <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+        <h3 style="font-size: 12.5px; font-weight: 800; color: var(--text-muted, #64748B); text-transform: uppercase; letter-spacing: 0.5px;">
+          Faol testlar ro'yxati
+        </h3>
+      </div>
+      <div id="active-tests-list-wrap">
+        <div style="text-align: center; padding: 20px; color: var(--text-muted, #64748B); font-size: 12.5px;">
+          Faol testlar tekshirilmoqda...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================
+       ASOSIY KONTEYNER (TEST TOPSHIRISH — FAQAT KOD TANLANGANDA OCHILADI)
+       ========================================= -->
+  <div class="test-container" id="test-app" style="display: none;">
 
     <!-- 1. YUQORI HEADER (KOMPAKT) -->
     <header class="test-header">
       <div class="header-top-row">
         <div class="header-brand-wrap">
-          <img src="/img/bm_logo.png?v=20260926_shohruh3" class="header-bm-logo" alt="Shohruh Matematika Logo">
-          <h1 class="header-test-title" id="test-title-display">#122 test</h1>
+          <img src="/img/bm_logo.png?v=20261021_v1" class="header-bm-logo" alt="Logo">
+          <h1 class="header-test-title" id="test-title-display" style="font-size: 16px; white-space: nowrap;">Test</h1>
         </div>
         <div class="header-actions">
-          <button type="button" class="btn-clear-all" id="btn-clear-all" onclick="TestApp.confirmClearAll()" title="Barcha belgilangan javoblarni tozalash">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-            <span>Hammasini o'chirish</span>
+          <button type="button" class="btn-clear-all" onclick="TestApp.showTestSelectScreen()" title="Boshqa testga o'tish" style="background: rgba(37, 99, 235, 0.08); color: #2563EB; border-color: rgba(37, 99, 235, 0.25); display: inline-flex; align-items: center; gap: 4px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+            <span>Kodni o'zgartirish</span>
           </button>
           <button class="theme-toggle-btn" onclick="TestApp.toggleTheme()" title="Mavzu" aria-label="Mavzu" style="display: inline-flex; align-items: center; justify-content: center;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -188,7 +248,7 @@
         <div class="progress-bar-track">
           <div class="progress-bar-fill" id="progress-bar-fill" style="width: 0%;"></div>
         </div>
-        <span class="progress-count-mini" id="answered-counter">0 / 55</span>
+        <span class="progress-count-mini" id="answered-counter">0 ta</span>
         <button type="button" class="btn-clear-inline" onclick="TestApp.confirmClearAll()" title="Barcha javoblarni tozalash" style="display: inline-flex; align-items: center; gap: 4px;">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="3 6 5 6 21 6"></polyline>
@@ -247,20 +307,24 @@
         </div>
       </section>
 
-      <!-- BO'LIM 4: 45-savol (Esse / Yozma ish) -->
-      <section class="section-group">
+      <!-- BO'LIM 4: ESSE (YOZMA ISH) -->
+      <section class="section-group" style="margin-bottom: 24px;">
         <div class="section-group-header">
-          <div class="section-badge esse-badge">4-BO'LIM (45-SAVOL: ESSE)</div>
-          <h2 class="section-heading">45-savol: Ijodiy yozma ish (Esse)</h2>
-          <span class="section-subtext">O'z ijodiy yozma ishingiz (esse) bo'yicha halol tahminiy balingizni kiriting (0 dan 75 gacha)</span>
+          <div class="section-badge esse-badge">ESSE (IJODIY YOZMA ISH)</div>
+          <h2 class="section-heading">Ijodiy yozma ish (Esse) bali</h2>
+          <span class="section-subtext">Esse test savollari soniga kirmaydi. O'z ijodiy yozma ishingiz (esse) bo'yicha balingizni kiriting (0 dan 75 gacha)</span>
         </div>
         <div class="questions-list" id="questions-part-5">
-          <div class="esse-question-box" id="qrow-45">
-            <div style="display: flex; align-items: center; justify-content: flex-start;">
-              <div class="savol-badge esse-badge">45-savol</div>
+          <div class="esse-card-wrap" id="qrow-45" style="background: var(--bg-card, #FFFFFF); border: 2px solid var(--border-color, #E2E8F0); border-radius: 16px; padding: 20px 16px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.04); margin-top: 8px; box-sizing: border-box;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px;">
+              <span class="savol-badge esse-badge" style="font-size: 13px; padding: 4px 12px; border-radius: 8px;">Esse bali</span>
+              <span style="font-size: 12px; color: var(--text-muted, #64748B); font-weight: 700;">Maksimal: 75 ball</span>
             </div>
-            <div class="savol-input-box" id="box-45" style="width: 100%; height: 46px; box-sizing: border-box;">
-              <input type="text" inputmode="decimal" class="savol-input open-native-input esse-input" id="input-45" placeholder="o'rtacha esse balingiz" autocomplete="off" oninput="TestApp.handleOpenInput('45', this.value)">
+            <div class="savol-input-box" id="box-45" style="max-width: 240px; height: 56px; margin: 0 auto; border-radius: 14px; border: 2.5px solid #8B5CF6; background: rgba(139, 92, 246, 0.06); display: flex; align-items: center; justify-content: center; box-sizing: border-box; transition: all 0.2s ease;">
+              <input type="text" inputmode="numeric" pattern="[0-9]*" class="savol-input open-native-input esse-input" id="input-45" placeholder="Ball (0 - 75)" autocomplete="off" style="width: 100%; height: 100%; text-align: center; font-size: 24px; font-weight: 800; color: #7C3AED; border: none; background: transparent; outline: none; letter-spacing: 1px;" oninput="TestApp.handleEsseInput(this)">
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted, #64748B); margin-top: 10px; line-height: 1.45;">
+              Test bali (75) va Esse bali (75) qo'shilib 2 ga bo'linadi
             </div>
           </div>
         </div>
@@ -346,7 +410,7 @@
             <span>Birorta ham javob belgilanmagan!</span>
           </div>
           <div style="font-size: 12px; color: var(--text-main); line-height: 1.4;">
-            Siz birorta ham savolga javob belgilamadingiz (0/55). Bo'sh testni topshirib bo'lmaydi. Iltimos, savollarni ishlab, javoblarni belgilang!
+            Siz birorta ham savolga javob belgilamadingiz. Bo'sh testni topshirib bo'lmaydi. Iltimos, savollarni ishlab, javoblarni belgilang!
           </div>
         </div>
 
@@ -369,6 +433,28 @@
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
           </button>
+        </div>
+      </div>
+
+      <!-- 3-BOSQICH: 2 SONIYALIK MARKAZIY DUMALOQ AYLANMA ANIMATSIYA -->
+      <div id="confirm-step-loading" style="display: none; padding: 22px 10px 14px; text-align: center;">
+        <div style="position: relative; width: 72px; height: 72px; margin: 0 auto 18px; display: flex; align-items: center; justify-content: center;">
+          <div style="position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, rgba(16, 185, 129, 0.16) 0%, rgba(37, 99, 235, 0.05) 70%);"></div>
+          <svg width="68" height="68" viewBox="0 0 68 68" style="animation: spin 0.85s linear infinite;">
+            <circle cx="34" cy="34" r="28" fill="none" stroke="rgba(16, 185, 129, 0.2)" stroke-width="5.5"></circle>
+            <path d="M34 6 a28 28 0 0 1 28 28" fill="none" stroke="#10B981" stroke-width="5.5" stroke-linecap="round"></path>
+          </svg>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="position: absolute;">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </div>
+        <h3 class="modal-heading" style="margin-bottom: 6px; font-size: 18px;">Javoblaringiz yuborilmoqda...</h3>
+        <p class="modal-desc" style="margin-bottom: 14px; font-size: 13px; color: var(--text-muted);">
+          Javoblar tekshirilib, xavfsiz navbatga joylanmoqda
+        </p>
+        <div style="width: 82%; height: 6px; margin: 0 auto; background: rgba(16, 185, 129, 0.14); border-radius: 99px; overflow: hidden;">
+          <div id="submit-spin-progress" style="width: 0%; height: 100%; background: linear-gradient(90deg, #10B981, #2563EB); border-radius: 99px; transition: width 1.95s cubic-bezier(0.22, 1, 0.36, 1);"></div>
         </div>
       </div>
 
@@ -475,14 +561,9 @@
         </div>
       </div>
 
-      <div class="result-actions" style="display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 14px;">
-        <div style="text-align:center; padding: 6px; font-size: 12px; color: var(--text-muted); font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 6px;">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="9" y1="18" x2="15" y2="18"></line>
-            <line x1="10" y1="22" x2="14" y2="22"></line>
-            <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.76.76 1.23 1.52 1.41 2.5"></path>
-          </svg>
-          <span>Eslatma: To'g'ri javoblarni (kalitlarni) asosiy Profil ilovasidagi "Testlar" bo'limida tekshirishingiz mumkin.</span>
+      <div class="result-actions" style="display: flex; flex-direction: column; gap: 12px; width: 100%; margin-top: 14px;">
+        <div id="result-note-box" style="text-align: center; padding: 12px 14px; font-size: 12.5px; line-height: 1.55; color: var(--text-muted); font-weight: 500; background: rgba(148, 163, 184, 0.08); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 12px; display: block;">
+          <b>Eslatma:</b> To'g'ri javoblarni (kalitlarni) "Mening natijalarim" bo'limida tekshirishingiz mumkin.
         </div>
         <button class="btn-result-close" onclick="TestApp.closeWebApp()" style="margin-top: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -616,7 +697,20 @@
     </div>
   </div>
 
-  <script src="/logo_data.js?v=20261020_v5_no45ab"></script>
-  <script src="/test_app.js?v=20261020_v6_essetext"></script>
+  <!-- MOBIL KLAVIATURA ACCESSORY (PTICHKA / TAYYOR TUGMASI) -->
+  <div id="keyboard-dismiss-bar" class="keyboard-dismiss-bar" style="display: none;">
+    <div class="keyboard-dismiss-info">
+      <span class="keyboard-dot"></span>
+      <span id="keyboard-focus-label">Savolga javob yozish</span>
+    </div>
+    <button type="button" class="btn-dismiss-keyboard" id="btn-dismiss-keyboard" aria-label="Klaviaturani yopish">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+      <span>Tayyor</span>
+    </button>
+  </div>
+
+  <script src="/test_app.js?v=20261024_v15_glow"></script>
 </body>
 </html>
