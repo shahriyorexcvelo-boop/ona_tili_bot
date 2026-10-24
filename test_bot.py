@@ -145,7 +145,7 @@ async def main():
             # Telegram pastki chat menyu tugmasini doimiy ravishda "Test yechish 📝" qilib o'rnatish
             try:
                 app_url = get_webapp_url()
-                menu_btn = MenuButtonWebApp(text="Test yechish 📝", web_app=WebAppInfo(url=f"{app_url.rstrip('/')}/index.html?v=20261022_v6_rasch"))
+                menu_btn = MenuButtonWebApp(text="Test yechish 📝", web_app=WebAppInfo(url=f"{app_url.rstrip('/')}/index.html?v=20261024_v16_live"))
                 await bot.set_chat_menu_button(menu_button=menu_btn)
                 log.info(f"✅ Telegram Bot pastki menyu tugmasi 'Test yechish 📝' ({app_url}/index.html?v=20261022_v6_rasch) qilib sozlandi!")
             except Exception as me:

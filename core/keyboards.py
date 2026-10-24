@@ -18,9 +18,9 @@ def main_menu_kb(user_tg_id: int) -> ReplyKeyboardMarkup:
     is_adm = test_db.is_admin(user_tg_id, ADMIN_ID)
     base_url = get_webapp_url()
     
-    test_webapp_url = f"{base_url}/index.html?tg_id={user_tg_id}&v=20261022_v9_q37"
-    results_webapp_url = f"{base_url}/results.html?tg_id={user_tg_id}&v=20261022_v9_q37"
-    admin_webapp_url = f"{base_url}/admin.html?tg_id={user_tg_id}&v=20261022_v9_q37"
+    test_webapp_url = f"{base_url}/index.html?tg_id={user_tg_id}&v=20261024_v16_live"
+    results_webapp_url = f"{base_url}/results.html?tg_id={user_tg_id}&v=20261024_v16_live"
+    admin_webapp_url = f"{base_url}/admin.html?tg_id={user_tg_id}&v=20261024_v16_live"
 
     if test_webapp_url.startswith("https://"):
         test_btn = KeyboardButton(text="📝 Test yechish", web_app=WebAppInfo(url=test_webapp_url))
